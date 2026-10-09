@@ -1545,8 +1545,8 @@ function parseQuestions(content) {
 // N5 usa ese mismo banco MÁS las preguntas exclusivas de Nivel 5 del
 // cuestionario (numeración 5001 en adelante, marcadas con soloN5 = true).
 // El campo "enfoque" de NIVELES indica qué parte de cada tema se toma de las
-// preguntas exclusivas de N5 (N5 = 1, o sea todas); si un tema no tiene
-// suficientes, el resto se completa al azar con el banco base (N3/N4).
+// preguntas exclusivas de N5 (N5 = 0.6, o sea 60 %); el resto se completa al
+// azar con el banco base (N3/N4).
 const bancosPorNivel = {};
 function obtenerBanco(nivel) {
   const clave = nivel === 'N5' ? 'N5' : 'BASE';
@@ -1578,12 +1578,37 @@ function mezclarLista(lista) {
   return arr;
 }
 
-// Toma "need" preguntas del tema: la proporción "enfoque" sale del grupo de
-// enfoque (si alcanza) y el resto se completa al azar con las demás.
-function seleccionarConEnfoque(theme, pool, need, enfoque) {
+// Reparte cuántas preguntas de N5 salen en cada tema para que el total del
+// examen respete exactamente la proporción "enfoque" (con 60 preguntas y
+// enfoque 0.6: 36 de N5 y 24 del banco N3/N4). Como 60 % de 13 no es entero,
+// las preguntas que sobran del redondeo se asignan a temas al azar en cada
+// examen (método del mayor resto).
+function repartirCuotaEnfoque(necesidades, enfoque) {
+  const temas = Object.keys(necesidades);
+  const total = temas.reduce((s, t) => s + necesidades[t], 0);
+  const objetivo = Math.round(total * enfoque);
+  const cuota = {}, resto = {};
+  let asignadas = 0;
+  temas.forEach(t => {
+    const exacto = necesidades[t] * enfoque;
+    cuota[t] = Math.floor(exacto + 1e-9);
+    resto[t] = exacto - cuota[t];
+    asignadas += cuota[t];
+  });
+  const orden = mezclarLista(temas).sort((a, b) => resto[b] - resto[a]);
+  for (let k = 0; asignadas < objetivo && k < orden.length; k++) {
+    if (cuota[orden[k]] < necesidades[orden[k]]) { cuota[orden[k]]++; asignadas++; }
+  }
+  return cuota;
+}
+
+// Toma "need" preguntas del tema: "cuota" salen del grupo de enfoque (N5) y el
+// resto se completa al azar con las demás (N3/N4). Si el tema no tiene
+// suficientes preguntas de enfoque, lo que falta también sale del resto.
+function seleccionarConEnfoque(theme, pool, need, cuota) {
   const enfocadas = mezclarLista(pool.filter(q => esPreguntaDeEnfoque(theme, q)));
   const resto = mezclarLista(pool.filter(q => !esPreguntaDeEnfoque(theme, q)));
-  const cuotaEnfoque = Math.min(enfocadas.length, Math.round(need * enfoque));
+  const cuotaEnfoque = Math.min(enfocadas.length, cuota);
   const elegidas = enfocadas.slice(0, cuotaEnfoque);
   const relleno = resto.concat(enfocadas.slice(cuotaEnfoque));
   return mezclarLista(elegidas.concat(relleno.slice(0, need - elegidas.length)));
@@ -1593,14 +1618,18 @@ function selectRandomQuestions(qbt) {
   const sel = {};
   const cfgNivel = (typeof NIVELES !== 'undefined' && NIVELES[nivelExamen]) || {};
   const enfoque = cfgNivel.enfoque || 0;
+  const necesidad = t => (t.toUpperCase() === 'REGLAMENTACION') ? 8 : 13;
+  const necesidades = {};
+  for (let theme in qbt) necesidades[theme] = necesidad(theme);
+  const cuotas = enfoque > 0 ? repartirCuotaEnfoque(necesidades, enfoque) : {};
   for (let theme in qbt) {
-    const need = (theme.toUpperCase() === 'REGLAMENTACION') ? 8 : 13;
+    const need = necesidades[theme];
     const pool = qbt[theme] || [];
     let selected = [];
     if (pool.length <= need) {
       selected = pool.slice();
     } else if (enfoque > 0) {
-      selected = seleccionarConEnfoque(theme, pool, need, enfoque);
+      selected = seleccionarConEnfoque(theme, pool, need, cuotas[theme]);
     } else {
       const shuffled = [...pool].sort(() => 0.5 - Math.random());
       selected = shuffled.slice(0, need);
@@ -2146,7 +2175,7 @@ bloque de código que aparece abajo y pegalo dentro de <code>INSTRUCTORES</code>
 <p class="nivel-actual" id="nivelActualTexto"></p>
 <button class="nivel-opcion" onclick="elegirNivel('N3')">Nivel 3 – Piloto Básico<small>40 minutos · Aprueba con 234 puntos</small></button>
 <button class="nivel-opcion" onclick="elegirNivel('N4')">Nivel 4 – Piloto<small>40 minutos · Aprueba con 252 puntos</small></button>
-<button class="nivel-opcion" onclick="elegirNivel('N5')">Nivel 5<small>40 minutos · Aprueba con 270 puntos · Preguntas de N5</small></button>
+<button class="nivel-opcion" onclick="elegirNivel('N5')">Nivel 5<small>40 minutos · Aprueba con 270 puntos · 60 % preguntas de N5 y 40 % de N3/N4</small></button>
 <button onclick="cerrarPanelNivel()">Cerrar</button>
 </div>
 <script>
@@ -2155,20 +2184,21 @@ bloque de código que aparece abajo y pegalo dentro de <code>INSTRUCTORES</code>
 // mínimo de aprobación (en puntos, no en porcentaje): N3 65 %, N4 70 %, N5 75 %
 // sobre un máximo de 360 puntos. "enfoque" es la parte (0 a 1) de las preguntas
 // de cada tema que se toma de las preguntas exclusivas de N5 (ver obtenerBanco
-// más arriba); el resto sale del banco base (N3/N4). N5 usa enfoque = 1: todas las
-// preguntas salen de N5 y solo si un tema no tiene suficientes se completa con
-// preguntas de N3/N4. 0 = todo al azar sobre el banco base.
+// más arriba); el resto sale del banco base (N3/N4). N5 usa enfoque = 0.6: de las
+// 60 preguntas, 36 (60 %) son de N5 y 24 (40 %) del banco N3/N4. Si un tema no
+// tuviera suficientes preguntas de N5, se completa con N3/N4. 0 = todo al azar
+// sobre el banco base.
 const NIVELES = {
   N3: { label: 'Nivel 3 – Piloto Básico', nombreCorto: 'NIVEL 3', tiempoMin: 40, puntajeAprobacion: 234, enfoque: 0 },
   N4: { label: 'Nivel 4 – Piloto',        nombreCorto: 'NIVEL 4', tiempoMin: 40, puntajeAprobacion: 252, enfoque: 0 },
-  N5: { label: 'Nivel 5 – Avanzado',        nombreCorto: 'NIVEL 5', tiempoMin: 40, puntajeAprobacion: 270, enfoque: 1 }
+  N5: { label: 'Nivel 5 – Avanzado',        nombreCorto: 'NIVEL 5', tiempoMin: 40, puntajeAprobacion: 270, enfoque: 0.6 }
 };
 let nivelExamen = 'N3'; // nivel por defecto si no se configura nada
 
 function actualizarIndicadorNivel(){
   const cfg = NIVELES[nivelExamen];
   const el = document.getElementById('nivelIndicador');
-  if(el) el.textContent = `Nivel configurado: ${cfg.label} · ${cfg.tiempoMin} min · aprueba con ${cfg.puntajeAprobacion} puntos${cfg.enfoque > 0 ? ' · preguntas de N5' : ''}`;
+  if(el) el.textContent = `Nivel configurado: ${cfg.label} · ${cfg.tiempoMin} min · aprueba con ${cfg.puntajeAprobacion} puntos${cfg.enfoque > 0 ? ` · ${Math.round(cfg.enfoque * 100)} % preguntas de N5 y ${100 - Math.round(cfg.enfoque * 100)} % de N3/N4` : ''}`;
   const actual = document.getElementById('nivelActualTexto');
   if(actual) actual.textContent = `Nivel actual: ${cfg.label}`;
   // Encabezado principal: refleja el nivel elegido (N3/N4/N5) en todo momento,
