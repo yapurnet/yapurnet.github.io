@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ruleta de sorteos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+/* Layout: ruleta grande centrada con puntero azul arriba y botón verde en el centro; panel de participantes al costado en pantallas anchas, debajo en el celular. Look único violeta, a propósito. */
+:root {
+  --bg: #7b2fa8;
+  --bg-deep: #5a1f86;
+  --ink: #ffffff;
+  --muted: #e3cdf3;
+  --panel: #4a1773;
+  --panel-line: #7a45a6;
+  --field: #35104f;
+  --green: #1fb455;
+  --green-deep: #128a3c;
+  --green-light: #4be07f;
+  --blue: #2aa9ee;
+  --blue-deep: #1479b8;
+  --sun: #ffd23f;
+  --plum: #2a0a42;
+  --scrim: rgba(42, 10, 66, 0.78);
+  --font-display: "Lilita One", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background-color: var(--bg); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding-inline: 16px;
+  padding-block: 20px 36px;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.07) 1.5px, transparent 1.8px),
+    radial-gradient(120% 60% at 50% 0%, #9b46c6 0%, transparent 70%);
+  background-size: 26px 26px, auto;
+  color: var(--ink);
+  font: 600 16px/1.5 var(--font-body);
+}
+.app {
+  max-width: 1020px;
+  margin: 0 auto;
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.main { min-width: 0; }
+.side { min-width: 0; }
+@media (min-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr); gap: 40px; align-items: start; }
+  .side { position: sticky; top: 20px; }
+}
+
+.title {
+  margin: 4px 0 4px;
+  text-align: center;
+  font: 400 clamp(2.1rem, 8vw, 3.6rem) / 1.02 var(--font-display);
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+  text-shadow: 0 3px 0 var(--bg-deep), 0 8px 18px rgba(30, 4, 50, 0.35);
+}
+
+/* Categorías */
+.tabs {
+  display: flex; gap: 6px; justify-content: center;
+  width: fit-content; max-width: 100%; margin: 12px auto 0; padding: 5px;
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 999px;
+}
+.tab {
+  font: 400 1.2rem/1 var(--font-display); letter-spacing: 0.02em;
+  padding: 10px 22px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.tab[aria-pressed="true"] { background: var(--sun); color: var(--plum); }
+.tab:disabled { cursor: default; opacity: 0.6; }
+.tab:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+
+/* Ruleta */
+.stage { position: relative; max-width: 520px; margin: 0 auto; padding-top: 34px; }
+.pointer {
+  position: absolute; top: 0; left: 50%;
+  width: 42px; height: 58px; margin-left: -21px;
+  z-index: 2; pointer-events: none;
+  transform-origin: 50% 12%;
+  filter: drop-shadow(0 3px 3px rgba(20, 4, 40, 0.4));
+}
+.wheelbox { position: relative; aspect-ratio: 1; }
+#wheel { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hub {
+  position: absolute; left: 50%; top: 50%;
+  width: 27%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 0; border-radius: 50%;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(1rem, 4.6vw, 1.6rem);
+  letter-spacing: 0.03em;
+  background: radial-gradient(circle at 35% 30%, var(--green-light) 0%, var(--green) 45%, var(--green-deep) 100%);
+  box-shadow: 0 0 0 5px var(--ink), 0 8px 18px rgba(20, 4, 40, 0.45), inset 0 -6px 10px rgba(0, 0, 0, 0.18);
+  text-shadow: 0 2px 0 var(--green-deep);
+}
+.hub:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.96); }
+.hub:disabled { filter: grayscale(0.6); opacity: 0.7; cursor: default; }
+.hub:focus-visible { outline: 4px solid var(--sun); outline-offset: 7px; }
+
+/* Panel */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 20px;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.panel-head h2 { margin: 0; font: 400 1.5rem/1.1 var(--font-display); letter-spacing: 0.01em; }
+.count {
+  font-weight: 800; font-size: 13px; color: var(--muted);
+  background: var(--field); padding: 4px 10px; border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+textarea {
+  width: 100%; min-height: 210px; resize: vertical;
+  background: var(--field); color: var(--ink);
+  border: 2px solid var(--panel-line); border-radius: 12px;
+  padding: 12px; font: 600 16px/1.55 var(--font-body);
+}
+textarea:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+textarea:read-only { opacity: 0.7; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn {
+  font: 800 14px/1 var(--font-body);
+  padding: 11px 16px; border-radius: 999px;
+  border: 2px solid var(--panel-line); background: transparent; color: var(--ink);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--ink); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+.btn.solid { background: var(--green); border-color: var(--green); color: var(--ink); }
+.btn.solid:hover:not(:disabled) { background: var(--green-light); border-color: var(--green-light); color: var(--plum); }
+.note { margin: 0; font-size: 14px; color: var(--muted); }
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 800; font-size: 15px; cursor: pointer; }
+.switch input {
+  appearance: none; -webkit-appearance: none; flex: none;
+  width: 48px; height: 28px; margin: 0; position: relative; cursor: pointer;
+  border-radius: 999px; background: var(--field); border: 2px solid var(--panel-line);
+  transition: background 0.15s;
+}
+.switch input::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--ink);
+  transition: transform 0.15s;
+}
+.switch input:checked { background: var(--green); border-color: var(--green); }
+.switch input:checked::after { transform: translateX(20px); }
+.switch input:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+.history { display: grid; gap: 8px; }
+.history h3 { margin: 0; font: 400 1.15rem/1.2 var(--font-display); }
+.history ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.history li {
+  display: flex; gap: 8px; min-width: 0;
+  background: var(--field); border-radius: 999px; padding: 5px 12px;
+  font-weight: 800; font-size: 14px; overflow-wrap: anywhere;
+}
+.history li b { color: var(--sun); font-variant-numeric: tabular-nums; }
+
+/* Ganador */
+.modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: var(--scrim); }
+.card {
+  width: min(100%, 420px); background: var(--sun); color: var(--plum);
+  border-radius: 24px; padding: 28px 22px 22px; text-align: center;
+  display: grid; gap: 8px; box-shadow: 0 20px 50px rgba(20, 4, 40, 0.5);
+  animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.card .kicker { margin: 0; font-weight: 800; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; }
+.card .winner {
+  margin: 0; font: 400 clamp(2.2rem, 10vw, 3.2rem) / 1.05 var(--font-display);
+  overflow-wrap: anywhere; text-wrap: balance;
+}
+.card .cheer { margin: 0 0 8px; font-weight: 800; }
+.card .row { justify-content: center; }
+.card .btn { border-color: var(--plum); color: var(--plum); }
+.card .btn.solid { background: var(--plum); color: var(--sun); }
+.card .btn:hover:not(:disabled) { border-color: var(--plum); filter: brightness(1.15); }
+@keyframes pop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+#confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 60; }
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <main class="main">
+    <h1 class="title">¡Buena suerte parapentistas!</h1>
+    <div class="tabs" role="group" aria-label="Categoría">
+      <button class="tab" type="button" data-cat="rec" aria-pressed="true">Recreativa</button>
+      <button class="tab" type="button" data-cat="fai2" aria-pressed="false">FAI2</button>
+    </div>
+    <div class="stage">
+      <svg class="pointer" id="pointer" viewBox="0 0 42 58" aria-hidden="true">
+        <path d="M21 56 L3 11 Q1 4 8 4 H34 Q41 4 39 11 Z" fill="var(--blue)" stroke="var(--blue-deep)" stroke-width="2.5" stroke-linejoin="round"/>
+        <path d="M11 9 H31" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <div class="wheelbox" id="wheelbox">
+        <canvas id="wheel" role="img" aria-label="Ruleta con los participantes"></canvas>
+        <button class="hub" id="spin" type="button" aria-label="Girar la ruleta">GIRAR</button>
+      </div>
+    </div>
+  </main>
+
+  <aside class="side">
+    <section class="panel" aria-label="Participantes">
+      <div class="panel-head">
+        <h2 id="panelTitle">Recreativa</h2>
+        <span class="count" id="count">0 participantes</span>
+      </div>
+      <textarea id="names" rows="9" spellcheck="false" autocomplete="off" aria-label="Un nombre por línea" placeholder="Escribí un nombre por línea"></textarea>
+      <p class="note" id="note">Son nombres de ejemplo. Reemplazalos por los tuyos, uno por línea.</p>
+      <p class="note" id="hint" hidden>Son tantos nombres que no entran en la ruleta. El ganador igual se muestra completo.</p>
+      <div class="row">
+        <button class="btn" id="shuffle" type="button">Mezclar</button>
+      </div>
+      <label class="switch" for="removeWinner"><span>Sacar al ganador de la ruleta</span><input type="checkbox" id="removeWinner" role="switch"></label>
+      <label class="switch" for="sound"><span>Sonido de variómetro</span><input type="checkbox" id="sound" role="switch" checked></label>
+      <div class="history" id="history" hidden>
+        <h3>Sorteos</h3>
+        <ol id="historyList"></ol>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="winner">
+  <div class="card">
+    <p class="kicker" id="kicker">Sorteo 1</p>
+    <p class="winner" id="winner"></p>
+    <p class="cheer">¡Felicitaciones!</p>
+    <div class="row">
+      <button class="btn solid" id="again" type="button">Girar de nuevo</button>
+      <button class="btn" id="close" type="button">Cerrar</button>
+    </div>
+  </div>
+</div>
+<canvas id="confetti" aria-hidden="true"></canvas>
+
+<script>
+(function () {
+  'use strict';
+  var TAU = Math.PI * 2;
+  var BODY = 'Nunito, system-ui, sans-serif';
+  var KEY = 'ruleta-sorteos-v2';
+  var OLD_KEY = 'ruleta-sorteos';
+  var CATS = {
+    rec: { label: 'Recreativa', sample: ['Ana', 'Daniela', 'Vivi', 'Sole', 'Nacho', 'Lucía'] },
+    fai2: { label: 'FAI2', sample: ['Martín', 'Paula', 'Tomás', 'Camila', 'Julián', 'Valentina'] }
+  };
+  var order = ['rec', 'fai2'];
+  var PALETTE = [
+    { c: '#ef3b2d', t: '#ffffff' }, { c: '#f5821f', t: '#ffffff' },
+    { c: '#fbb91e', t: '#4a1220' }, { c: '#8f1d52', t: '#ffffff' },
+    { c: '#d62839', t: '#ffffff' }, { c: '#f9d02c', t: '#4a1220' },
+    { c: '#6d1b4d', t: '#ffffff' }, { c: '#ea5a1a', t: '#ffffff' }
+  ];
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function $(id) { return document.getElementById(id); }
+  var canvas = $('wheel'), ctx = canvas.getContext('2d');
+  var field = $('names'), spinBtn = $('spin'), ptr = $('pointer');
+  var countEl = $('count'), noteEl = $('note'), hintEl = $('hint');
+  var removeSw = $('removeWinner'), soundSw = $('sound');
+  var modal = $('modal');
+
+  function mod(a, m) { return ((a % m) + m) % m; }
+  function rnd() {
+    try { var a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; }
+    catch (e) { return Math.random(); }
+  }
+
+  var items = [], theta = rnd() * TAU, spinning = false, size = 0, dpr = 1;
+  var cur = 'rec', pendingIdx = -1, hiding = false;
+  var store = {
+    rec: { names: CATS.rec.sample.join('\n'), sample: true, history: [] },
+    fai2: { names: CATS.fai2.sample.join('\n'), sample: true, history: [] }
+  };
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+
+  /* ---------- datos ---------- */
+  function parse() {
+    items = field.value.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 200);
+  }
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        cur: cur,
+        rec: { names: store.rec.names, sample: store.rec.sample },
+        fai2: { names: store.fai2.names, sample: store.fai2.sample },
+        remove: removeSw.checked, sound: soundSw.checked
+      }));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      var d = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (d) {
+        order.forEach(function (k) {
+          if (d[k] && typeof d[k].names === 'string') { store[k].names = d[k].names; store[k].sample = !!d[k].sample; }
+        });
+        if (CATS[d.cur]) cur = d.cur;
+        removeSw.checked = !!d.remove; soundSw.checked = d.sound !== false;
+        return;
+      }
+      var old = JSON.parse(localStorage.getItem(OLD_KEY) || 'null');
+      if (old && typeof old.names === 'string') {
+        store.rec.names = old.names; store.rec.sample = !!old.sample;
+        removeSw.checked = !!old.remove; soundSw.checked = old.sound !== false;
+      }
+    } catch (e) {}
+  }
+  function show(cat) {
+    cur = cat;
+    field.value = store[cat].names;
+    $('panelTitle').textContent = CATS[cat].label;
+    field.setAttribute('aria-label', 'Participantes de ' + CATS[cat].label + ', un nombre por línea');
+    tabs.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-cat') === cat)); });
+    renderHistory();
+    sync();
+  }
+  function sync() {
+    parse();
+    store[cur].names = field.value;
+    var n = items.length;
+    countEl.textContent = n + (n === 1 ? ' participante' : ' participantes');
+    spinBtn.disabled = spinning || n === 0;
+    noteEl.hidden = !store[cur].sample;
+    draw();
+    save();
+  }
+
+  /* ---------- dibujo ---------- */
+  function colorFor(i, n) {
+    var k = i % PALETTE.length;
+    if (i === n - 1 && n > 1 && k === 0) k = 4;
+    return PALETTE[k];
+  }
+  function font(px) { return '800 ' + px + 'px ' + BODY; }
+  function fit(text, maxW, fs) {
+    ctx.font = font(fs);
+    if (ctx.measureText(text).width <= maxW) return [text, fs];
+    var fs2 = Math.max(9, fs * 0.8);
+    ctx.font = font(fs2);
+    var t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return [t.trimEnd() + '…', fs2];
+  }
+  function draw() {
+    if (!size) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    var cx = size / 2, cy = size / 2, R = size / 2 - 8;
+    var ringW = R * 0.032, Rin = R - ringW, hubR = R * 0.27;
+    var n = items.length;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(30,4,50,0.45)';
+    ctx.shadowBlur = size * 0.04;
+    ctx.shadowOffsetY = size * 0.012;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    if (n === 0) {
+      ctx.fillStyle = '#6b3a94';
+      ctx.beginPath(); ctx.arc(cx, cy, Rin, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = font(Math.max(14, R * 0.09));
+      ctx.fillText('Agregá nombres', cx, cy + R * 0.42);
+      hintEl.hidden = true;
+      return;
+    }
+
+    var s = TAU / n, i, a0, col;
+    for (i = 0; i < n; i++) {
+      col = colorFor(i, n);
+      a0 = theta + i * s;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, Rin, a0, a0 + s); ctx.closePath();
+      ctx.fillStyle = col.c; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = col.c; ctx.stroke();
+    }
+    var g = ctx.createRadialGradient(cx, cy, hubR * 0.8, cx, cy, Rin);
+    g.addColorStop(0, 'rgba(40,0,30,0.28)'); g.addColorStop(0.55, 'rgba(40,0,30,0.04)'); g.addColorStop(1, 'rgba(40,0,30,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, Rin, 0, TAU); ctx.fill();
+
+    if (n > 1) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1.2;
+      for (i = 0; i < n; i++) {
+        a0 = theta + i * s;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a0) * hubR, cy + Math.sin(a0) * hubR);
+        ctx.lineTo(cx + Math.cos(a0) * Rin, cy + Math.sin(a0) * Rin);
+        ctx.stroke();
+      }
+    }
+
+    var arc = n === 1 ? Infinity : s * Rin * 0.6;
+    var fs = Math.min(R * 0.115, arc * 0.55);
+    hiding = fs < 9;
+    hintEl.hidden = !hiding;
+    if (!hiding) {
+      var maxW = Rin - R * 0.12 - hubR - 8;
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      for (i = 0; i < n; i++) {
+        var r = fit(items[i], maxW, fs);
+        ctx.font = font(r[1]);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(theta + (i + 0.5) * s);
+        ctx.fillStyle = colorFor(i, n).t;
+        ctx.fillText(r[0], Rin - R * 0.1, 0);
+        ctx.restore();
+      }
+    }
+
+    var pr = R * 0.026, pd = Rin - pr * 1.9;
+    if (n === 1 || pd * s > pr * 3.2) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(30,4,50,0.35)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
+      ctx.fillStyle = '#ffffff';
+      for (i = 0; i < n; i++) {
+        a0 = theta + i * s;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a0) * pd, cy + Math.sin(a0) * pd, pr, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+    if (spinning) flap();
+  }
+  function flap() {
+    if (!items.length) { ptr.style.transform = ''; return; }
+    var s = TAU / items.length;
+    var d = mod(theta + Math.PI / 2, s);
+    var w = Math.min(s * 0.28, 0.14);
+    var x = d > s - w ? (d - (s - w)) / w : 0;
+    ptr.style.transform = 'rotate(' + (-x * 26).toFixed(1) + 'deg)';
+  }
+  function resize() {
+    var w = Math.round($('wheelbox').getBoundingClientRect().width);
+    if (!w) return;
+    dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    size = w;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(w * dpr);
+    draw();
+  }
+
+  /* ---------- sonido ---------- */
+  var ac = null;
+  function ensureAudio() {
+    if (!soundSw.checked) return;
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      if (ac.state === 'suspended') ac.resume();
+    } catch (e) { ac = null; }
+  }
+  // Variómetro: beeps agudos y rápidos con ascendencia fuerte, graves y espaciados cuando se debilita.
+  function vbeep(freq, t0, dur) {
+    var o = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    o.type = 'square'; o.frequency.setValueAtTime(freq, t0);
+    f.type = 'lowpass'; f.frequency.setValueAtTime(2600, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.006);
+    g.gain.setValueAtTime(0.07, t0 + Math.max(0.008, dur - 0.012));
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(f); f.connect(g); g.connect(ac.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  // u va de 1 (ascendencia fuerte) a 0 (casi sin ascendencia). Devuelve los ms hasta el próximo beep.
+  function vario(u) {
+    if (!soundSw.checked || !ac) return 0;
+    var period = 85 + 520 * (1 - u);
+    vbeep(360 + 840 * u, ac.currentTime, Math.min(0.16, period * 0.00055));
+    return period;
+  }
+  function winSound() {
+    if (!soundSw.checked || !ac) return;
+    var t = ac.currentTime;
+    for (var i = 0; i < 6; i++) vbeep(700 + i * 110, t + i * 0.085, 0.05);
+    vbeep(1350, t + 0.6, 0.55);
+  }
+
+  /* ---------- giro ---------- */
+  function lock(on) {
+    spinning = on;
+    field.readOnly = on;
+    $('shuffle').disabled = on;
+    tabs.forEach(function (b) { b.disabled = on; });
+    spinBtn.disabled = on || items.length === 0;
+  }
+  function startSpin() {
+    if (spinning || !items.length) return;
+    ensureAudio();
+    var n = items.length, s = TAU / n;
+    var idx = Math.floor(rnd() * n);
+    var f = 0.3 + rnd() * 0.4;
+    var end = mod(-Math.PI / 2 - (idx + f) * s, TAU);
+    var turns = reduce ? 2 : 5 + Math.floor(rnd() * 4);
+    var from = theta, delta = mod(end - from, TAU) + turns * TAU;
+    var dur = reduce ? 1800 : 4600 + rnd() * 1600;
+    lock(true);
+    var t0 = performance.now(), nextBeep = t0;
+    (function frame(now) {
+      var t = Math.min(1, Math.max(0, (now - t0) / dur));
+      theta = from + delta * (1 - Math.pow(1 - t, 4));
+      if (t < 1 && now >= nextBeep) nextBeep = now + vario(Math.pow(1 - t, 1.2));
+      draw();
+      if (t < 1) requestAnimationFrame(frame); else finish();
+    })(t0);
+  }
+  function finish() {
+    theta = mod(theta, TAU);
+    ptr.style.transform = '';
+    var n = items.length, s = TAU / n;
+    var idx = Math.floor(mod(-Math.PI / 2 - theta, TAU) / s) % n;
+    draw();
+    lock(false);
+    pendingIdx = idx;
+    store[cur].history.push(items[idx]);
+    renderHistory();
+    setTimeout(function () { showModal(items[idx]); }, 350);
+  }
+
+  /* ---------- ganador ---------- */
+  function showModal(name) {
+    $('kicker').textContent = CATS[cur].label + ' · Sorteo ' + store[cur].history.length;
+    $('winner').textContent = name;
+    modal.hidden = false;
+    $('again').focus();
+    winSound();
+    burst();
+  }
+  function closeModal(again) {
+    if (modal.hidden) return;
+    modal.hidden = true;
+    if (removeSw.checked && pendingIdx >= 0 && pendingIdx < items.length) {
+      items.splice(pendingIdx, 1);
+      field.value = items.join('\n');
+      store[cur].sample = false;
+      sync();
+    }
+    pendingIdx = -1;
+    if (again) setTimeout(startSpin, 150); else spinBtn.focus();
+  }
+  function renderHistory() {
+    var box = $('history'), list = $('historyList'), history = store[cur].history;
+    box.hidden = history.length === 0;
+    list.textContent = '';
+    for (var i = history.length - 1; i >= 0 && i >= history.length - 12; i--) {
+      var li = document.createElement('li');
+      var b = document.createElement('b'); b.textContent = String(i + 1);
+      var sp = document.createElement('span'); sp.textContent = history[i];
+      li.appendChild(b); li.appendChild(sp); list.appendChild(li);
+    }
+  }
+
+  /* ---------- confeti ---------- */
+  function burst() {
+    if (reduce) return;
+    var c = $('confetti'), g = c.getContext('2d');
+    var W = c.width = window.innerWidth, H = c.height = window.innerHeight;
+    var cols = PALETTE.map(function (p) { return p.c; }).concat(['#ffffff', '#2aa9ee', '#1fb455']);
+    var P = [];
+    for (var i = 0; i < 150; i++) {
+      P.push({
+        x: W / 2 + (rnd() - 0.5) * W * 0.3, y: H * 0.45,
+        vx: (rnd() - 0.5) * 15, vy: -rnd() * 17 - 4,
+        w: 6 + rnd() * 6, h: 4 + rnd() * 6,
+        r: rnd() * TAU, vr: (rnd() - 0.5) * 0.4,
+        c: cols[Math.floor(rnd() * cols.length)]
+      });
+    }
+    var start = performance.now(), last = start;
+    (function f(now) {
+      var k = Math.min(3, (now - last) / 16.67); last = now;
+      g.clearRect(0, 0, W, H);
+      for (var j = 0; j < P.length; j++) {
+        var p = P[j];
+        p.vy += 0.38 * k; p.vx *= 0.995; p.x += p.vx * k; p.y += p.vy * k; p.r += p.vr * k;
+        g.save(); g.translate(p.x, p.y); g.rotate(p.r);
+        g.fillStyle = p.c; g.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        g.restore();
+      }
+      if (now - start < 3200) requestAnimationFrame(f); else g.clearRect(0, 0, W, H);
+    })(start);
+  }
+
+  /* ---------- eventos ---------- */
+  field.addEventListener('input', function () { store[cur].sample = false; sync(); });
+  tabs.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var cat = b.getAttribute('data-cat');
+      if (spinning || cat === cur) return;
+      show(cat);
+    });
+  });
+  spinBtn.addEventListener('click', startSpin);
+  $('shuffle').addEventListener('click', function () {
+    if (spinning) return;
+    parse();
+    for (var i = items.length - 1; i > 0; i--) {
+      var j = Math.floor(rnd() * (i + 1)), t = items[i]; items[i] = items[j]; items[j] = t;
+    }
+    field.value = items.join('\n');
+    store[cur].sample = false;
+    sync();
+  });
+  removeSw.addEventListener('change', save);
+  soundSw.addEventListener('change', function () { if (soundSw.checked) ensureAudio(); save(); });
+  $('again').addEventListener('click', function () { closeModal(true); });
+  $('close').addEventListener('click', function () { closeModal(false); });
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(false); });
+
+  load();
+  show(cur);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe($('wheelbox'));
+  window.addEventListener('resize', resize);
+  resize();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+})();
+</script>
+
+</body>
+</html>
