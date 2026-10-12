@@ -1,0 +1,46 @@
+<script>
+/* ===== Adaptaciones de la app Android (no hacen nada fuera de la app) ===== */
+// El PDF se entrega al guardado nativo (descarga + menú de compartir). Si se está enviando
+// el mail al instructor, se espera a que termine para que el menú de compartir no
+// interrumpa el envío (la pantalla de "enviando" pide no cambiar de aplicación).
+var __pdfPendienteApp = null;
+function vaciarPdfPendienteApp(){
+  var f = __pdfPendienteApp; __pdfPendienteApp = null;
+  if (f) { try { f(); } catch (e) { console.error(e); } }
+}
+function entregarPdfApp(nombre, b64){
+  function guardar(){
+    if (typeof window.AndroidBridge.savePdfBase64 === 'function') window.AndroidBridge.savePdfBase64(nombre, b64);
+    else window.AndroidBridge.postMessage(JSON.stringify({ action: 'savePdf', filename: nombre, data: b64 }));
+  }
+  var enviando = (typeof RESULTS_ENDPOINT !== 'undefined' && RESULTS_ENDPOINT) &&
+                 (typeof ENVIAR_PDF_AL_INSTRUCTOR !== 'undefined' && ENVIAR_PDF_AL_INSTRUCTOR);
+  if (!enviando) { guardar(); return; }
+  __pdfPendienteApp = guardar;
+  setTimeout(vaciarPdfPendienteApp, 100000);   // red de seguridad: nunca se pierde el PDF
+}
+(function(){
+  if (!window.AndroidBridge) return;
+  // cuando termina el envío (bien, mal o por tiempo agotado) se entrega el PDF
+  var _terminarOrig = window.envioTerminar;
+  window.envioTerminar = function(){
+    try { return _terminarOrig.apply(this, arguments); }
+    finally { setTimeout(vaciarPdfPendienteApp, 400); }
+  };
+  // Instructores: en la app se guardan en el propio celular (no hay archivo que reemplazar)
+  window.hayCambiosSinArchivo = function(){ return false; };
+  window.pintarEstadoGuardado = function(){
+    var box = document.getElementById('estadoGuardadoInstr'); if (!box) return;
+    box.innerHTML = ''; box.className = 'iestado ok';
+    var t = document.createElement('b'); t.textContent = '✔ Guardado en la app.'; box.appendChild(t);
+    var d = document.createElement('small');
+    d.textContent = 'Los instructores y sus correos quedan guardados en este celular y se conservan al actualizar la app.';
+    box.appendChild(d);
+  };
+  // "Descargar una copia del examen" no aplica dentro de la app
+  try {
+    var b = document.querySelector('button[onclick="guardarCopiaConInstructores()"]');
+    if (b) { var p = b.previousElementSibling; if (p && p.tagName === 'P') p.style.display = 'none'; b.style.display = 'none'; }
+  } catch (e) {}
+})();
+</script>

@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Adapta el examen FAVL (HTML original) para que funcione dentro de la app Android.
+
+Uso:  python3 patch_examen.py <examen_original.html> <examen_para_la_app.html>
+
+Hace exactamente esto sobre el archivo original (no toca la lista de instructores):
+  1) agrega la etiqueta viewport (pantalla de celular),
+  2) usa jsPDF local (js/jspdf.umd.min.js) en vez de bajarlo de internet,
+  3) el guardado del PDF pasa por el puente nativo de la app (descarga + compartir),
+  4) agrega las adaptaciones de la app (solo actúan dentro de la app) y el diseño para celular.
+
+Si el examen cambia tanto que alguna pieza ya no se encuentra, el script FRENA con un
+mensaje claro (así nunca se publica una app a medias).
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def leer(ruta):
+    with open(ruta, encoding="utf-8") as f:       # texto: \r\n pasa a \n
+        return f.read()
+
+
+def aplicar(contenido, viejo, nuevo, etiqueta):
+    n = contenido.count(viejo)
+    if n != 1:
+        sys.exit("ERROR: no pude adaptar el examen (paso «%s»: encontré %d coincidencias, esperaba 1). "
+                 "El examen cambió de forma que este script no conoce: hay que actualizar tools/patch_examen.py." % (etiqueta, n))
+    return contenido.replace(viejo, nuevo)
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    origen, destino = sys.argv[1], sys.argv[2]
+    c = leer(origen)
+
+    c = aplicar(c, '<meta charset="utf-8"/>\n',
+                '<meta charset="utf-8"/>\n<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>\n',
+                "viewport")
+    c = aplicar(c, '<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>',
+                '<script src="js/jspdf.umd.min.js"></script>', "jsPDF local")
+    c = aplicar(c, "doc.save(nombreArchivo);\nreturn { nombre: nombreArchivo, base64: pdfBase64 };\n",
+                leer(os.path.join(HERE, "examen_guardar_pdf.js")), "guardado del PDF")
+
+    shim = leer(os.path.join(HERE, "examen_app_shim.html"))
+    css = leer(os.path.join(HERE, "examen_app.css.html"))
+    c = aplicar(c, "</script></body>\n</html>\n", "</script>\n" + shim + css + "\n</body>\n</html>\n", "cierre del archivo")
+
+    # comprobaciones finales
+    for marca in ("/*INSTR_BASE_INICIO*/", "/*INSTR_BASE_FIN*/", "entregarPdfApp", 'src="js/jspdf.umd.min.js"'):
+        if marca not in c:
+            sys.exit("ERROR: falta «%s» en el examen adaptado." % marca)
+    if "cdnjs.cloudflare.com" in c:
+        sys.exit("ERROR: el examen todavía intenta bajar jsPDF de internet.")
+
+    with open(destino, "w", encoding="utf-8", newline="\n") as f:
+        f.write(c)
+    print("Examen adaptado: %s (%d caracteres)" % (destino, len(c)))
+
+
+main()
