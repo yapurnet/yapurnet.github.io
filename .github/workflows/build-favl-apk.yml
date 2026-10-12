@@ -40,6 +40,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # Clave de GitHub que lleva la app para poder publicar los cambios de instructores (solo abre pedidos en este repositorio)
+          FAVL_ISSUES_TOKEN: ${{ secrets.FAVL_ISSUES_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
@@ -64,23 +66,27 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Si otra compilación publicó mientras esta corría, partimos de lo último que hay en GitHub
-          # (lo compilado ya está guardado en RUNNER_TEMP, así que no se pierde nada).
-          git fetch origin "$GITHUB_REF_NAME"
-          git reset --hard "origin/$GITHUB_REF_NAME"
-          cp "$RUNNER_TEMP/FAVL-BanderaVuela.apk" FAVL-BanderaVuela.apk
-          git add FAVL-BanderaVuela.apk
-          # Lista de instructores que las apps instaladas bajan solas al abrirse
-          if [ -f "$RUNNER_TEMP/favl-instructores.json" ]; then
-            cp "$RUNNER_TEMP/favl-instructores.json" favl-instructores.json
+          for intento in 1 2 3 4 5; do
+            # Se parte de lo último que hay en GitHub (otra corrida pudo publicar mientras esta compilaba;
+            # lo compilado ya está guardado en RUNNER_TEMP, así que no se pierde nada).
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            cp "$RUNNER_TEMP/FAVL-BanderaVuela.apk" FAVL-BanderaVuela.apk
+            git add FAVL-BanderaVuela.apk
+            # Lista de instructores que las apps instaladas bajan solas al abrirse: examen + cambios hechos desde las apps
+            RAW="$(python3 favl-app/tools/pick_raw.py favl-app/raw)"
+            node favl-app/tools/extract_instructores.js "$RAW" favl-instructores.json auto favl-app/data/instructores-cambios.json
             git add favl-instructores.json
-          fi
-          if git diff --cached --quiet; then
-            echo "El APK no cambió."
-          else
+            if git diff --cached --quiet; then
+              echo "El APK no cambió."
+              break
+            fi
             git commit -m "APK FAVL ${VERSION_NAME}: compilación automática (+ lista de instructores)"
-            git push origin "HEAD:$GITHUB_REF_NAME"
-          fi
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then break; fi
+            echo "Otro proceso publicó al mismo tiempo (intento $intento). Reintento."
+            sleep $((intento * 3))
+            [ "$intento" -lt 5 ] || { echo "::error::No se pudo publicar el APK después de 5 intentos."; exit 1; }
+          done
           {
             echo "### APK FAVL ${VERSION_NAME} publicado"
             echo "Descarga: https://${GITHUB_REPOSITORY_OWNER}.github.io/FAVL-BanderaVuela.apk (puede tardar 1-2 minutos en aparecer)"

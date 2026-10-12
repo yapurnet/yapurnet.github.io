@@ -1,0 +1,40 @@
+name: Instructores automático
+
+# Cuando alguien agrega, edita o quita un instructor dentro de la app (con el código de administrador),
+# la app abre un pedido (issue) llamado «FAVL-INSTR …» en este repositorio. Este proceso lo revisa,
+# lo aplica y publica la lista nueva (favl-instructores.json): las apps instaladas la bajan solas.
+# También se puede lanzar a mano desde Actions > «Instructores automático» > Run workflow
+# (procesa los pedidos que hayan quedado abiertos).
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+# Una sola corrida a la vez; cada corrida procesa TODOS los pedidos abiertos, así que si llegan varios
+# juntos no se pierde ninguno.
+concurrency:
+  group: favl-instructores
+  cancel-in-progress: false
+
+jobs:
+  aplicar:
+    # Solo los pedidos del dueño del repositorio (la app usa su clave de GitHub) y con el título esperado.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'FAVL-INSTR'))
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Aplicar pedidos y publicar la lista
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAVL_ADMIN_CODE: ${{ secrets.FAVL_ADMIN_CODE }}
+        run: bash favl-app/tools/aplicar_pedidos.sh

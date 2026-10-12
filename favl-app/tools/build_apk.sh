@@ -9,7 +9,8 @@
 #   VERSION_CODE        número de versión entero (siempre creciente)
 #   VERSION_NAME        texto de versión (se ve en Ajustes > Aplicaciones)
 # Opcional: EXPECTED_CERT_SHA256 (huella de la clave de FAVL), ANDROID_JAR,
-#           INSTR_VERSION (marca de tiempo), FAVL_SITE (https://<usuario>.github.io), INSTR_JSON_OUT (dónde dejar favl-instructores.json)
+#           INSTR_VERSION (marca de tiempo), FAVL_SITE (https://<usuario>.github.io), INSTR_JSON_OUT (dónde dejar favl-instructores.json),
+#           FAVL_REPO (usuario/repositorio), FAVL_ISSUES_TOKEN (clave de GitHub para que la app publique cambios de instructores)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +22,8 @@ export KEYSTORE_PASSWORD KEY_PASSWORD
 # Marca de tiempo de la lista de instructores: la lleva el APK y también el favl-instructores.json publicado.
 export INSTR_VERSION="${INSTR_VERSION:-$(date +%s)}"
 export FAVL_SITE="${FAVL_SITE:-https://yapurnet.github.io}"
+export FAVL_REPO="${FAVL_REPO:-${GITHUB_REPOSITORY:-yapurnet/yapurnet.github.io}}"
+export FAVL_ISSUES_TOKEN="${FAVL_ISSUES_TOKEN:-}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -29,10 +32,13 @@ echo "==> 1/6 Examen: adaptación para la app"
 RAW="$(python3 "$ROOT/tools/pick_raw.py" "$ROOT/raw")"
 echo "    usando: $RAW"
 mkdir -p "$WORK/assets/www/js"
-python3 "$ROOT/tools/patch_examen.py" "$RAW" "$WORK/assets/www/examen.html"
-# Lista de instructores para la actualización automática (también valida que la lista del examen esté bien)
+# Lista de instructores = la del examen + los cambios hechos desde las apps (favl-app/data/instructores-cambios.json).
+# También valida que la lista esté bien y deja el examen con la lista ya fusionada (el APK nace al día).
 INSTR_JSON_OUT="${INSTR_JSON_OUT:-$WORK/favl-instructores.json}"
-node "$ROOT/tools/extract_instructores.js" "$RAW" "$INSTR_JSON_OUT" "$INSTR_VERSION"
+node "$ROOT/tools/extract_instructores.js" "$RAW" "$INSTR_JSON_OUT" "$INSTR_VERSION" \
+     "$ROOT/data/instructores-cambios.json" "$WORK/examen_fusionado.html"
+[ -n "$FAVL_ISSUES_TOKEN" ] || echo "    AVISO: falta el secreto FAVL_ISSUES_TOKEN: esta versión de la app NO podrá publicar cambios de instructores."
+python3 "$ROOT/tools/patch_examen.py" "$WORK/examen_fusionado.html" "$WORK/assets/www/examen.html"
 
 echo "==> 2/6 Páginas de la app"
 cp "$ROOT/www/index.html" "$ROOT/www/cuestionario.html" "$WORK/assets/www/"

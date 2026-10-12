@@ -97,6 +97,10 @@ function entregarPdfApp(nombre, b64){
 
   function aplicarLista(lista, version, avisar){
     var cambio = firma(lista) !== firma(INSTRUCTORES_BASE);
+    // lo que este celular ya publicó y ahora llega en la lista deja de ser «local» (ver bloque de publicación)
+    var absorbio = false;
+    try { absorbio = !!(window.__favlAbsorber && window.__favlAbsorber(lista, version)); } catch (e) {}
+    if (!cambio && absorbio) aplicarCambioInstructores(null);
     if (cambio) {
       var previos = {};
       INSTRUCTORES_BASE.forEach(function(b){ previos[b.id] = firma([b]); });
@@ -160,5 +164,472 @@ function entregarPdfApp(nombre, b64){
       }
     } catch (e) {}
   }, 30000);
+})();
+</script><script>
+/* ===== Publicar los cambios de instructores a todos los celulares (solo dentro de la app) =====
+   Al agregar, editar o quitar un instructor en el panel, la app manda el cambio a GitHub (abre un pedido
+   «FAVL-INSTR» firmado con el código de administrador). GitHub lo aplica, publica la lista nueva y las
+   demás apps la bajan solas. Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión.
+   Sin código de administrador, los cambios quedan solo en este celular (como antes). */
+(function(){
+  if (!window.AndroidBridge) return;
+  var REPO = '__FAVL_REPO__';
+  var TOKEN = '__FAVL_ISSUES_TOKEN__';          // clave de GitHub que solo permite abrir pedidos (issues) en este repositorio
+  var API = 'https://api.github.com/repos/' + REPO;
+  var K_COD = 'favlAdminCodeV1', K_COLA = 'favlColaPublicarV1', K_VERIF = 'favlVerificarV1',
+      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_REINT = 'favlReintentarV1';
+  var MAX_LOGO = 60000;                          // el cuerpo de un pedido admite 65536 caracteres
+
+  /* ---------- almacenamiento ---------- */
+  function leer(k, def){ try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? def : v; } catch (e) { return def; } }
+  function guardar(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  function borrar(k){ try { localStorage.removeItem(k); } catch (e) {} }
+  function normalizarCodigo(c){ return String(c == null ? '' : c).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function codigo(){ var c = leer(K_COD, ''); return (typeof c === 'string' && c.length >= 16) ? c : ''; }
+
+  /* ---------- SHA-256 y HMAC (propios: no dependen de crypto.subtle) ---------- */
+  var K256 = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  function rotr(x, n){ return (x >>> n) | (x << (32 - n)); }
+  function sha256(m0){
+    var m = m0.slice(), l = m0.length;
+    var h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    m.push(0x80);
+    while (m.length % 64 !== 56) m.push(0);
+    var hi = Math.floor(l / 0x20000000), lo = (l << 3) >>> 0;
+    m.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    var w = new Array(64), i, t;
+    for (i = 0; i < m.length; i += 64) {
+      for (t = 0; t < 16; t++) w[t] = (m[i + 4*t] << 24) | (m[i + 4*t + 1] << 16) | (m[i + 4*t + 2] << 8) | m[i + 4*t + 3];
+      for (t = 16; t < 64; t++) {
+        var s0 = rotr(w[t-15], 7) ^ rotr(w[t-15], 18) ^ (w[t-15] >>> 3);
+        var s1 = rotr(w[t-2], 17) ^ rotr(w[t-2], 19) ^ (w[t-2] >>> 10);
+        w[t] = (w[t-16] + s0 + w[t-7] + s1) | 0;
+      }
+      var a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+      for (t = 0; t < 64; t++) {
+        var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g);
+        var t1 = (hh + S1 + ch + K256[t] + w[t]) | 0;
+        var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), mj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + mj) | 0;
+        hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+    }
+    var out = [];
+    for (i = 0; i < 8; i++) out.push((h[i] >>> 24) & 255, (h[i] >>> 16) & 255, (h[i] >>> 8) & 255, h[i] & 255);
+    return out;
+  }
+  function bytesUtf8(s){
+    var u = unescape(encodeURIComponent(s)), out = new Array(u.length);
+    for (var i = 0; i < u.length; i++) out[i] = u.charCodeAt(i);
+    return out;
+  }
+  function hmacHex(clave, mensaje){
+    var k = bytesUtf8(clave), i;
+    if (k.length > 64) k = sha256(k);
+    while (k.length < 64) k.push(0);
+    var ip = [], op = [];
+    for (i = 0; i < 64; i++) { ip.push(k[i] ^ 0x36); op.push(k[i] ^ 0x5c); }
+    var interno = sha256(ip.concat(bytesUtf8(mensaje)));
+    var r = sha256(op.concat(interno)), hex = '';
+    for (i = 0; i < r.length; i++) hex += ('0' + r[i].toString(16)).slice(-2);
+    return hex;
+  }
+  window.__favlHmacHex = hmacHex;               // (para las pruebas)
+
+  function nonce(){
+    var a = '', i;
+    try { var u = new Uint8Array(8); (window.crypto || window.msCrypto).getRandomValues(u); for (i = 0; i < 8; i++) a += ('0' + u[i].toString(16)).slice(-2); } catch (e) { a = ''; }
+    while (a.length < 16) a += Math.floor(Math.random() * 16).toString(16);
+    return a;
+  }
+
+  /* ---------- avisos en pantalla ---------- */
+  var toastEl = null, toastTimer = null;
+  function toast(texto, tipo, fijo){
+    try {
+      if (!toastEl || !toastEl.parentNode) {
+        toastEl = document.createElement('div');
+        toastEl.setAttribute('role', 'status');
+        toastEl.onclick = function(){ if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl); };
+        document.body.appendChild(toastEl);
+      }
+      toastEl.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:90vw;z-index:2147483000;' +
+        'color:#fff;padding:10px 16px;border-radius:12px;font:600 14px/1.35 system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.35);' +
+        'text-align:center;background:' + (tipo === 'err' ? '#7a1f16' : (tipo === 'ok' ? '#1d6b3a' : '#12355b'));
+      toastEl.textContent = texto + (fijo ? '  (tocá para cerrar)' : '');
+      if (toastTimer) clearTimeout(toastTimer);
+      if (!fijo) toastTimer = setTimeout(function(){ if (toastEl && toastEl.parentNode) toastEl.parentNode.removeChild(toastEl); }, 6000);
+    } catch (e) {}
+  }
+
+  /* ---------- logo: se achica para que entre en un pedido ---------- */
+  function prepararLogo(dataUrl){
+    return new Promise(function(resolve, reject){
+      if (!dataUrl) return resolve(null);
+      if (dataUrl.length <= MAX_LOGO) return resolve(dataUrl);
+      var img = new Image();
+      img.onload = function(){
+        try {
+          var esJpg = /^data:image\/jpe?g/.test(dataUrl);
+          var tamanos = [400, 300, 220, 160, 120, 90];
+          for (var n = 0; n < tamanos.length; n++) {
+            var esc = Math.min(1, tamanos[n] / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+            var w = Math.max(1, Math.round((img.naturalWidth || 1) * esc)), h = Math.max(1, Math.round((img.naturalHeight || 1) * esc));
+            var c = document.createElement('canvas'); c.width = w; c.height = h;
+            var ctx = c.getContext('2d');
+            var intentos = esJpg ? [['image/jpeg', 0.85], ['image/jpeg', 0.7]] : [['image/png'], ['image/jpeg', 0.85], ['image/jpeg', 0.7]];
+            for (var j = 0; j < intentos.length; j++) {
+              ctx.clearRect(0, 0, w, h);
+              if (intentos[j][0] === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }
+              ctx.drawImage(img, 0, 0, w, h);
+              var out = c.toDataURL(intentos[j][0], intentos[j][1]);
+              if (out.length <= MAX_LOGO && /^data:image\/(jpeg|png);base64,/.test(out)) return resolve(out);
+            }
+          }
+          reject(new Error('logo'));
+        } catch (e) { reject(e); }
+      };
+      img.onerror = function(){ reject(new Error('logo')); };
+      img.src = dataUrl;
+    });
+  }
+
+  /* ---------- API de GitHub ---------- */
+  function cab(conCuerpo){
+    var h = { 'Authorization': 'Bearer ' + TOKEN, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (conCuerpo) h['Content-Type'] = 'application/json';
+    return h;
+  }
+  function errorHttp(status){
+    var tipo = 'red';
+    if (status === 401 || status === 403) tipo = 'auth';
+    else if (status === 404 || status === 410) tipo = 'repo';
+    else if (status === 422 || status === 400) tipo = 'datos';
+    return { tipo: tipo, status: status };
+  }
+  function crearPedido(cuerpoPedido, titulo){
+    return fetch(API + '/issues', { method: 'POST', headers: cab(true), body: JSON.stringify({ title: titulo, body: cuerpoPedido }) })
+      .then(function(r){
+        if (r.status === 201) return r.json().then(function(j){
+          if (!j || typeof j.number !== 'number') throw { tipo: 'red', status: 0 };
+          return { num: j.number };
+        });
+        throw errorHttp(r.status);
+      }, function(){ throw { tipo: 'red', status: 0 }; });
+  }
+
+  /* ---------- cola de envío ---------- */
+  var enviando = false, bloqueoHasta = 0, avisoRed = false, avisoAuth = false;
+
+  function armarPedido(item){
+    return prepararLogo(item.d && item.d.logo).then(function(logo){
+      var datos;
+      if (item.op === 'set') {
+        datos = { nombre: item.d.nombre, licencia: item.d.licencia, emails: item.d.emails || [] };
+        if (logo) datos.logo = logo;
+      }
+      var p = JSON.stringify({ v: 1, n: item.n, t: Date.now(), op: item.op, id: item.id, d: datos });
+      var cuerpo = JSON.stringify({ p: p, f: hmacHex(codigo(), p) });
+      if (cuerpo.length > 65000) throw { tipo: 'datos', status: 0 };
+      return cuerpo;
+    });
+  }
+
+  function procesar(){
+    if (!TOKEN || !codigo() || enviando || Date.now() < bloqueoHasta) return;
+    var cola = leer(K_COLA, []);
+    if (!cola.length) return;
+    var item = cola[0];
+    enviando = true;
+    armarPedido(item)
+      .then(function(cuerpo){ return crearPedido(cuerpo, 'FAVL-INSTR ' + item.op + ' ' + String(item.n).slice(0, 8)); })
+      .then(function(r){
+        guardar(K_COLA, leer(K_COLA, []).filter(function(x){ return x.n !== item.n; }));
+        var v = leer(K_VERIF, []);
+        v.push({ num: r.num, n: item.n, op: item.op, id: item.id, nombre: item.d && item.d.nombre, licencia: item.d && item.d.licencia, t: Date.now() });
+        guardar(K_VERIF, v);
+        enviando = false; avisoRed = false;
+        toast('Enviando el cambio a todos los celulares…');
+        estado();
+        setTimeout(procesar, 0);
+        setTimeout(verificar, 6000);
+      })
+      .catch(function(err){
+        enviando = false;
+        var tipo = (err && err.tipo) || 'datos';
+        if (tipo === 'red') {
+          bloqueoHasta = Date.now() + 60000;
+          if (!avisoRed) { avisoRed = true; toast('Sin internet: el cambio quedó guardado y se publica solo cuando haya conexión.'); }
+        } else if (tipo === 'auth' || tipo === 'repo') {
+          bloqueoHasta = Date.now() + 5 * 60000;
+          if (!avisoAuth) {
+            avisoAuth = true;
+            toast(tipo === 'auth'
+              ? 'La clave de GitHub que usa la app venció o no tiene permiso. Hay que renovarla; los cambios quedan guardados y se publican apenas se arregle.'
+              : 'GitHub no encontró el repositorio o tiene desactivados los pedidos (Issues). Los cambios quedan guardados.', 'err', true);
+          }
+        } else {
+          // el pedido es inválido: no tiene sentido reintentarlo
+          guardar(K_COLA, leer(K_COLA, []).filter(function(x){ return x.n !== item.n; }));
+          toast('No se pudo publicar el cambio' + (item.d && item.d.nombre ? ' de ' + item.d.nombre : '') + ' (datos o foto no aceptados). Quedó solo en este celular.', 'err', true);
+        }
+        estado();
+      });
+  }
+
+  /* ---------- verificar el resultado (GitHub contesta en el mismo pedido) ---------- */
+  var verificando = false;
+  function consultar(it){
+    return fetch(API + '/issues/' + it.num + '/comments?per_page=10&x=' + Date.now(), { headers: cab(false), cache: 'no-store' })
+      .then(function(r){ if (!r.ok) throw new Error('http'); return r.json(); })
+      .then(function(arr){
+        for (var i = 0; i < (arr || []).length; i++) {
+          var c = arr[i];
+          if (c && c.user && c.user.login === 'github-actions[bot]' && typeof c.body === 'string') {
+            var m = /^FAVL-(OK|REPETIDO|RECHAZADO)\b/.exec(c.body);
+            if (m) return { tipo: m[1], texto: c.body.split('\n').slice(1).join(' ').replace(/\s+/g, ' ').trim().slice(0, 220) };
+          }
+        }
+        return null;
+      });
+  }
+  function verificar(){
+    if (verificando || !TOKEN) return;
+    var v = leer(K_VERIF, []);
+    if (!v.length) return;
+    verificando = true;
+    var hechos = [];
+    v.reduce(function(p, it){
+      return p.then(function(){
+        return consultar(it).then(function(res){ if (res) hechos.push({ it: it, res: res }); }, function(){});
+      });
+    }, Promise.resolve()).then(function(){
+      verificando = false;
+      var ahora = Date.now();
+      var cerrados = {};
+      hechos.forEach(function(h){ cerrados[h.it.n] = 1; });
+      var resto = leer(K_VERIF, []).filter(function(x){
+        if (cerrados[x.n]) return false;
+        if (ahora - x.t > 40 * 60000) { toast('GitHub no confirmó un cambio de instructores. Si no aparece en los otros celulares, repetilo.', 'err', true); return false; }
+        return true;
+      });
+      guardar(K_VERIF, resto);
+      hechos.forEach(function(h){ resultado(h.it, h.res); });
+      estado();
+    });
+  }
+  function resultado(it, res){
+    if (res.tipo === 'RECHAZADO') {
+      if (/firma/i.test(res.texto)) {
+        borrar(K_COD);
+        var re = leer(K_REINT, []).filter(function(x){ return !(x.op === it.op && x.id === it.id); });
+        re.push({ op: it.op, id: it.id });
+        guardar(K_REINT, re);
+      }
+      toast('No se publicó: ' + (res.texto || 'GitHub rechazó el cambio.') + (/firma/i.test(res.texto) ? ' Volvé a ingresar el código.' : ''), 'err', true);
+      return;
+    }
+    if (it.op === 'set') {
+      var pubs = leer(K_PUB, []).filter(function(p){ return p.id !== it.id; });
+      pubs.push({ id: it.id, nombre: it.nombre || '', licencia: it.licencia || '', t: Date.now() });
+      guardar(K_PUB, pubs);
+    }
+    toast('✔ Publicado: ya llega a todos los celulares (en 1 o 2 minutos).', 'ok');
+  }
+
+  /* ---------- engancharse al panel de instructores ---------- */
+  var sinCodigoPendientes = [], preguntando = false, noPreguntarSesion = false;
+
+  function encolar(op, id, d){
+    var cola = leer(K_COLA, []);
+    cola.push({ n: nonce(), op: op, id: id, d: d });
+    guardar(K_COLA, cola);
+    estado();
+    procesar();
+  }
+  function publicar(op, id, d){
+    if (!TOKEN || leer(K_NO, false)) return;
+    if (codigo()) return encolar(op, id, d);
+    if (noPreguntarSesion) return;
+    sinCodigoPendientes.push([op, id, d]);
+    if (!preguntando) pedirCodigo();
+  }
+  function guardarCodigo(c){
+    guardar(K_COD, c); avisoAuth = false;
+    var re = leer(K_REINT, []); borrar(K_REINT);
+    re.forEach(function(x){
+      var i = null;
+      for (var k = 0; k < INSTRUCTORES.length; k++) if (INSTRUCTORES[k].id === x.id) i = INSTRUCTORES[k];
+      if (x.op === 'set' && i) encolar('set', x.id, { nombre: i.nombre, licencia: i.licencia, emails: i.emails || [], logo: i.logo });
+      else if (x.op === 'del' && !i) encolar('del', x.id);
+    });
+  }
+  function soltarPendientes(publicarlos){
+    var p = sinCodigoPendientes; sinCodigoPendientes = [];
+    if (publicarlos) p.forEach(function(x){ encolar(x[0], x[1], x[2]); });
+  }
+
+  function pedirCodigo(){
+    preguntando = true;
+    try {
+      var fondo = document.createElement('div');
+      fondo.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483100;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+      var caja = document.createElement('div');
+      caja.style.cssText = 'background:#fff;color:#111;border-radius:14px;max-width:420px;width:100%;padding:18px;font:15px/1.4 system-ui,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4)';
+      var t = document.createElement('b'); t.textContent = '¿Publicar este cambio a todos los celulares?'; t.style.cssText = 'display:block;font-size:17px;margin-bottom:6px';
+      var p = document.createElement('div'); p.textContent = 'Para que llegue solo a todos los celulares que tienen la app, ingresá el código de administrador (se pide una sola vez en este celular). Si no lo tenés, el cambio queda solo acá.';
+      p.style.cssText = 'margin-bottom:10px';
+      var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'characters'; inp.autocomplete = 'off'; inp.spellcheck = false;
+      inp.id = 'favlCodigoModal'; inp.placeholder = 'Código de administrador'; inp.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #888;border-radius:8px;margin:0 0 6px 0;background:#fff !important;color:#111 !important';
+      var msg = document.createElement('div'); msg.style.cssText = 'color:#a02020;min-height:18px;font-size:13px;margin-bottom:8px';
+      var fila = document.createElement('div'); fila.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+      function boton(txt, primario){
+        var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+        // el examen pinta todos los botones con !important: hay que pisarlo con !important en línea
+        b.style.cssText = 'flex:1;min-width:120px;margin:0 !important;padding:10px 12px !important;border-radius:10px !important;font:600 15px system-ui,sans-serif !important;' +
+          'box-shadow:none !important;border:1px solid #12355b !important;' +
+          (primario ? 'background:#12355b !important;color:#fff !important' : 'background:#fff !important;color:#12355b !important');
+        fila.appendChild(b); return b;
+      }
+      var bOk = boton('Publicar a todos', true), bNo = boton('Solo en este celular', false);
+      var nada = document.createElement('div'); nada.textContent = 'No preguntar más en este celular'; nada.style.cssText = 'margin-top:10px;font-size:13px;color:#555;text-decoration:underline;text-align:center';
+      function cerrar(){ if (fondo.parentNode) fondo.parentNode.removeChild(fondo); preguntando = false; }
+      bOk.onclick = function(){
+        var c = normalizarCodigo(inp.value);
+        if (c.length < 16) { msg.textContent = 'El código tiene 20 letras y números. Revisalo.'; return; }
+        guardarCodigo(c); cerrar(); soltarPendientes(true); estado();
+      };
+      bNo.onclick = function(){ noPreguntarSesion = true; cerrar(); soltarPendientes(false); };
+      nada.onclick = function(){ guardar(K_NO, true); cerrar(); soltarPendientes(false); estado(); };
+      caja.appendChild(t); caja.appendChild(p); caja.appendChild(inp); caja.appendChild(msg); caja.appendChild(fila); caja.appendChild(nada);
+      fondo.appendChild(caja); document.body.appendChild(fondo);
+      setTimeout(function(){ try { inp.focus(); } catch (e) {} }, 100);
+    } catch (e) { preguntando = false; soltarPendientes(false); }
+  }
+
+  var oAdd = window.instrAgregar, oEdit = window.instrEditar, oDel = window.instrEliminar;
+  if (typeof oAdd === 'function') window.instrAgregar = function(d){
+    var antes = cambiosInstructores.agregados.length;
+    var r = oAdd.apply(this, arguments);
+    try {
+      var a = cambiosInstructores.agregados;
+      if (a.length > antes) {
+        var n = a[a.length - 1];
+        publicar('set', n.id, { nombre: n.nombre, licencia: n.licencia, emails: n.emails || [], logo: n.logo });
+      }
+    } catch (e) { console.error(e); }
+    return r;
+  };
+  if (typeof oEdit === 'function') window.instrEditar = function(id, d){
+    var r = oEdit.apply(this, arguments);
+    try {
+      var i = null;
+      for (var k = 0; k < INSTRUCTORES.length; k++) if (INSTRUCTORES[k].id === id) i = INSTRUCTORES[k];
+      if (i) {
+        var conocido = false;
+        for (var b = 0; b < INSTRUCTORES_BASE.length; b++) if (INSTRUCTORES_BASE[b].id === id) conocido = true;
+        // la foto solo viaja si la cambiaron o si el instructor todavía no está en la lista publicada
+        publicar('set', id, { nombre: i.nombre, licencia: i.licencia, emails: i.emails || [], logo: (d && d.logo) ? d.logo : (conocido ? undefined : i.logo) });
+      }
+    } catch (e) { console.error(e); }
+    return r;
+  };
+  if (typeof oDel === 'function') window.instrEliminar = function(id){
+    var antes = INSTRUCTORES.length;
+    var r = oDel.apply(this, arguments);
+    try { if (INSTRUCTORES.length < antes) publicar('del', id); } catch (e) { console.error(e); }
+    return r;
+  };
+
+  /* ---------- lo ya publicado deja de ser «local» cuando llega en la lista de GitHub ---------- */
+  function norm(s){ return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  window.__favlAbsorber = function(lista, version){
+    var pubs = leer(K_PUB, []);
+    if (!pubs.length) return false;
+    var ids = {}, nl = {};
+    lista.forEach(function(i){ ids[i.id] = 1; nl[norm(i.nombre) + '|' + norm(i.licencia)] = 1; });
+    var cambio = false, quedan = [];
+    pubs.forEach(function(p){
+      var enLista = ids[p.id] || nl[norm(p.nombre) + '|' + norm(p.licencia)];
+      var borradoEnGitHub = !enLista && (version * 1000 > p.t + 15 * 60000);
+      if (enLista || borradoEnGitHub) {
+        var antes = cambiosInstructores.agregados.length;
+        cambiosInstructores.agregados = cambiosInstructores.agregados.filter(function(a){
+          return !(a.id === p.id || (enLista && norm(a.nombre) + '|' + norm(a.licencia) === norm(p.nombre) + '|' + norm(p.licencia)));
+        });
+        if (cambiosInstructores.agregados.length !== antes) cambio = true;
+      } else {
+        quedan.push(p);
+      }
+    });
+    guardar(K_PUB, quedan);
+    return cambio;
+  };
+
+  /* ---------- estado en el panel de instructores ---------- */
+  function estado(){ try { if (typeof window.pintarEstadoGuardado === 'function') window.pintarEstadoGuardado(); } catch (e) {} }
+  var pintarBase = window.pintarEstadoGuardado;
+  window.pintarEstadoGuardado = function(){
+    try { if (typeof pintarBase === 'function') pintarBase.apply(this, arguments); } catch (e) {}
+    try { pintarPublicacion(); } catch (e) { console.error(e); }
+  };
+  function pintarPublicacion(){
+    var box = document.getElementById('estadoGuardadoInstr');
+    if (!box) return;
+    var viejo = document.getElementById('favlPublicacion'); if (viejo && viejo.parentNode) viejo.parentNode.removeChild(viejo);
+    var d = document.createElement('div'); d.id = 'favlPublicacion';
+    d.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,.15);font-size:13px;line-height:1.4';
+    function linea(txt, negrita){ var s = document.createElement(negrita ? 'b' : 'div'); s.textContent = txt; s.style.display = 'block'; d.appendChild(s); return s; }
+    function chico(txt, fn){
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+      b.className = 'ibtn ibtn-sec';            // mismo aspecto que Editar / Probar
+      b.style.cssText = 'margin:6px 6px 0 0 !important';
+      b.onclick = fn; d.appendChild(b); return b;
+    }
+    if (!TOKEN) {
+      linea('Publicación automática: no está activada en esta versión de la app.');
+    } else if (leer(K_NO, false)) {
+      linea('La publicación a todos los celulares está desactivada en este celular.');
+      chico('Activar', function(){ borrar(K_NO); noPreguntarSesion = false; estado(); });
+    } else if (codigo()) {
+      linea('✔ Publicación automática activa', true);
+      linea('Lo que agregues, edites o quites llega solo a todos los celulares con la app (tarda 1 o 2 minutos).');
+      var pend = leer(K_COLA, []).length, esp = leer(K_VERIF, []).length;
+      if (pend) linea('Pendiente de enviar (falta internet): ' + pend);
+      if (esp) linea('Esperando la confirmación de GitHub: ' + esp);
+      chico('Cambiar código', function(){ borrar(K_COD); estado(); });
+    } else {
+      linea('Publicación automática: falta el código de administrador', true);
+      linea('Ingresalo una sola vez en este celular para que lo que agregues llegue solo a todos los demás.');
+      var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'characters'; inp.autocomplete = 'off'; inp.spellcheck = false;
+      inp.id = 'favlCodigoPanel'; inp.placeholder = 'Código de administrador';
+      inp.style.cssText = 'width:100%;box-sizing:border-box;margin-top:6px;padding:8px;font-size:15px;border:1px solid #888;border-radius:8px;background:#fff !important;color:#111 !important';
+      d.appendChild(inp);
+      var m = linea('');
+      m.style.color = '#a02020';
+      chico('Activar', function(){
+        var c = normalizarCodigo(inp.value);
+        if (c.length < 16) { m.textContent = 'El código tiene 20 letras y números. Revisalo.'; return; }
+        guardarCodigo(c); estado(); procesar();
+      });
+    }
+    box.appendChild(d);
+  }
+
+  /* ---------- arranque y reintentos ---------- */
+  function tic(){ if (document.hidden) return; procesar(); if (leer(K_VERIF, []).length) verificar(); }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) { bloqueoHasta = Math.min(bloqueoHasta, Date.now() + 2000); tic(); } });
+  window.addEventListener('online', function(){ bloqueoHasta = 0; tic(); });
+  setInterval(tic, 10000);
+  setTimeout(tic, 3000);
+  // si ya había una lista bajada antes de que este bloque existiera, también se limpia lo ya publicado
+  setTimeout(function(){
+    try {
+      var c = leer('favlInstrRemotoV1', null);
+      if (c && typeof c.version === 'number' && Array.isArray(c.instructores) && window.__favlAbsorber(c.instructores, c.version)) aplicarCambioInstructores(null);
+    } catch (e) {}
+  }, 1500);
 })();
 </script>
