@@ -8,7 +8,8 @@
 #   KEY_PASSWORD        contraseña de la clave
 #   VERSION_CODE        número de versión entero (siempre creciente)
 #   VERSION_NAME        texto de versión (se ve en Ajustes > Aplicaciones)
-# Opcional: EXPECTED_CERT_SHA256 (huella de la clave de FAVL), ANDROID_JAR
+# Opcional: EXPECTED_CERT_SHA256 (huella de la clave de FAVL), ANDROID_JAR,
+#           INSTR_VERSION (marca de tiempo), FAVL_SITE (https://<usuario>.github.io), INSTR_JSON_OUT (dónde dejar favl-instructores.json)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +18,9 @@ OUT="$(realpath -m "${1:?Falta el nombre del APK de salida}")"
 EXPECTED_CERT_SHA256="${EXPECTED_CERT_SHA256:-35543672e437a9400b0b27066f4cca0c3848e4565c6088b84b53a8b169c67c2c}"
 ANDROID_JAR="${ANDROID_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}"
 export KEYSTORE_PASSWORD KEY_PASSWORD
+# Marca de tiempo de la lista de instructores: la lleva el APK y también el favl-instructores.json publicado.
+export INSTR_VERSION="${INSTR_VERSION:-$(date +%s)}"
+export FAVL_SITE="${FAVL_SITE:-https://yapurnet.github.io}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -26,6 +30,9 @@ RAW="$(python3 "$ROOT/tools/pick_raw.py" "$ROOT/raw")"
 echo "    usando: $RAW"
 mkdir -p "$WORK/assets/www/js"
 python3 "$ROOT/tools/patch_examen.py" "$RAW" "$WORK/assets/www/examen.html"
+# Lista de instructores para la actualización automática (también valida que la lista del examen esté bien)
+INSTR_JSON_OUT="${INSTR_JSON_OUT:-$WORK/favl-instructores.json}"
+node "$ROOT/tools/extract_instructores.js" "$RAW" "$INSTR_JSON_OUT" "$INSTR_VERSION"
 
 echo "==> 2/6 Páginas de la app"
 cp "$ROOT/www/index.html" "$ROOT/www/cuestionario.html" "$WORK/assets/www/"

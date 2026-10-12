@@ -7,7 +7,8 @@ Hace exactamente esto sobre el archivo original (no toca la lista de instructore
   1) agrega la etiqueta viewport (pantalla de celular),
   2) usa jsPDF local (js/jspdf.umd.min.js) en vez de bajarlo de internet,
   3) el guardado del PDF pasa por el puente nativo de la app (descarga + compartir),
-  4) agrega las adaptaciones de la app (solo actúan dentro de la app) y el diseño para celular.
+  4) agrega las adaptaciones de la app (solo actúan dentro de la app), incluida la actualización automática
+     de instructores (usa las variables INSTR_VERSION y FAVL_SITE), y el diseño para celular.
 
 Si el examen cambia tanto que alguna pieza ya no se encuentra, el script FRENA con un
 mensaje claro (así nunca se publica una app a medias).
@@ -46,6 +47,15 @@ def main():
                 leer(os.path.join(HERE, "examen_guardar_pdf.js")), "guardado del PDF")
 
     shim = leer(os.path.join(HERE, "examen_app_shim.html"))
+    version = os.environ.get("INSTR_VERSION", "0").strip()
+    if not version.isdigit():
+        sys.exit("ERROR: INSTR_VERSION debe ser un número entero (marca de tiempo), no «%s»." % version)
+    sitio = os.environ.get("FAVL_SITE", "https://yapurnet.github.io").strip().rstrip("/")
+    if not sitio.startswith("https://") or any(ch in sitio for ch in "'\" \n<>"):
+        sys.exit("ERROR: FAVL_SITE inválido: %r" % sitio)
+    shim = shim.replace("__FAVL_INSTR_VERSION__", version).replace("__FAVL_SITE__", sitio)
+    if "__FAVL_" in shim:
+        sys.exit("ERROR: quedaron marcas __FAVL_ sin reemplazar en el shim.")
     css = leer(os.path.join(HERE, "examen_app.css.html"))
     c = aplicar(c, "</script></body>\n</html>\n", "</script>\n" + shim + css + "\n</body>\n</html>\n", "cierre del archivo")
 

@@ -43,4 +43,122 @@ function entregarPdfApp(nombre, b64){
     if (b) { var p = b.previousElementSibling; if (p && p.tagName === 'P') p.style.display = 'none'; b.style.display = 'none'; }
   } catch (e) {}
 })();
+</script><script>
+/* ===== Actualización automática de instructores (solo dentro de la app) =====
+   Al abrir la app (y al volver a ella) se baja la lista publicada en GitHub. Si es más nueva que la que
+   tiene la app, reemplaza la lista "de fábrica"; los instructores cargados a mano en este celular se
+   conservan. Si no hay internet se sigue usando la última lista bajada (o la que trae la app). */
+(function(){
+  if (!window.AndroidBridge) return;
+  var URL_LISTA = '__FAVL_SITE__/favl-instructores.json';
+  var VERSION_APP = __FAVL_INSTR_VERSION__;            // marca de tiempo de la lista que trae esta app
+  var LS_CACHE = 'favlInstrRemotoV1';
+  var aplicada = VERSION_APP;                           // versión de la lista que se está usando
+  var ultimoIntento = 0, enCurso = false;
+
+  function ls(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v){ try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+
+  // Valida y limpia una lista que viene de internet. Devuelve null si algo no cierra.
+  function validar(lista){
+    if (!Array.isArray(lista) || !lista.length || lista.length > 60) return null;
+    var out = [], ids = {};
+    for (var n = 0; n < lista.length; n++) {
+      var i = lista[n];
+      if (!i || typeof i.id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(i.id) || ids[i.id]) return null;
+      if (typeof i.nombre !== 'string' || !i.nombre.trim() || i.nombre.length > 120) return null;
+      if (typeof i.licencia !== 'string' || !i.licencia.trim() || i.licencia.length > 40) return null;
+      if (typeof i.logo !== 'string' || i.logo.length > 3000000 || !/^data:image\/(jpeg|png|webp|gif);base64,/.test(i.logo)) return null;
+      var emails = [];
+      if (Array.isArray(i.emails)) i.emails.forEach(function(e){ if (typeof e === 'string' && e.length < 200) emails.push(e); });
+      ids[i.id] = 1;
+      out.push({ id: i.id, nombre: i.nombre.trim(), licencia: i.licencia.trim(), emails: limpiarCorreos(emails), logo: i.logo });
+    }
+    return out;
+  }
+  function firma(lista){
+    return JSON.stringify(lista.map(function(i){
+      return [i.id, String(i.nombre || '').trim(), String(i.licencia || '').trim(), i.logo, limpiarCorreos(i.emails || []).join(',')];
+    }));
+  }
+
+  function aviso(texto){
+    try {
+      var d = document.createElement('div');
+      d.setAttribute('role', 'status');
+      d.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:88vw;z-index:2147483000;' +
+        'background:#12355b;color:#fff;padding:10px 16px;border-radius:12px;font:600 14px/1.35 system-ui,sans-serif;' +
+        'box-shadow:0 6px 20px rgba(0,0,0,.35);text-align:center';
+      d.textContent = texto;
+      document.body.appendChild(d);
+      setTimeout(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, 4500);
+    } catch (e) {}
+  }
+
+  function aplicarLista(lista, version, avisar){
+    var cambio = firma(lista) !== firma(INSTRUCTORES_BASE);
+    if (cambio) {
+      var previos = {};
+      INSTRUCTORES_BASE.forEach(function(b){ previos[b.id] = firma([b]); });
+      INSTRUCTORES_BASE.length = 0;
+      lista.forEach(function(i){ INSTRUCTORES_BASE.push(i); });
+      // si la lista publicada cambió los datos de un instructor, vale lo nuevo (se descarta la edición local vieja de ese instructor)
+      lista.forEach(function(i){
+        if (previos[i.id] && previos[i.id] !== firma([i]) && cambiosInstructores.editados) delete cambiosInstructores.editados[i.id];
+      });
+      aplicarCambioInstructores(null);
+    }
+    aplicada = version;
+    if (cambio && avisar) aviso('Lista de instructores actualizada');
+  }
+
+  function examenEnMarcha(){ try { return !!examenEnCurso; } catch (e) { return false; } }
+
+  // 1) al abrir: usar la última lista bajada si es más nueva que la de la app (sirve sin internet)
+  try {
+    var c = JSON.parse(ls(LS_CACHE) || 'null');
+    if (c && typeof c.version === 'number' && c.version > aplicada) {
+      var lc = validar(c.instructores);
+      if (lc) aplicarLista(lc, c.version, false);
+    }
+  } catch (e) {}
+
+  // 2) con internet: bajar la lista publicada
+  function sincronizar(){
+    if (enCurso) return;
+    enCurso = true; ultimoIntento = Date.now();
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var corte = setTimeout(function(){ if (ctrl) ctrl.abort(); }, 20000);
+    var fin = function(){ clearTimeout(corte); enCurso = false; };
+    fetch(URL_LISTA, { cache: 'no-cache', signal: ctrl ? ctrl.signal : undefined })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(j){
+        fin();
+        if (!j || typeof j.version !== 'number' || j.version <= aplicada) return;
+        var lista = validar(j.instructores);
+        if (!lista) return;
+        lsSet(LS_CACHE, JSON.stringify({ version: j.version, instructores: lista }));
+        if (examenEnMarcha()) return;                 // no se toca nada con un examen en curso: se aplica en la próxima sincronización
+        aplicarLista(lista, j.version, true);
+      })
+      .catch(function(){ fin(); });
+  }
+
+  function sincronizarSiHaceFalta(){ if (Date.now() - ultimoIntento > 5 * 60 * 1000) sincronizar(); }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) sincronizarSiHaceFalta(); });
+  window.addEventListener('online', sincronizarSiHaceFalta);
+  window.addEventListener('focus', sincronizarSiHaceFalta);
+  setTimeout(sincronizar, 800);
+  // por si el examen terminó y había una lista nueva guardada pendiente
+  setInterval(function(){
+    if (examenEnMarcha()) return;
+    try {
+      var c2 = JSON.parse(ls(LS_CACHE) || 'null');
+      if (c2 && typeof c2.version === 'number' && c2.version > aplicada) {
+        var l2 = validar(c2.instructores);
+        if (l2) aplicarLista(l2, c2.version, true);
+      }
+    } catch (e) {}
+  }, 30000);
+})();
 </script>
