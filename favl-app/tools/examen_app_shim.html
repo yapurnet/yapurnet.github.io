@@ -180,7 +180,7 @@ function entregarPdfApp(nombre, b64){
   var TOKEN_APK = '__FAVL_ISSUES_TOKEN__';       // clave que trae el APK (puede estar vacía)
   var API = 'https://api.github.com/repos/' + REPO;
   var K_TOK = 'favlGhKeyV1', K_COLA = 'favlColaPublicarV1', K_VERIF = 'favlVerificarV1',
-      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1';
+      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1', K_ERR = 'favlUltimoErrorGhV1';
   var RE_CLAVE = /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/;
   var SITE = '__FAVL_SITE__';
   var K_EMIT = 'favlClavesEmitidasV1', K_REG = 'favlClavesRegV1', K_CANJE = 'favlCanjeV1', K_EXIGIR = 'favlExigirLocalV1';
@@ -265,12 +265,12 @@ function entregarPdfApp(nombre, b64){
     if (conCuerpo) h['Content-Type'] = 'application/json';
     return h;
   }
-  function errorHttp(status){
+  function errorHttp(status, msg){
     var tipo = 'red';
     if (status === 401 || status === 403) tipo = 'auth';
     else if (status === 404 || status === 410) tipo = 'repo';
     else if (status === 422 || status === 400) tipo = 'datos';
-    return { tipo: tipo, status: status };
+    return { tipo: tipo, status: status, msg: String(msg || '').replace(/\s+/g, ' ').slice(0, 80) };
   }
   function crearPedido(cuerpoPedido, titulo){
     return fetch(API + '/issues', { method: 'POST', headers: cab(true), body: JSON.stringify({ title: titulo, body: cuerpoPedido }) })
@@ -279,7 +279,11 @@ function entregarPdfApp(nombre, b64){
           if (!j || typeof j.number !== 'number') throw { tipo: 'red', status: 0 };
           return { num: j.number };
         });
-        throw errorHttp(r.status);
+        // se guarda lo que contestó GitHub (por ejemplo «Bad credentials») para poder diagnosticar el problema
+        return r.text().then(function(t){
+          var m = ''; try { m = String(JSON.parse(t).message || ''); } catch (e) {}
+          throw errorHttp(r.status, m);
+        }, function(){ throw errorHttp(r.status); });
       }, function(){ throw { tipo: 'red', status: 0 }; });
   }
 
@@ -329,14 +333,19 @@ function entregarPdfApp(nombre, b64){
         } else if (tipo === 'auth' || tipo === 'repo') {
           bloqueoHasta = Date.now() + 5 * 60000;
           var vencida = !!(err && err.status === 401);
+          var eraGuardada = !!claveGuardada();
+          var dijo = (err && err.status) ? ' (GitHub dijo: ' + err.status + (err.msg ? ' ' + err.msg : '') + ')' : '';
+          guardar(K_ERR, { s: (err && err.status) || 0, m: (err && err.msg) || '', t: Date.now() });
           if (vencida) claveRechazadaPorGitHub(401);   // vencida o revocada: se vuelve a pedir una nueva
           if (!avisoAuth) {
             avisoAuth = true;
             toast(vencida
-              ? 'La clave de GitHub venció o dejó de valer. Pedile la nueva al administrador (o el APK actualizado) y cargala en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
+              ? (eraGuardada
+                  ? 'La clave de GitHub que cargaste en este celular ya no sirve' + dijo + '. Cargá una nueva en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
+                  : 'La clave de GitHub que trae esta app ya no sirve' + dijo + '. El administrador tiene que crear una clave nueva, cambiar el secreto FAVL_ISSUES_TOKEN en GitHub y volver a compilar el APK. Mientras tanto los cambios quedan guardados en este celular.')
               : (tipo === 'auth'
-                ? 'GitHub no dejó publicar: a la clave le falta el permiso «Issues: Read and write» sobre el repositorio (o hay demasiados pedidos juntos). Los cambios quedan guardados y se reintentan.'
-                : 'GitHub no encontró el repositorio o tiene desactivados los pedidos (Issues). Los cambios quedan guardados.'), 'err', true);
+                ? 'GitHub no dejó publicar' + dijo + ': a la clave le falta el permiso «Issues: Read and write» sobre el repositorio (o hay demasiados pedidos juntos). Los cambios quedan guardados y se reintentan.'
+                : 'GitHub no encontró el repositorio o tiene desactivados los pedidos (Issues)' + dijo + '. Los cambios quedan guardados.'), 'err', true);
           }
         } else {
           // el pedido es inválido: no tiene sentido reintentarlo
@@ -608,6 +617,11 @@ function entregarPdfApp(nombre, b64){
       }
     } else {
       linea('Publicación automática: falta la clave de GitHub', true);
+      if (RE_CLAVE.test(TOKEN_APK) && !claveDelApk()) {
+        linea('La clave que trae esta app fue rechazada por GitHub (venció o la borraron). El administrador tiene que crear una clave nueva, cambiar el secreto FAVL_ISSUES_TOKEN y volver a compilar el APK; o se puede pegar una clave nueva acá abajo.').style.color = '#ffd479';
+      }
+      var ue = leer(K_ERR, null);
+      if (ue && ue.s && Date.now() - ue.t < 24 * 3600 * 1000) linea('Último aviso de GitHub: ' + ue.s + (ue.m ? ' ' + ue.m : '') + ' (a las ' + dos(new Date(ue.t).getHours()) + ':' + dos(new Date(ue.t).getMinutes()) + ')').style.opacity = '.8';
       linea('Pegá la clave que te pasó el administrador, una sola vez en este celular, para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.');
       var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'off'; inp.setAttribute('autocorrect', 'off'); inp.autocomplete = 'off'; inp.spellcheck = false;
       inp.id = 'favlClavePanel'; inp.placeholder = 'Clave de GitHub (github_pat_…)';
@@ -699,12 +713,15 @@ function entregarPdfApp(nombre, b64){
       if (reg.t && reg.version * 1000 > em.okT + 10 * 60000) return { txt: 'Anulada o vencida', cls: 'x' };
       return { txt: '✔ Lista para usar · vence el ' + fechaDia(em.e), cls: 'ok' };
     }
+    if (!clave()) return { txt: 'Sin enviar: falta una clave de GitHub válida en esta app. Se envía apenas la haya.', cls: 'w' };
     return { txt: 'Publicando… (tarda 1 o 2 minutos)', cls: 'w' };
   }
 
   function haceFaltaClave(){
     if (clave()) return false;
-    msgClaves('Esta app no tiene la clave de GitHub, así que no puede crear claves personales. Pedí el APK actualizado o cargá la clave en Instructores > Publicación automática.', true);
+    msgClaves((RE_CLAVE.test(TOKEN_APK) && !claveDelApk())
+      ? 'GitHub rechazó la clave que trae esta app (venció o la borraron), así que no se pueden crear claves personales. El administrador tiene que crear una clave nueva y compilar el APK de nuevo.'
+      : 'Esta app no tiene la clave de GitHub, así que no puede crear claves personales. Pedí el APK actualizado o cargá la clave en Instructores > Publicación automática.', true);
     return true;
   }
   function msgClaves(txt, malo){
