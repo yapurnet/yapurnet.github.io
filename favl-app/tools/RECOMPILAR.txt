@@ -1,1 +1,2 @@
 Recompilación pedida el 2026-10-13 01:56 UTC (para que el APK incluya el secreto FAVL_ISSUES_TOKEN)
+Recompilación 2026-10-13T18:32:50Z: clave de GitHub renovada (secreto FAVL_ISSUES_TOKEN).
