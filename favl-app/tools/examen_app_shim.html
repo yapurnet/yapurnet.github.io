@@ -941,7 +941,7 @@ function entregarPdfApp(nombre, b64){
       var st = (e && e.status) || 0;
       if (e && (e.tipo === 'auth' || e.tipo === 'repo')) {
         claveRechazadaPorGitHub(st);
-        textoGate('La app no pudo validar la clave (problema de la app, no tuyo). Avisale a tu instructor.');
+        textoGate('La app no pudo validar tu clave por un problema de la propia app (no tuyo). Pedile a tu instructor el código del día e ingresalo acá.');
       } else if (e && e.tipo === 'red') {
         textoGate('Sin conexión con el servidor. Revisá tu internet y probá de nuevo: tu clave no se gastó.');
       } else {
@@ -960,10 +960,11 @@ function entregarPdfApp(nombre, b64){
     if (!texto.trim()) return validarOriginal.apply(this, arguments);
     var cod = normalizarCk(texto);
     if (RE_CK.test(cod)) return canjear(cod);
-    // otro código (el del día o uno fijo): sirve salvo que el instructor haya pedido exigir la clave personal
+    // otro código (el del día o uno fijo): sirve salvo que el instructor haya pedido exigir la clave personal.
+    // Si esta app no puede validar claves (no trae la clave de GitHub o GitHub la rechazó), no se exige: nadie queda afuera por un problema de la app.
     var reg = regGuardado();
-    if (Date.now() - (reg.t || 0) > 2 * 60000) { var nueva = await bajarRegistro(2500); if (nueva) reg = nueva; }
-    if (exigirEfectivo(reg)) {
+    if (clave() && Date.now() - (reg.t || 0) > 2 * 60000) { var nueva = await bajarRegistro(2500); if (nueva) reg = nueva; }
+    if (clave() && exigirEfectivo(reg)) {
       textoGate('Para rendir necesitás tu clave personal (formato XXXX-XXXX-XXXX), que te da tu instructor.');
       if (input) { input.value = ''; input.focus(); }
       return;
