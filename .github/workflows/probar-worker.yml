@@ -1,0 +1,26 @@
+name: Probar Worker FAVL
+
+# Corre las pruebas automáticas del Worker de Cloudflare cada vez que cambia su código.
+on:
+  push:
+    paths:
+      - 'favl-app/worker/**'
+      - '.github/workflows/probar-worker.yml'
+  pull_request:
+    paths:
+      - 'favl-app/worker/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pruebas del Worker
+        run: node --test favl-app/worker/worker.test.mjs

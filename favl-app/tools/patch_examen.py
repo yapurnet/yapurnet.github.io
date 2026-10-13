@@ -8,7 +8,8 @@ Hace exactamente esto sobre el archivo original (no toca la lista de instructore
   2) usa jsPDF local (js/jspdf.umd.min.js) en vez de bajarlo de internet,
   3) el guardado del PDF pasa por el puente nativo de la app (descarga + compartir),
   4) agrega las adaptaciones de la app (solo actúan dentro de la app), incluida la actualización automática
-     de instructores (usa INSTR_VERSION, FAVL_SITE, FAVL_REPO y FAVL_ISSUES_TOKEN), el aviso de versión nueva
+     de instructores (usa INSTR_VERSION, FAVL_SITE, FAVL_REPO y, o bien FAVL_WORKER_URL (Worker de Cloudflare, sin clave en la app),
+     o bien FAVL_ISSUES_TOKEN (modo anterior)), el aviso de versión nueva
      (usa VERSION_CODE y VERSION_NAME) y el diseño para celular.
 
 Si el examen cambia tanto que alguna pieza ya no se encuentra, el script FRENA con un
@@ -63,8 +64,17 @@ def main():
     token = os.environ.get("FAVL_ISSUES_TOKEN", "").strip()
     if token and not re.fullmatch(r"[A-Za-z0-9_]{20,255}", token):
         sys.exit("ERROR: FAVL_ISSUES_TOKEN tiene un formato inesperado (solo letras, números y _). Revisá el secreto en GitHub.")
+    # Worker de Cloudflare (recomendado): la app habla con él y NO lleva ninguna clave de GitHub. Si se indica, se ignora FAVL_ISSUES_TOKEN.
+    worker = os.environ.get("FAVL_WORKER_URL", "").strip().rstrip("/")
+    if worker:
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~-]+)*", worker):
+            sys.exit("ERROR: FAVL_WORKER_URL inválida (tiene que ser una dirección https:// sin espacios ni parámetros): %r" % worker)
+        if token:
+            print("AVISO: FAVL_WORKER_URL está definida: la app NO llevará la clave de GitHub (se ignora FAVL_ISSUES_TOKEN).")
+            token = ""
     shim = (shim.replace("__FAVL_INSTR_VERSION__", version).replace("__FAVL_SITE__", sitio)
-                .replace("__FAVL_REPO__", repo).replace("__FAVL_ISSUES_TOKEN__", token))
+                .replace("__FAVL_REPO__", repo).replace("__FAVL_ISSUES_TOKEN__", token)
+                .replace("__FAVL_WORKER_URL__", worker))
     if "__FAVL_" in shim:
         sys.exit("ERROR: quedaron marcas __FAVL_ sin reemplazar en el shim.")
     # Aviso de versión nueva de la app (usa VERSION_CODE y VERSION_NAME de la compilación)

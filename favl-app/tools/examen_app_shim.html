@@ -173,15 +173,49 @@ function entregarPdfApp(nombre, b64){
    FAVL_ISSUES_TOKEN): entonces cualquier instructor publica sin escribir nada. Si el APK no la trae (o venció),
    se pega a mano UNA vez en el celular. Sin clave, los cambios quedan solo en este celular (como antes).
    La misma vía sirve para las claves personales de examen (una por alumno, de un solo uso).
-   Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión. */
+   Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión.
+
+   DOS MODOS (según cómo se compiló la app):
+   · Con Worker (recomendado): la app NO trae ninguna clave de GitHub. Habla con un Worker de Cloudflare (WORKER) que la guarda
+     como secreto y revisa cada pedido. Los instructores publican con una «clave de publicación» que se escribe una vez en su
+     celular; los alumnos canjean su clave personal sin ninguna credencial (el Worker comprueba que la clave exista).
+   · Sin Worker (WORKER vacío): modo anterior, con la clave de GitHub dentro de la app o pegada a mano. */
 (function(){
   if (!window.AndroidBridge) return;
   var REPO = '__FAVL_REPO__';
-  var TOKEN_APK = '__FAVL_ISSUES_TOKEN__';       // clave que trae el APK (puede estar vacía)
+  var TOKEN_APK = '__FAVL_ISSUES_TOKEN__';       // clave que trae el APK (puede estar vacía; en modo Worker siempre vacía)
+  var WORKER = '__FAVL_WORKER_URL__';            // dirección del Worker de Cloudflare (vacía = modo anterior)
+  var MODO_W = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?(\/[A-Za-z0-9._~-]+)*$/.test(WORKER);
   var API = 'https://api.github.com/repos/' + REPO;
   var K_TOK = 'favlGhKeyV1', K_COLA = 'favlColaPublicarV1', K_VERIF = 'favlVerificarV1',
-      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1', K_ERR = 'favlUltimoErrorGhV1';
-  var RE_CLAVE = /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/;
+      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1', K_ERR = 'favlUltimoErrorGhV1',
+      K_PUBW = 'favlClavePublicarV1', K_SERV = 'favlServicioCaidoV1';
+  // formato de la clave que se escribe a mano: clave de GitHub (modo anterior) o clave de publicación (modo Worker)
+  var RE_CLAVE = MODO_W ? /^[A-Za-z0-9_-]{16,100}$/ : /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/;
+  // textos que cambian según el modo
+  var TX = MODO_W ? {
+    ph: 'Clave de publicación',
+    formato: 'Esa clave no parece válida: tiene entre 16 y 100 letras, números, guiones o guiones bajos, sin espacios. Copiala completa.',
+    rechazada: 'El servicio no aceptó la clave (está mal escrita o ya la cambiaron). Pedísela de nuevo al administrador.',
+    pedir: 'Para que llegue solo a todos los celulares que tienen la app, escribí la clave de publicación que te dio el administrador (se pide una sola vez y queda guardada solo en este celular). Si no la tenés, el cambio queda solo acá.',
+    falta: 'Publicación automática: falta la clave de publicación',
+    faltaAyuda: 'Escribí la clave de publicación que te dio el administrador, una sola vez en este celular, para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.',
+    activa: 'Lo que agregues, edites o quites llega solo a todos los celulares con la app (tarda 1 o 2 minutos).',
+    pasar: 'Para que otro instructor también pueda publicar desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la escriba una vez en su app. Es secreta: no se la des a los alumnos.',
+    sinClaveCk: 'Para crear claves personales hace falta la clave de publicación. Cargala en Modo instructor > Instructores > Publicación automática (te la da el administrador).',
+    sinEnviar: 'Sin enviar: falta la clave de publicación en este celular. Se envía apenas la cargues.'
+  } : {
+    ph: 'Clave de GitHub (github_pat_…)',
+    formato: 'Esa clave no parece válida: empieza con github_pat_ y hay que copiarla completa.',
+    rechazada: 'GitHub no aceptó la clave (vencida o mal copiada). Copiala de nuevo completa.',
+    pedir: 'Para que llegue solo a todos los celulares que tienen la app, pegá la clave de GitHub que te pasó el administrador (se pide una sola vez y queda guardada solo en este celular). Si no la tenés, el cambio queda solo acá.',
+    falta: 'Publicación automática: falta la clave de GitHub',
+    faltaAyuda: 'Pegá la clave que te pasó el administrador, una sola vez en este celular, para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.',
+    activa: 'Lo que agregues, edites o quites llega solo a todos los celulares con la app (tarda 1 o 2 minutos).',
+    pasar: 'Para que otro instructor también pueda agregar instructores desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la pegue una vez en su app. Es secreta: no se la des a los alumnos.',
+    sinClaveCk: 'Esta app no tiene la clave de GitHub, así que no puede crear claves personales. Pedí el APK actualizado o cargá la clave en Instructores > Publicación automática.',
+    sinEnviar: 'Sin enviar: falta una clave de GitHub válida en esta app. Se envía apenas la haya.'
+  };
   var SITE = '__FAVL_SITE__';
   var K_EMIT = 'favlClavesEmitidasV1', K_REG = 'favlClavesRegV1', K_CANJE = 'favlCanjeV1', K_EXIGIR = 'favlExigirLocalV1';
   var ALFA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';     // 31 caracteres, sin I, L, O, 0, 1 (no se confunden al copiar)
@@ -194,10 +228,17 @@ function entregarPdfApp(nombre, b64){
   function guardar(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
   function borrar(k){ try { localStorage.removeItem(k); } catch (e) {} }
   function limpiarClave(c){ return String(c == null ? '' : c).replace(/\s+/g, ''); }
-  function claveGuardada(){ var c = leer(K_TOK, ''); return (typeof c === 'string' && RE_CLAVE.test(c)) ? c : ''; }
-  // la clave pegada a mano manda; si no hay, la que trae el APK (salvo que GitHub ya la haya rechazado)
-  function claveDelApk(){ return RE_CLAVE.test(TOKEN_APK) && leer(K_MALA, '') !== TOKEN_APK.slice(-10) ? TOKEN_APK : ''; }
+  // dónde se guarda la clave que se escribe a mano (en modo Worker es la clave de publicación; una clave de GitHub vieja ya no se usa)
+  var K_CLAVE = MODO_W ? K_PUBW : K_TOK;
+  if (MODO_W) borrar(K_TOK);                // una clave de GitHub guardada por una versión anterior no debe quedar en el celular
+  function claveGuardada(){ var c = leer(K_CLAVE, ''); return (typeof c === 'string' && RE_CLAVE.test(c)) ? c : ''; }
+  // la clave pegada a mano manda; si no hay, la que trae el APK (salvo que GitHub ya la haya rechazado). En modo Worker el APK no trae ninguna.
+  function claveDelApk(){ return !MODO_W && /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/.test(TOKEN_APK) && leer(K_MALA, '') !== TOKEN_APK.slice(-10) ? TOKEN_APK : ''; }
   function clave(){ return claveGuardada() || claveDelApk(); }
+  function tieneClaveApkRechazada(){ return !MODO_W && /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/.test(TOKEN_APK) && !claveDelApk(); }
+  // modo Worker: si el servicio no responde por un problema suyo, no se exige la clave personal (nadie queda afuera por un problema de la app)
+  function servicioCaido(){ var t = leer(K_SERV, 0); return MODO_W && typeof t === 'number' && Date.now() - t < 30 * 60000; }
+  function puedeValidar(){ return MODO_W ? !servicioCaido() : !!clave(); }
 
   function nonce(){
     var a = '', i;
@@ -265,14 +306,47 @@ function entregarPdfApp(nombre, b64){
     if (conCuerpo) h['Content-Type'] = 'application/json';
     return h;
   }
-  function errorHttp(status, msg){
+  function errorHttp(status, msg, texto){
     var tipo = 'red';
-    if (status === 401 || status === 403) tipo = 'auth';
+    if (MODO_W) {
+      // el Worker contesta: 401 clave de publicación incorrecta · 400/413 pedido inválido · 409 la clave del alumno no sirve ·
+      // 429/503 hay que esperar · 5xx (y 404) el servicio tiene un problema
+      if (status === 401) tipo = 'auth';
+      else if (status === 409) tipo = 'canje';
+      else if (status === 400 || status === 413) tipo = 'datos';
+      else if (status === 429 || status === 503) tipo = 'red';
+      else if (status >= 500 || status === 404) tipo = 'servicio';
+    } else if (status === 401 || status === 403) tipo = 'auth';
     else if (status === 404 || status === 410) tipo = 'repo';
     else if (status === 422 || status === 400) tipo = 'datos';
-    return { tipo: tipo, status: status, msg: String(msg || '').replace(/\s+/g, ' ').slice(0, 80) };
+    return { tipo: tipo, status: status, msg: String(msg || '').replace(/\s+/g, ' ').slice(0, 80), texto: String(texto || '').slice(0, 220) };
+  }
+  // respuesta del Worker a un pedido nuevo: { ok:true, num } o { ok:false, motivo, texto }
+  function respuestaWorker(r){
+    if (r.status === 200) return r.json().then(function(j){
+      if (!j || typeof j.num !== 'number') throw errorHttp(500, 'respuesta rara');
+      return { num: j.num };
+    }, function(){ throw errorHttp(500, 'respuesta rara'); });
+    return r.text().then(function(t){
+      var j = null; try { j = JSON.parse(t); } catch (e) {}
+      throw errorHttp(r.status, (j && j.motivo) || '', j && j.texto);
+    }, function(){ throw errorHttp(r.status); });
+  }
+  function redCaida(){ throw { tipo: 'red', status: 0 }; }
+  function cabW(conCuerpo, tk){
+    var k = tk || clave(), h = {};
+    if (k) h['Authorization'] = 'Bearer ' + k;
+    if (conCuerpo) h['Content-Type'] = 'application/json';
+    return h;
+  }
+  // el alumno canjea su clave personal: no lleva ninguna credencial; el Worker comprueba que la clave exista y arma el pedido
+  // (text/plain evita la consulta previa de CORS). Contesta 409 con el motivo si la clave no sirve.
+  function pedirCanje(codigo){
+    return fetch(WORKER + '/canjear', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ codigo: codigo }), cache: 'no-store' })
+      .then(respuestaWorker, redCaida);
   }
   function crearPedido(cuerpoPedido, titulo){
+    if (MODO_W) return fetch(WORKER + '/publicar', { method: 'POST', headers: cabW(true), body: cuerpoPedido, cache: 'no-store' }).then(respuestaWorker, redCaida);
     return fetch(API + '/issues', { method: 'POST', headers: cab(true), body: JSON.stringify({ title: titulo, body: cuerpoPedido }) })
       .then(function(r){
         if (r.status === 201) return r.json().then(function(j){
@@ -330,14 +404,22 @@ function entregarPdfApp(nombre, b64){
         if (tipo === 'red') {
           bloqueoHasta = Date.now() + 60000;
           if (!avisoRed) { avisoRed = true; toast('Sin internet: el cambio quedó guardado y se publica solo cuando haya conexión.'); }
+        } else if (tipo === 'servicio') {
+          // modo Worker: el servicio de publicación tiene un problema propio (no es de la clave del instructor); se reintenta solo
+          bloqueoHasta = Date.now() + 2 * 60000;
+          guardar(K_ERR, { s: (err && err.status) || 0, m: (err && err.msg) || '', t: Date.now() });
+          if (!avisoRed) { avisoRed = true; toast('El servicio de publicación no responde ahora. El cambio quedó guardado y se reintenta solo; si sigue así, avisale al administrador.', 'err'); }
         } else if (tipo === 'auth' || tipo === 'repo') {
           bloqueoHasta = Date.now() + 5 * 60000;
           var vencida = !!(err && err.status === 401);
           var eraGuardada = !!claveGuardada();
-          var dijo = (err && err.status) ? ' (GitHub dijo: ' + err.status + (err.msg ? ' ' + err.msg : '') + ')' : '';
+          var dijo = (err && err.status) ? ' (' + (MODO_W ? 'el servicio dijo' : 'GitHub dijo') + ': ' + err.status + (err.msg ? ' ' + err.msg : '') + ')' : '';
           guardar(K_ERR, { s: (err && err.status) || 0, m: (err && err.msg) || '', t: Date.now() });
           if (vencida) claveRechazadaPorGitHub(401);   // vencida o revocada: se vuelve a pedir una nueva
-          if (!avisoAuth) {
+          if (!avisoAuth && MODO_W) {
+            avisoAuth = true;
+            toast('La clave de publicación guardada en este celular no es correcta o ya no sirve (la cambiaron). Pedile la actual al administrador y cargala en Modo instructor > Instructores > Publicación automática. Los cambios quedan guardados y se publican apenas la cargues.', 'err', true);
+          } else if (!avisoAuth) {
             avisoAuth = true;
             toast(vencida
               ? (eraGuardada
@@ -360,6 +442,15 @@ function entregarPdfApp(nombre, b64){
   /* ---------- verificar el resultado (GitHub contesta en el mismo pedido) ---------- */
   var verificando = false;
   function consultar(it){
+    if (MODO_W) {
+      // el Worker lee los comentarios del bot y contesta { estado: PENDIENTE | OK | REPETIDO | RECHAZADO, texto }
+      return fetch(WORKER + '/resultado/' + encodeURIComponent(it.num) + '?x=' + Date.now(), { cache: 'no-store' })
+        .then(function(r){ if (!r.ok) throw new Error('http'); return r.json(); })
+        .then(function(j){
+          if (j && /^(OK|REPETIDO|RECHAZADO)$/.test(j.estado)) return { tipo: j.estado, texto: String(j.texto || '').slice(0, 220) };
+          return null;
+        });
+    }
     return fetch(API + '/issues/' + it.num + '/comments?per_page=10&x=' + Date.now(), { headers: cab(false), cache: 'no-store' })
       .then(function(r){ if (!r.ok) throw new Error('http'); return r.json(); })
       .then(function(arr){
@@ -429,9 +520,11 @@ function entregarPdfApp(nombre, b64){
     sinClavePendientes.push([op, id, d]);
     if (!preguntando) pedirClave();
   }
-  function guardarClave(c){ guardar(K_TOK, c); avisoAuth = false; bloqueoHasta = 0; }
-  // GitHub contesta 401 si la clave está mal copiada o vencida; ante cualquier otra cosa (sin internet, etc.) se acepta
+  function guardarClave(c){ guardar(K_CLAVE, c); avisoAuth = false; avisoRed = false; bloqueoHasta = 0; }
+  // GitHub (o el Worker) contesta 401 si la clave está mal copiada, vencida o fue cambiada; ante cualquier otra cosa (sin internet, etc.) se acepta
   function validarClave(c){
+    if (MODO_W) return fetch(WORKER + '/clave', { headers: cabW(false, c), cache: 'no-store' })
+      .then(function(r){ return (r.status === 401 || r.status === 429) ? 'mala' : 'ok'; }, function(){ return 'red'; });
     return fetch(API, { headers: cab(false, c), cache: 'no-store' })
       .then(function(r){ return r.status === 401 ? 'mala' : 'ok'; }, function(){ return 'red'; });
   }
@@ -448,10 +541,10 @@ function entregarPdfApp(nombre, b64){
       var caja = document.createElement('div');
       caja.style.cssText = 'background:#fff;color:#111;border-radius:14px;max-width:420px;width:100%;padding:18px;font:15px/1.4 system-ui,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4)';
       var t = document.createElement('b'); t.textContent = '¿Publicar este cambio a todos los celulares?'; t.style.cssText = 'display:block;font-size:17px;margin-bottom:6px';
-      var p = document.createElement('div'); p.textContent = 'Para que llegue solo a todos los celulares que tienen la app, pegá la clave de GitHub que te pasó el administrador (se pide una sola vez y queda guardada solo en este celular). Si no la tenés, el cambio queda solo acá.';
+      var p = document.createElement('div'); p.textContent = TX.pedir;
       p.style.cssText = 'margin-bottom:10px';
       var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'off'; inp.setAttribute('autocorrect', 'off'); inp.autocomplete = 'off'; inp.spellcheck = false;
-      inp.id = 'favlClaveModal'; inp.placeholder = 'Clave de GitHub (github_pat_…)'; inp.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #888;border-radius:8px;margin:0 0 6px 0;background:#fff !important;color:#111 !important';
+      inp.id = 'favlClaveModal'; inp.placeholder = TX.ph; inp.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #888;border-radius:8px;margin:0 0 6px 0;background:#fff !important;color:#111 !important';
       var msg = document.createElement('div'); msg.style.cssText = 'color:#a02020;min-height:18px;font-size:13px;margin-bottom:8px';
       var fila = document.createElement('div'); fila.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
       function boton(txt, primario){
@@ -467,11 +560,11 @@ function entregarPdfApp(nombre, b64){
       function cerrar(){ if (fondo.parentNode) fondo.parentNode.removeChild(fondo); preguntando = false; }
       bOk.onclick = function(){
         var c = limpiarClave(inp.value);
-        if (!RE_CLAVE.test(c)) { msg.textContent = 'Esa clave no parece válida: empieza con github_pat_ y hay que copiarla completa.'; return; }
+        if (!RE_CLAVE.test(c)) { msg.textContent = TX.formato; return; }
         msg.textContent = 'Comprobando la clave…'; bOk.disabled = true;
         validarClave(c).then(function(r){
           bOk.disabled = false;
-          if (r === 'mala') { msg.textContent = 'GitHub no aceptó la clave (vencida o mal copiada). Copiala de nuevo completa.'; return; }
+          if (r === 'mala') { msg.textContent = TX.rechazada; return; }
           guardarClave(c); cerrar(); soltarPendientes(true); estado();
         });
       };
@@ -598,14 +691,14 @@ function entregarPdfApp(nombre, b64){
       chico('Activar', function(){ borrar(K_NO); noPreguntarSesion = false; estado(); });
     } else if (clave()) {
       linea('✔ Publicación automática activa', true);
-      linea('Lo que agregues, edites o quites llega solo a todos los celulares con la app (tarda 1 o 2 minutos).');
+      linea(TX.activa);
       var pend = leer(K_COLA, []).length, esp = leer(K_VERIF, []).length;
       if (pend) linea('Pendiente de enviar (falta internet): ' + pend);
       if (esp) linea('Esperando la confirmación de GitHub: ' + esp);
       if (claveGuardada()) {
-        linea('Para que otro instructor también pueda agregar instructores desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la pegue una vez en su app. Es secreta: no se la des a los alumnos.');
+        linea(TX.pasar);
         chico('Copiar clave', function(){ copiarClave(); });
-        chico('Cambiar clave', function(){ borrar(K_TOK); claveVisible = false; estado(); });
+        chico('Cambiar clave', function(){ borrar(K_CLAVE); claveVisible = false; estado(); });
       } else {
         linea('Esta app ya trae la clave: cualquier instructor puede agregar, editar o quitar instructores desde su celular sin escribir nada.');
       }
@@ -617,25 +710,25 @@ function entregarPdfApp(nombre, b64){
         linea('Tocá el recuadro, mantené apretado y elegí «Copiar».');
       }
     } else {
-      linea('Publicación automática: falta la clave de GitHub', true);
-      if (RE_CLAVE.test(TOKEN_APK) && !claveDelApk()) {
+      linea(TX.falta, true);
+      if (tieneClaveApkRechazada()) {
         linea('La clave que trae esta app fue rechazada por GitHub (venció o la borraron). El administrador tiene que crear una clave nueva, cambiar el secreto FAVL_ISSUES_TOKEN y volver a compilar el APK; o se puede pegar una clave nueva acá abajo.').style.color = '#ffd479';
       }
       var ue = leer(K_ERR, null);
-      if (ue && ue.s && Date.now() - ue.t < 24 * 3600 * 1000) linea('Último aviso de GitHub: ' + ue.s + (ue.m ? ' ' + ue.m : '') + ' (a las ' + dos(new Date(ue.t).getHours()) + ':' + dos(new Date(ue.t).getMinutes()) + ')').style.opacity = '.8';
-      linea('Pegá la clave que te pasó el administrador, una sola vez en este celular, para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.');
+      if (ue && ue.s && Date.now() - ue.t < 24 * 3600 * 1000) linea('Último aviso de ' + (MODO_W ? 'el servicio' : 'GitHub') + ': ' + ue.s + (ue.m ? ' ' + ue.m : '') + ' (a las ' + dos(new Date(ue.t).getHours()) + ':' + dos(new Date(ue.t).getMinutes()) + ')').style.opacity = '.8';
+      linea(TX.faltaAyuda);
       var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'off'; inp.setAttribute('autocorrect', 'off'); inp.autocomplete = 'off'; inp.spellcheck = false;
-      inp.id = 'favlClavePanel'; inp.placeholder = 'Clave de GitHub (github_pat_…)';
+      inp.id = 'favlClavePanel'; inp.placeholder = TX.ph;
       inp.style.cssText = 'width:100%;box-sizing:border-box;margin-top:6px;padding:8px;font-size:15px;border:1px solid #888;border-radius:8px;background:#fff !important;color:#111 !important';
       d.appendChild(inp);
       var m = linea('');
       m.style.color = '#a02020';
       var bAct = chico('Activar', function(){
         var c = limpiarClave(inp.value);
-        if (!RE_CLAVE.test(c)) { m.textContent = 'Esa clave no parece válida: empieza con github_pat_ y hay que copiarla completa.'; return; }
+        if (!RE_CLAVE.test(c)) { m.textContent = TX.formato; return; }
         m.textContent = 'Comprobando la clave…'; bAct.disabled = true;
         validarClave(c).then(function(r){
-          if (r === 'mala') { bAct.disabled = false; m.textContent = 'GitHub no aceptó la clave (vencida o mal copiada). Copiala de nuevo completa.'; return; }
+          if (r === 'mala') { bAct.disabled = false; m.textContent = TX.rechazada; return; }
           guardarClave(c); estado(); procesar();
         });
       });
@@ -714,15 +807,15 @@ function entregarPdfApp(nombre, b64){
       if (reg.t && reg.version * 1000 > em.okT + 10 * 60000) return { txt: 'Anulada o vencida', cls: 'x' };
       return { txt: '✔ Lista para usar · vence el ' + fechaDia(em.e), cls: 'ok' };
     }
-    if (!clave()) return { txt: 'Sin enviar: falta una clave de GitHub válida en esta app. Se envía apenas la haya.', cls: 'w' };
+    if (!clave()) return { txt: TX.sinEnviar, cls: 'w' };
     return { txt: 'Publicando… (tarda 1 o 2 minutos)', cls: 'w' };
   }
 
   function haceFaltaClave(){
     if (clave()) return false;
-    msgClaves((RE_CLAVE.test(TOKEN_APK) && !claveDelApk())
+    msgClaves(tieneClaveApkRechazada()
       ? 'GitHub rechazó la clave que trae esta app (venció o la borraron), así que no se pueden crear claves personales. El administrador tiene que crear una clave nueva y compilar el APK de nuevo.'
-      : 'Esta app no tiene la clave de GitHub, así que no puede crear claves personales. Pedí el APK actualizado o cargá la clave en Instructores > Publicación automática.', true);
+      : TX.sinClaveCk, true);
     return true;
   }
   function msgClaves(txt, malo){
@@ -894,7 +987,7 @@ function entregarPdfApp(nombre, b64){
     try { document.getElementById('codigoAcceso').removeEventListener('keydown', onEnterCodigoAcceso); } catch (e) {}
   }
   function claveRechazadaPorGitHub(status){
-    if (status === 401) { if (claveGuardada()) borrar(K_TOK); else guardar(K_MALA, TOKEN_APK.slice(-10)); }
+    if (status === 401) { if (claveGuardada()) borrar(K_CLAVE); else if (!MODO_W) guardar(K_MALA, TOKEN_APK.slice(-10)); }
   }
   async function canjear(cod){
     if (canjeando) return;
@@ -910,12 +1003,15 @@ function entregarPdfApp(nombre, b64){
         for (i = 0; i < reg.claves.length; i++) if (reg.claves[i].h === h) k = reg.claves[i];
         if (k && k.u > 0) { textoGate('Esta clave ya fue usada. Pedile una nueva a tu instructor.'); return; }
         if (k && k.e <= Date.now()) { textoGate('Esta clave venció. Pedile una nueva a tu instructor.'); return; }
-        if (!clave()) { textoGate('Esta versión de la app no puede validar claves personales. Actualizá la app o pedile a tu instructor otra forma de ingresar.'); return; }
+        if (!MODO_W && !clave()) { textoGate('Esta versión de la app no puede validar claves personales. Actualizá la app o pedile a tu instructor otra forma de ingresar.'); return; }
       }
       gateOcupado(true);
       textoGate('Validando tu clave… puede tardar hasta 2 minutos. No cierres la app.');
       if (num == null) {
-        var r = await crearPedido(JSON.stringify({ v: 1, n: nonce(), t: Date.now(), op: 'ck-use', id: h }), 'FAVL-INSTR ck-use ' + nonce().slice(0, 8));
+        // modo Worker: se manda la clave al Worker (por HTTPS), que comprueba que exista y arma el pedido con su hash; sin Worker, el pedido se arma acá
+        var r = MODO_W ? await pedirCanje(cod)
+                       : await crearPedido(JSON.stringify({ v: 1, n: nonce(), t: Date.now(), op: 'ck-use', id: h }), 'FAVL-INSTR ck-use ' + nonce().slice(0, 8));
+        if (MODO_W) borrar(K_SERV);          // el servicio contestó: está andando
         num = r.num;
         guardar(K_CANJE, { h: h, num: num, t: Date.now() });
       }
@@ -940,12 +1036,22 @@ function entregarPdfApp(nombre, b64){
       abrirExamen();
     } catch (e) {
       var st = (e && e.status) || 0;
-      if (e && (e.tipo === 'auth' || e.tipo === 'repo')) {
-        claveRechazadaPorGitHub(st);
+      if (e && e.tipo === 'canje') {
+        // el Worker dice que la clave no sirve (no existe, anulada, usada o vencida): no se gastó nada
+        borrar(K_SERV); borrar(K_CANJE);
+        textoGate(e.texto || 'La clave no es válida. Pedile una nueva a tu instructor.');
+        if (input) { input.value = ''; }
+      } else if (e && (e.tipo === 'auth' || e.tipo === 'repo' || e.tipo === 'servicio')) {
+        if (MODO_W) guardar(K_SERV, Date.now());     // modo Worker: el servicio tiene un problema; por un rato no se exige la clave personal
+        else claveRechazadaPorGitHub(st);
         textoGate('La app no pudo validar tu clave por un problema de la propia app (no tuyo). Pedile a tu instructor el código del día e ingresalo acá.' +
           ((window.__favlVersion && window.__favlVersion.hayNueva()) ? ' Además hay una versión nueva de la app: actualizala.' : ''));
+      } else if (e && e.tipo === 'red' && (st === 429 || st === 503)) {
+        textoGate('Hay muchos intentos seguidos o el servicio está ocupado. Esperá un minuto y probá de nuevo: tu clave no se gastó.');
       } else if (e && e.tipo === 'red') {
         textoGate('Sin conexión con el servidor. Revisá tu internet y probá de nuevo: tu clave no se gastó.');
+      } else if (e && e.tipo === 'datos' && e.texto) {
+        textoGate(e.texto);
       } else {
         textoGate('No se pudo validar la clave. Probá de nuevo; si sigue igual, avisale a tu instructor.');
       }
@@ -963,10 +1069,10 @@ function entregarPdfApp(nombre, b64){
     var cod = normalizarCk(texto);
     if (RE_CK.test(cod)) return canjear(cod);
     // otro código (el del día o uno fijo): sirve salvo que el instructor haya pedido exigir la clave personal.
-    // Si esta app no puede validar claves (no trae la clave de GitHub o GitHub la rechazó), no se exige: nadie queda afuera por un problema de la app.
+    // Si esta app no puede validar claves (no trae la clave de GitHub o GitHub la rechazó; en modo Worker, el servicio falló hace poco), no se exige: nadie queda afuera por un problema de la app.
     var reg = regGuardado();
-    if (clave() && Date.now() - (reg.t || 0) > 2 * 60000) { var nueva = await bajarRegistro(2500); if (nueva) reg = nueva; }
-    if (clave() && exigirEfectivo(reg)) {
+    if (puedeValidar() && Date.now() - (reg.t || 0) > 2 * 60000) { var nueva = await bajarRegistro(2500); if (nueva) reg = nueva; }
+    if (puedeValidar() && exigirEfectivo(reg)) {
       textoGate('Para rendir necesitás tu clave personal (formato XXXX-XXXX-XXXX), que te da tu instructor.');
       if (input) { input.value = ''; input.focus(); }
       return;

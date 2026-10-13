@@ -10,6 +10,7 @@ on:
       - 'favl-app/www/**'
       - 'favl-app/app/**'
       - 'favl-app/tools/**'
+      - 'favl-app/worker/worker-url.txt'
       - '.github/workflows/build-favl-apk.yml'
   workflow_dispatch:
 
@@ -40,7 +41,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          # Clave de GitHub que lleva la app para publicar los cambios de instructores (solo abre pedidos en este repositorio). Opcional.
+          # Dirección del Worker de Cloudflare (no es secreta). Si está, la app NO lleva ninguna clave de GitHub.
+          # Se puede poner acá (Settings > Secrets and variables > Actions > Variables > FAVL_WORKER_URL) o en el archivo favl-app/worker/worker-url.txt.
+          FAVL_WORKER_URL: ${{ vars.FAVL_WORKER_URL }}
+          # Modo anterior (sin Worker): clave de GitHub que lleva la app dentro del APK. Con Worker se ignora y conviene borrar este secreto.
           FAVL_ISSUES_TOKEN: ${{ secrets.FAVL_ISSUES_TOKEN }}
         run: |
           set -euo pipefail

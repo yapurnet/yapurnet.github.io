@@ -54,6 +54,14 @@ para pegarlo en Chrome). Nunca bloquea la app, y sin internet no muestra nada.
 - En Modo instructor > Instructores se ve la versión de cada celular, y en la pantalla de acceso al examen aparece «App 12.xx».
 - La compilación siguiente conserva el `"minimo"` y la `"nota"` que dejaste en el archivo.
 
+## Clave de GitHub fuera de la app (Worker de Cloudflare)
+
+Por defecto la app lleva dentro del APK una clave de GitHub (secreto `FAVL_ISSUES_TOKEN`) para publicar los cambios de
+instructores y las claves de examen. Como un APK es público, esa clave se puede sacar. La alternativa recomendada es
+el **Worker de Cloudflare** (`favl-app/worker/`): la clave de GitHub vive solo en Cloudflare y la app únicamente conoce
+su dirección. Se activa poniendo la dirección en `favl-app/worker/worker-url.txt` (o en la variable `FAVL_WORKER_URL`
+de Actions); entonces el APK se compila sin ninguna clave de GitHub. Pasos completos en `favl-app/worker/LEEME.md`.
+
 ## Si algo falla
 
 Pestaña *Actions* → entrar al intento con la cruz roja → leer el mensaje del paso que falló:

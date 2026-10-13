@@ -1,0 +1,3 @@
+# Dirección del Worker de Cloudflare que usa la app (por ejemplo https://favl.TU-USUARIO.workers.dev).
+# Dejá esta línea vacía (o solo comentarios) para compilar la app en el modo anterior, con la clave de GitHub dentro del APK.
+# Al cambiar este archivo, GitHub compila solo una versión nueva de la app.
