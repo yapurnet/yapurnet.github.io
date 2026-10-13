@@ -1,6 +1,6 @@
 name: Instructores automático
 
-# Cuando alguien agrega, edita o quita un instructor dentro de la app (con el código de administrador),
+# Cuando se agrega, edita o quita un instructor dentro de la app (en el celular que tiene la clave de GitHub),
 # la app abre un pedido (issue) llamado «FAVL-INSTR …» en este repositorio. Este proceso lo revisa,
 # lo aplica y publica la lista nueva (favl-instructores.json): las apps instaladas la bajan solas.
 # También se puede lanzar a mano desde Actions > «Instructores automático» > Run workflow
@@ -36,5 +36,4 @@ jobs:
       - name: Aplicar pedidos y publicar la lista
         env:
           GH_TOKEN: ${{ github.token }}
-          FAVL_ADMIN_CODE: ${{ secrets.FAVL_ADMIN_CODE }}
         run: bash favl-app/tools/aplicar_pedidos.sh

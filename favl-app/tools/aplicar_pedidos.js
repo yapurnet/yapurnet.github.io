@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// Aplica los pedidos de instructores que mandan las apps (issues «FAVL-INSTR …» firmados).
+// Aplica los pedidos de instructores que mandan las apps (issues «FAVL-INSTR …»).
 //   Uso: node aplicar_pedidos.js <issues.json> <cambios.json> <resultado.json> <examen_original.html>
-//   Entorno: FAVL_ADMIN_CODE (código de administrador), FAVL_OWNER (dueño del repositorio)
+//   Entorno: FAVL_OWNER (dueño del repositorio)
 //
 // Seguridad: el texto de los issues es PÚBLICO y no es confiable. Un pedido solo se aplica si
-//   1) lo abrió el dueño del repositorio (la app usa su clave de GitHub),
-//   2) trae una firma HMAC-SHA256 válida calculada con el código de administrador (el código nunca viaja),
-//   3) su identificador único (nonce) no se aplicó antes (no se puede repetir un pedido viejo),
-//   4) todos sus datos pasan una validación estricta.
+//   1) lo abrió el dueño del repositorio: cualquiera puede abrir issues, pero a nombre del dueño solo se puede
+//      con su clave de GitHub, que está únicamente en el celular de quien carga los instructores,
+//   2) su identificador único (nonce) no se aplicó antes (no se puede repetir un pedido viejo),
+//   3) todos sus datos pasan una validación estricta.
 // Nada del texto del issue se usa como comando ni se escribe en los comentarios.
 'use strict';
 const fs = require('fs');
-const crypto = require('crypto');
 const L = require('./instructores_lib.js');
 
 const [, , issuesPath, cambiosPath, resultadoPath, rawPath] = process.argv;
@@ -25,8 +24,6 @@ const MAX_INSTRUCTORES = 50;
 const MAX_CUERPO = 70000;
 const MAX_LOGO = 200000;
 
-function normalizarCodigo(c) { return String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
-const codigo = normalizarCodigo(process.env.FAVL_ADMIN_CODE);
 const dueno = String(process.env.FAVL_OWNER || '').toLowerCase();
 
 function textoSeguro(s, min, max) {
@@ -34,13 +31,6 @@ function textoSeguro(s, min, max) {
   const t = s.replace(/\s+/g, ' ').trim();
   if (t.length < min || t.length > max || L.RE_CONTROL.test(t) || /[<>]/.test(t)) return null;
   return t;
-}
-
-function firmaValida(p, f) {
-  if (!codigo || typeof f !== 'string' || !/^[0-9a-f]{64}$/i.test(f)) return false;
-  const esperada = crypto.createHmac('sha256', codigo).update(p, 'utf8').digest();
-  const recibida = Buffer.from(f, 'hex');
-  return recibida.length === esperada.length && crypto.timingSafeEqual(recibida, esperada);
 }
 
 let issues = [];
@@ -131,13 +121,8 @@ issues.slice(0, MAX_PEDIDOS_POR_CORRIDA).forEach(it => {
     return resultado(n, 'ignorado', '');
   }
   if (typeof it.body !== 'string' || it.body.length > MAX_CUERPO) return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.');
-  let cuerpo;
-  try { cuerpo = JSON.parse(it.body); } catch (e) { return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.'); }
-  if (!cuerpo || typeof cuerpo.p !== 'string' || typeof cuerpo.f !== 'string') return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.');
-  if (!codigo) return resultado(n, 'rechazado', 'Falta configurar el secreto FAVL_ADMIN_CODE en GitHub.');
-  if (!firmaValida(cuerpo.p, cuerpo.f)) return resultado(n, 'rechazado', 'Firma inválida: el código de administrador de la app no coincide con el de GitHub.');
   let p;
-  try { p = JSON.parse(cuerpo.p); } catch (e) { return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.'); }
+  try { p = JSON.parse(it.body); } catch (e) { return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.'); }
   if (!p || p.v !== 1 || typeof p.n !== 'string' || !/^[a-f0-9]{16,32}$/.test(p.n) || (p.op !== 'set' && p.op !== 'del')) {
     return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.');
   }
@@ -150,7 +135,7 @@ issues.slice(0, MAX_PEDIDOS_POR_CORRIDA).forEach(it => {
     const r = aplicarDel(p);
     error = r.error || null; aviso = r.aviso || '';
   }
-  cambios.aplicados.push(p.n);          // pedido con firma válida: no se vuelve a procesar
+  cambios.aplicados.push(p.n);          // pedido del dueño con formato válido: no se vuelve a procesar
   huboCambios = true;                    // (también si se rechazó: el nonce queda registrado)
   if (error) return resultado(n, 'rechazado', error);
   resultado(n, 'aplicado', aviso || 'Listo: el cambio ya está publicado para todos los celulares.');

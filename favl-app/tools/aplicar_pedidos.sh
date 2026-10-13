@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Procesa los pedidos de instructores que mandan las apps y publica la lista nueva.
 # Lo ejecuta el workflow «Instructores automático» (ver .github/workflows/instructores-auto.yml).
-# Entorno: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_REPOSITORY_OWNER, FAVL_ADMIN_CODE
+# Entorno: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_REPOSITORY_OWNER
 # Opcional: FAVL_NO_PUSH=1 (solo para pruebas: no sube nada)
 set -euo pipefail
 

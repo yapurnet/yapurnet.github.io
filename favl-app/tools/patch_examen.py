@@ -8,7 +8,7 @@ Hace exactamente esto sobre el archivo original (no toca la lista de instructore
   2) usa jsPDF local (js/jspdf.umd.min.js) en vez de bajarlo de internet,
   3) el guardado del PDF pasa por el puente nativo de la app (descarga + compartir),
   4) agrega las adaptaciones de la app (solo actúan dentro de la app), incluida la actualización automática
-     de instructores (usa INSTR_VERSION, FAVL_SITE, FAVL_REPO y FAVL_ISSUES_TOKEN), y el diseño para celular.
+     de instructores (usa INSTR_VERSION, FAVL_SITE y FAVL_REPO), y el diseño para celular.
 
 Si el examen cambia tanto que alguna pieza ya no se encuentra, el script FRENA con un
 mensaje claro (así nunca se publica una app a medias).
@@ -57,12 +57,8 @@ def main():
     repo = os.environ.get("FAVL_REPO", "yapurnet/yapurnet.github.io").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         sys.exit("ERROR: FAVL_REPO inválido (debe ser usuario/repositorio): %r" % repo)
-    # Clave de GitHub (solo permite abrir pedidos en este repositorio). Vacía = la app no publica cambios.
-    token = os.environ.get("FAVL_ISSUES_TOKEN", "").strip()
-    if token and not re.fullmatch(r"[A-Za-z0-9_]{20,255}", token):
-        sys.exit("ERROR: FAVL_ISSUES_TOKEN tiene un formato inesperado (solo letras, números y _). Revisá el secreto en GitHub.")
     shim = (shim.replace("__FAVL_INSTR_VERSION__", version).replace("__FAVL_SITE__", sitio)
-                .replace("__FAVL_REPO__", repo).replace("__FAVL_ISSUES_TOKEN__", token))
+                .replace("__FAVL_REPO__", repo))
     if "__FAVL_" in shim:
         sys.exit("ERROR: quedaron marcas __FAVL_ sin reemplazar en el shim.")
     css = leer(os.path.join(HERE, "examen_app.css.html"))
