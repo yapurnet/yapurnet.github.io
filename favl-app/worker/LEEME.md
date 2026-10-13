@@ -26,11 +26,16 @@ Entrá a <https://dash.cloudflare.com/sign-up>, creá la cuenta (plan **Free**, 
 y confirmá el correo. No pide tarjeta.
 
 ### 2. Crear el Worker
-1. En el panel: **Workers & Pages** → **Create** → **Create Worker** (o «Start with Hello World!»).
-2. Nombre: `favl` → **Deploy**. (La primera vez te pide elegir un nombre de subdominio `workers.dev`: elegí el que quieras.)
-3. Botón **Edit code**: borrá todo lo que haya y pegá el contenido completo de
-   [`favl-worker.js`](favl-worker.js) (abrilo en GitHub → botón *Copy raw file*) → **Deploy**.
-4. Anotá la dirección: algo como `https://favl.TU-SUBDOMINIO.workers.dev`.
+**Camino recomendado (sin pegar código; sirve también desde el celular):** que Cloudflare lo tome del repositorio.
+1. En el panel: **Workers & Pages** → **Create application** → **Get started** junto a **Import a repository**.
+2. Elegí **GitHub**, autorizá la app de Cloudflare solo sobre el repositorio `yapurnet.github.io` y seleccionalo.
+3. Nombre del proyecto: **`favl`** (tiene que ser igual al `name` de `wrangler.jsonc`, si no la compilación falla).
+   **Root directory:** `/favl-app/worker`. Dejá el resto como viene (comando de despliegue `npx wrangler deploy`) → **Save and Deploy**.
+4. La primera vez te pide elegir un subdominio `workers.dev`: elegí el que quieras. Anotá la dirección: `https://favl.TU-SUBDOMINIO.workers.dev`.
+Ventaja: cuando se cambie `favl-worker.js` en el repositorio, Cloudflare lo publica solo (los secretos se conservan).
+
+**Camino alternativo (pegando el código a mano):** *Workers & Pages* → *Create* → *Create Worker* → nombre `favl` → *Deploy* →
+*Edit code* → borrar todo y pegar el contenido de [`favl-worker.js`](favl-worker.js) → *Deploy*.
 
 ### 3. Crear una clave de GitHub NUEVA para el Worker
 (No reutilices la que está dentro de los APK anteriores: esa ya hay que dar por conocida.)
@@ -90,7 +95,7 @@ Los alumnos no necesitan nada.
 - **Emergencia** (el Worker o GitHub no andan y se exige la clave personal): en el repositorio editá `favl-claves.json` y poné `"exigir": false`.
   En 1 o 2 minutos todos pueden entrar con el código del día.
 - **Si en algún lugar el celular de un alumno no llega a `workers.dev`** (algunas redes de escuelas o empresas lo bloquean), la app dice «Sin conexión con el servidor»: que pruebe con datos móviles, o apagá «Exigir clave personal» para esa jornada.
-- **Actualizar el Worker** (si Claude cambia `favl-worker.js`): repetir el paso 2.3 (pegar el código nuevo y *Deploy*). Los secretos se conservan.
+- **Actualizar el Worker** (si Claude cambia `favl-worker.js`): con el camino recomendado se publica solo; con el alternativo hay que pegar el código nuevo y *Deploy*. Los secretos se conservan.
 - Las pruebas automáticas están en `worker.test.mjs` (`node --test favl-app/worker/worker.test.mjs`).
 
 ## Qué protege y qué no

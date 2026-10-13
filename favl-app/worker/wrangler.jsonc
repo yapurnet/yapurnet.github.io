@@ -1,0 +1,10 @@
+// Configuración para que Cloudflare compile y publique el Worker directamente desde este repositorio
+// (Workers & Pages > Create application > Import a repository, con «Root directory» = /favl-app/worker).
+// El nombre tiene que ser igual al del Worker en Cloudflare. Los secretos (GITHUB_TOKEN, CLAVES_PUBLICAR) NO van acá:
+// se cargan en el panel de Cloudflare y se conservan en cada publicación.
+{
+  "name": "favl",
+  "main": "favl-worker.js",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true
+}
