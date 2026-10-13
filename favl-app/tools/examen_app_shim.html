@@ -320,7 +320,7 @@ function entregarPdfApp(nombre, b64){
           if (!avisoAuth) {
             avisoAuth = true;
             toast(vencida
-              ? 'La clave de GitHub venció o dejó de valer. Cargá una nueva en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
+              ? 'La clave de GitHub venció o dejó de valer. Pedile la nueva al administrador y cargala en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
               : (tipo === 'auth'
                 ? 'GitHub no dejó publicar: a la clave le falta el permiso «Issues: Read and write» sobre el repositorio (o hay demasiados pedidos juntos). Los cambios quedan guardados y se reintentan.'
                 : 'GitHub no encontró el repositorio o tiene desactivados los pedidos (Issues). Los cambios quedan guardados.'), 'err', true);
@@ -424,7 +424,7 @@ function entregarPdfApp(nombre, b64){
       var caja = document.createElement('div');
       caja.style.cssText = 'background:#fff;color:#111;border-radius:14px;max-width:420px;width:100%;padding:18px;font:15px/1.4 system-ui,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4)';
       var t = document.createElement('b'); t.textContent = '¿Publicar este cambio a todos los celulares?'; t.style.cssText = 'display:block;font-size:17px;margin-bottom:6px';
-      var p = document.createElement('div'); p.textContent = 'Para que llegue solo a todos los celulares que tienen la app, pegá la clave de GitHub (se pide una sola vez y queda guardada solo en este celular). Si no la tenés, el cambio queda solo acá.';
+      var p = document.createElement('div'); p.textContent = 'Para que llegue solo a todos los celulares que tienen la app, pegá la clave de GitHub que te pasó el administrador (se pide una sola vez y queda guardada solo en este celular). Si no la tenés, el cambio queda solo acá.';
       p.style.cssText = 'margin-bottom:10px';
       var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'off'; inp.setAttribute('autocorrect', 'off'); inp.autocomplete = 'off'; inp.spellcheck = false;
       inp.id = 'favlClaveModal'; inp.placeholder = 'Clave de GitHub (github_pat_…)'; inp.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #888;border-radius:8px;margin:0 0 6px 0;background:#fff !important;color:#111 !important';
@@ -518,6 +518,32 @@ function entregarPdfApp(nombre, b64){
     return cambio;
   };
 
+  /* ---------- copiar la clave para pasársela a otro instructor ---------- */
+  var claveVisible = false;
+  function copiarClave(){
+    var c = clave(); if (!c) return;
+    function exito(){
+      claveVisible = false;
+      toast('Clave copiada. Pegala en un mensaje para pasársela a los otros instructores (es secreta: no la compartas con alumnos).', 'ok', true);
+      estado();
+    }
+    function fallo(){ claveVisible = true; estado(); }      // se muestra la clave para copiarla a mano
+    var ok = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = c; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { ta.setSelectionRange(0, c.length); } catch (e) {}
+      ok = !!document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    if (ok) return exito();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(c).then(exito, fallo);
+    } catch (e) {}
+    fallo();
+  }
+
   /* ---------- estado en el panel de instructores ---------- */
   function estado(){ try { if (typeof window.pintarEstadoGuardado === 'function') window.pintarEstadoGuardado(); } catch (e) {} }
   var pintarBase = window.pintarEstadoGuardado;
@@ -547,10 +573,19 @@ function entregarPdfApp(nombre, b64){
       var pend = leer(K_COLA, []).length, esp = leer(K_VERIF, []).length;
       if (pend) linea('Pendiente de enviar (falta internet): ' + pend);
       if (esp) linea('Esperando la confirmación de GitHub: ' + esp);
-      chico('Cambiar clave', function(){ borrar(K_TOK); estado(); });
+      linea('Para que otro instructor también pueda agregar instructores desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la pegue una vez en su app. Es secreta: no se la des a los alumnos.');
+      chico('Copiar clave', function(){ copiarClave(); });
+      chico('Cambiar clave', function(){ borrar(K_TOK); claveVisible = false; estado(); });
+      if (claveVisible) {
+        var ver = document.createElement('input'); ver.type = 'text'; ver.readOnly = true; ver.value = clave();
+        ver.style.cssText = 'width:100%;box-sizing:border-box;margin-top:8px;padding:8px;font-size:14px;border:1px solid #888;border-radius:8px;background:#fff !important;color:#111 !important';
+        ver.onfocus = function(){ try { ver.select(); } catch (e) {} };
+        d.appendChild(ver);
+        linea('Tocá el recuadro, mantené apretado y elegí «Copiar».');
+      }
     } else {
       linea('Publicación automática: falta la clave de GitHub', true);
-      linea('Pegala una sola vez en este celular para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.');
+      linea('Pegá la clave que te pasó el administrador, una sola vez en este celular, para que lo que agregues llegue solo a todos los demás. Mientras tanto, lo que agregues queda solo en este celular.');
       var inp = document.createElement('input'); inp.type = 'text'; inp.autocapitalize = 'off'; inp.setAttribute('autocorrect', 'off'); inp.autocomplete = 'off'; inp.spellcheck = false;
       inp.id = 'favlClavePanel'; inp.placeholder = 'Clave de GitHub (github_pat_…)';
       inp.style.cssText = 'width:100%;box-sizing:border-box;margin-top:6px;padding:8px;font-size:15px;border:1px solid #888;border-radius:8px;background:#fff !important;color:#111 !important';
