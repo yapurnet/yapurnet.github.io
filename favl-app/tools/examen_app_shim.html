@@ -86,7 +86,7 @@ function entregarPdfApp(nombre, b64){
     try {
       var d = document.createElement('div');
       d.setAttribute('role', 'status');
-      d.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:88vw;z-index:2147483000;' +
+      d.style.cssText = 'position:fixed;left:50%;bottom:calc(20px + var(--favl-aviso-h, 0px));transform:translateX(-50%);max-width:88vw;z-index:2147483000;' +
         'background:#12355b;color:#fff;padding:10px 16px;border-radius:12px;font:600 14px/1.35 system-ui,sans-serif;' +
         'box-shadow:0 6px 20px rgba(0,0,0,.35);text-align:center';
       d.textContent = texto;
@@ -216,7 +216,7 @@ function entregarPdfApp(nombre, b64){
         toastEl.onclick = function(){ if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl); };
         document.body.appendChild(toastEl);
       }
-      toastEl.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:90vw;z-index:2147483000;' +
+      toastEl.style.cssText = 'position:fixed;left:50%;bottom:calc(20px + var(--favl-aviso-h, 0px));transform:translateX(-50%);max-width:90vw;z-index:2147483000;' +
         'color:#fff;padding:10px 16px;border-radius:12px;font:600 14px/1.35 system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.35);' +
         'text-align:center;background:' + (tipo === 'err' ? '#7a1f16' : (tipo === 'ok' ? '#1d6b3a' : '#12355b'));
       toastEl.textContent = texto + (fijo ? '  (tocá para cerrar)' : '');
@@ -586,6 +586,7 @@ function entregarPdfApp(nombre, b64){
     var d = document.createElement('div'); d.id = 'favlPublicacion';
     d.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,.15);font-size:13px;line-height:1.4';
     function linea(txt, negrita){ var s = document.createElement(negrita ? 'b' : 'div'); s.textContent = txt; s.style.display = 'block'; d.appendChild(s); return s; }
+    try { var vt = window.__favlVersion && window.__favlVersion.texto(); if (vt) { var lv = linea(vt); lv.style.opacity = '.85'; lv.style.marginBottom = '6px'; } } catch (e) {}
     function chico(txt, fn){
       var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
       b.className = 'ibtn ibtn-sec';            // mismo aspecto que Editar / Probar
@@ -941,7 +942,8 @@ function entregarPdfApp(nombre, b64){
       var st = (e && e.status) || 0;
       if (e && (e.tipo === 'auth' || e.tipo === 'repo')) {
         claveRechazadaPorGitHub(st);
-        textoGate('La app no pudo validar tu clave por un problema de la propia app (no tuyo). Pedile a tu instructor el código del día e ingresalo acá.');
+        textoGate('La app no pudo validar tu clave por un problema de la propia app (no tuyo). Pedile a tu instructor el código del día e ingresalo acá.' +
+          ((window.__favlVersion && window.__favlVersion.hayNueva()) ? ' Además hay una versión nueva de la app: actualizala.' : ''));
       } else if (e && e.tipo === 'red') {
         textoGate('Sin conexión con el servidor. Revisá tu internet y probá de nuevo: tu clave no se gastó.');
       } else {

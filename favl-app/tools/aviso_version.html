@@ -1,0 +1,179 @@
+<script>
+/* ===== Aviso de versión nueva de la app (solo dentro de la app) =====
+   Al abrir la app (y al volver a ella) se mira favl-version.json, que publica la compilación automática:
+     codigo / nombre = la última versión publicada del APK
+     minimo          = versión mínima que se pide (la sube el administrador cuando hace falta que todos actualicen)
+   Si hay una versión más nueva se muestra un aviso abajo con «Cómo actualizar»; si esta app es más vieja que la mínima, el
+   aviso es naranja y más insistente. Nunca bloquea la app: «Más tarde» lo oculta (el de «mínima», 2 horas), así nadie queda
+   afuera en un día de examen. Sin internet no se muestra nada. */
+(function(){
+  if (!window.AndroidBridge) return;
+  var SITE = '__FAVL_SITE__';
+  var MI_CODIGO = __FAVL_VERSION_CODE__;               // número de esta compilación (crece en cada una)
+  var MI_NOMBRE = '__FAVL_VERSION_NAME__';
+  var URL_VER = SITE + '/favl-version.json';
+  var APK_URL = SITE + '/FAVL-BanderaVuela.apk';
+  var K_VER = 'favlVersionRemotaV1', K_POS = 'favlAvisoVersionPosponerV1';
+  var CADA = 30 * 60 * 1000;                           // cada cuánto se vuelve a consultar
+  var ultimoIntento = 0, enCurso = false;
+
+  function ls(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v){ try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function leer(k){ try { return JSON.parse(ls(k) || 'null'); } catch (e) { return null; } }
+  function remota(){
+    var r = leer(K_VER);
+    if (!r || !Number.isInteger(r.codigo) || r.codigo <= 0) return null;
+    return { codigo: r.codigo, nombre: String(r.nombre || r.codigo), minimo: Math.min(Number.isInteger(r.minimo) && r.minimo > 0 ? r.minimo : 0, r.codigo), apk: r.apk || APK_URL, t: r.t || 0 };
+  }
+  function hayNueva(){ var r = remota(); return !!(r && r.codigo > MI_CODIGO); }
+  function esObligatoria(){ var r = remota(); return !!(r && r.minimo > MI_CODIGO); }
+
+  /* ---------- consulta ---------- */
+  function consultar(){
+    if (enCurso || document.hidden) return;
+    ultimoIntento = Date.now(); enCurso = true;
+    var fin = function(){ enCurso = false; };
+    var tope = new Promise(function(res){ setTimeout(function(){ res(null); }, 8000); });
+    var pedido = fetch(URL_VER + '?x=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ if (!r.ok) throw new Error('http'); return r.json(); })
+      .catch(function(){ return null; });
+    Promise.race([pedido, tope]).then(function(j){
+      fin();
+      if (!j || typeof j !== 'object' || !Number.isInteger(j.codigo) || j.codigo <= 0 || j.codigo > 9999999) return;
+      var nombre = (typeof j.nombre === 'string' && /^[0-9A-Za-z._-]{1,20}$/.test(j.nombre)) ? j.nombre : String(j.codigo);
+      var apk = (typeof j.apk === 'string' && j.apk.length < 200 && j.apk.indexOf(SITE + '/') === 0 && /\.apk$/.test(j.apk)) ? j.apk : APK_URL;
+      var minimo = Number.isInteger(j.minimo) && j.minimo > 0 ? j.minimo : 0;
+      lsSet(K_VER, JSON.stringify({ codigo: j.codigo, nombre: nombre, minimo: minimo, apk: apk, t: Date.now() }));
+      pintar();
+      try { if (typeof window.pintarEstadoGuardado === 'function') window.pintarEstadoGuardado(); } catch (e) {}
+    }, fin);
+  }
+  function consultarSiHaceFalta(){
+    var r = remota();
+    if (Date.now() - ultimoIntento < 60000) return;
+    if (!r || Date.now() - r.t > CADA) consultar();
+  }
+
+  /* ---------- aviso ---------- */
+  var barra = null;
+  function quitarBarra(){
+    if (barra && barra.parentNode) barra.parentNode.removeChild(barra);
+    barra = null;
+    try { document.documentElement.style.setProperty('--favl-aviso-h', '0px'); document.body.style.paddingBottom = ''; } catch (e) {}
+  }
+  function posponido(r, obligatoria){
+    var p = leer(K_POS);
+    return !!(p && p.c === r.codigo && p.o === obligatoria && Date.now() < p.h);
+  }
+  function pintar(){
+    quitarBarra();
+    var r = remota(); if (!r) return;
+    var obligatoria = r.minimo > MI_CODIGO, nueva = r.codigo > MI_CODIGO;
+    if (!nueva && !obligatoria) return;
+    if (posponido(r, obligatoria)) return;
+    try {
+      barra = document.createElement('div'); barra.id = 'favlAvisoVersion'; barra.setAttribute('role', 'status');
+      barra.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147482000;box-sizing:border-box;padding:10px 14px;color:#fff;' +
+        'font:600 14px/1.35 system-ui,sans-serif;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;box-shadow:0 -4px 16px rgba(0,0,0,.3);' +
+        'background:' + (obligatoria ? '#b45309' : '#12355b');
+      var tx = document.createElement('span'); tx.style.cssText = 'flex:1 1 220px';
+      tx.textContent = obligatoria
+        ? 'Hay que actualizar la app: tenés la ' + MI_NOMBRE + ' y la última es la ' + r.nombre + '.'
+        : 'Hay una versión nueva de la app (' + r.nombre + '). Tenés la ' + MI_NOMBRE + '.';
+      barra.appendChild(tx);
+      function boton(txt, primario, fn){
+        var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+        b.style.cssText = 'margin:0 !important;padding:8px 12px !important;border-radius:10px !important;font:700 14px system-ui,sans-serif !important;box-shadow:none !important;' +
+          'border:1px solid #fff !important;' + (primario ? 'background:#fff !important;color:#12355b !important' : 'background:transparent !important;color:#fff !important');
+        b.onclick = fn; barra.appendChild(b); return b;
+      }
+      boton('Cómo actualizar', true, function(){ ayuda(r); });
+      boton(obligatoria ? 'Seguir sin actualizar' : 'Más tarde', false, function(){
+        lsSet(K_POS, JSON.stringify({ c: r.codigo, o: obligatoria, h: Date.now() + (obligatoria ? 2 : 24) * 3600 * 1000 }));
+        quitarBarra();
+      });
+      document.body.appendChild(barra);
+      var h = barra.offsetHeight || 60;
+      document.documentElement.style.setProperty('--favl-aviso-h', h + 'px');
+      document.body.style.paddingBottom = h + 'px';           // el aviso no tapa lo que hay abajo
+    } catch (e) { console.error(e); }
+  }
+
+  /* ---------- «Cómo actualizar» ---------- */
+  function copiar(texto, exito, fallo){
+    var ok = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = texto; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { ta.setSelectionRange(0, texto.length); } catch (e) {}
+      ok = !!document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    if (ok) return exito();
+    try { if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(texto).then(exito, fallo); } catch (e) {}
+    fallo();
+  }
+  function ayuda(r){
+    var fondo = document.getElementById('favlAyudaVersion'); if (fondo && fondo.parentNode) fondo.parentNode.removeChild(fondo);
+    fondo = document.createElement('div'); fondo.id = 'favlAyudaVersion';
+    fondo.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147482500;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    var caja = document.createElement('div');
+    caja.style.cssText = 'background:#fff;color:#111;border-radius:14px;max-width:420px;width:100%;max-height:90vh;overflow:auto;padding:18px;font:15px/1.45 system-ui,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4)';
+    var t = document.createElement('b'); t.textContent = 'Cómo actualizar la app'; t.style.cssText = 'display:block;font-size:17px;margin-bottom:8px';
+    var ol = document.createElement('ol'); ol.style.cssText = 'margin:0 0 10px 18px;padding:0';
+    ['Tocá «Copiar enlace».', 'Abrí Chrome y pegá el enlace en la barra de direcciones.',
+     'Descargá el archivo y abrilo para instalarlo encima de esta app (no hace falta desinstalar nada; no se pierden los datos).'].forEach(function(x){
+      var li = document.createElement('li'); li.textContent = x; li.style.marginBottom = '4px'; ol.appendChild(li);
+    });
+    var inp = document.createElement('input'); inp.type = 'text'; inp.readOnly = true; inp.value = r.apk;
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px;font-size:14px;border:1px solid #888;border-radius:8px;margin-bottom:8px;background:#fff !important;color:#111 !important';
+    inp.onfocus = function(){ try { inp.select(); } catch (e) {} };
+    var msg = document.createElement('div'); msg.style.cssText = 'min-height:18px;font-size:13px;margin-bottom:8px;color:#1d6b3a';
+    var fila = document.createElement('div'); fila.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+    function boton(txt, primario, fn){
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+      b.style.cssText = 'flex:1;min-width:120px;margin:0 !important;padding:10px 12px !important;border-radius:10px !important;font:600 15px system-ui,sans-serif !important;box-shadow:none !important;border:1px solid #12355b !important;' +
+        (primario ? 'background:#12355b !important;color:#fff !important' : 'background:#fff !important;color:#12355b !important');
+      b.onclick = fn; fila.appendChild(b); return b;
+    }
+    boton('Copiar enlace', true, function(){
+      copiar(r.apk, function(){ msg.style.color = '#1d6b3a'; msg.textContent = 'Enlace copiado: pegalo en Chrome.'; },
+                    function(){ msg.style.color = '#a02020'; msg.textContent = 'No se pudo copiar solo: tocá el recuadro, mantené apretado y elegí «Copiar».'; try { inp.focus(); inp.select(); } catch (e) {} });
+    });
+    boton('Cerrar', false, function(){ if (fondo.parentNode) fondo.parentNode.removeChild(fondo); });
+    caja.appendChild(t); caja.appendChild(ol); caja.appendChild(inp); caja.appendChild(msg); caja.appendChild(fila);
+    fondo.appendChild(caja); document.body.appendChild(fondo);
+  }
+
+  /* ---------- lo que usan otras partes de la app ---------- */
+  window.__favlVersion = {
+    codigo: MI_CODIGO, nombre: MI_NOMBRE,
+    hayNueva: hayNueva, obligatoria: esObligatoria,
+    texto: function(){
+      var r = remota();
+      if (r && r.codigo > MI_CODIGO) return 'Versión de la app: ' + MI_NOMBRE + ' — hay una más nueva (' + r.nombre + ').';
+      if (r) return 'Versión de la app: ' + MI_NOMBRE + ' (es la última).';
+      return 'Versión de la app: ' + MI_NOMBRE + '.';
+    }
+  };
+  // en la pantalla de acceso al examen se ve la versión (sirve para ayudar a un alumno por mensaje)
+  function marcarVersionEnAcceso(){
+    var g = document.getElementById('gateAcceso');
+    if (g && !document.getElementById('favlVersionAcceso')) {
+      var p = document.createElement('p'); p.id = 'favlVersionAcceso'; p.textContent = 'App ' + MI_NOMBRE;
+      p.style.cssText = 'opacity:.6;font-size:11px;margin:10px 0 0';
+      g.appendChild(p);
+    }
+  }
+
+  /* ---------- arranque ---------- */
+  marcarVersionEnAcceso();
+  pintar();                                   // con lo último que se supo (por si no hay internet)
+  setTimeout(consultarSiHaceFalta, 2500);
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) consultarSiHaceFalta(); });
+  window.addEventListener('focus', consultarSiHaceFalta);
+  window.addEventListener('online', consultarSiHaceFalta);
+  setInterval(consultarSiHaceFalta, 5 * 60 * 1000);
+})();
+</script>

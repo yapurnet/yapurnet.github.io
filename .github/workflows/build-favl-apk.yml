@@ -60,6 +60,7 @@ jobs:
           bash favl-app/tools/build_apk.sh "$RUNNER_TEMP/FAVL-BanderaVuela.apk"
           rm -f "$KEYSTORE"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Publicar el APK en la raíz del sitio
         run: |
@@ -73,6 +74,9 @@ jobs:
             git reset --hard "origin/$GITHUB_REF_NAME"
             cp "$RUNNER_TEMP/FAVL-BanderaVuela.apk" FAVL-BanderaVuela.apk
             git add FAVL-BanderaVuela.apk
+            # Aviso de versión nueva: las apps instaladas consultan este archivo (conserva la «mínima» que fijó el administrador)
+            node favl-app/tools/escribir_version.js favl-version.json "$VERSION_CODE" "$VERSION_NAME" "https://${GITHUB_REPOSITORY_OWNER}.github.io/FAVL-BanderaVuela.apk"
+            git add favl-version.json
             # Lista de instructores que las apps instaladas bajan solas al abrirse: examen + cambios hechos desde las apps
             RAW="$(python3 favl-app/tools/pick_raw.py favl-app/raw)"
             node favl-app/tools/extract_instructores.js "$RAW" favl-instructores.json auto favl-app/data/instructores-cambios.json

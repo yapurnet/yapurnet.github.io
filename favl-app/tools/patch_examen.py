@@ -8,7 +8,8 @@ Hace exactamente esto sobre el archivo original (no toca la lista de instructore
   2) usa jsPDF local (js/jspdf.umd.min.js) en vez de bajarlo de internet,
   3) el guardado del PDF pasa por el puente nativo de la app (descarga + compartir),
   4) agrega las adaptaciones de la app (solo actúan dentro de la app), incluida la actualización automática
-     de instructores (usa INSTR_VERSION, FAVL_SITE, FAVL_REPO y FAVL_ISSUES_TOKEN), y el diseño para celular.
+     de instructores (usa INSTR_VERSION, FAVL_SITE, FAVL_REPO y FAVL_ISSUES_TOKEN), el aviso de versión nueva
+     (usa VERSION_CODE y VERSION_NAME) y el diseño para celular.
 
 Si el examen cambia tanto que alguna pieza ya no se encuentra, el script FRENA con un
 mensaje claro (así nunca se publica una app a medias).
@@ -66,6 +67,10 @@ def main():
                 .replace("__FAVL_REPO__", repo).replace("__FAVL_ISSUES_TOKEN__", token))
     if "__FAVL_" in shim:
         sys.exit("ERROR: quedaron marcas __FAVL_ sin reemplazar en el shim.")
+    # Aviso de versión nueva de la app (usa VERSION_CODE y VERSION_NAME de la compilación)
+    sys.path.insert(0, HERE)
+    import aviso_lib
+    shim += aviso_lib.bloque(sitio)
     css = leer(os.path.join(HERE, "examen_app.css.html"))
     c = aplicar(c, "</script></body>\n</html>\n", "</script>\n" + shim + css + "\n</body>\n</html>\n", "cierre del archivo")
 

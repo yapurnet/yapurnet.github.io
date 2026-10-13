@@ -19,7 +19,7 @@ OUT="$(realpath -m "${1:?Falta el nombre del APK de salida}")"
 : "${KEYSTORE:?}" "${KEYSTORE_PASSWORD:?}" "${KEY_ALIAS:?}" "${KEY_PASSWORD:?}" "${VERSION_CODE:?}" "${VERSION_NAME:?}"
 EXPECTED_CERT_SHA256="${EXPECTED_CERT_SHA256:-35543672e437a9400b0b27066f4cca0c3848e4565c6088b84b53a8b169c67c2c}"
 ANDROID_JAR="${ANDROID_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}"
-export KEYSTORE_PASSWORD KEY_PASSWORD
+export KEYSTORE_PASSWORD KEY_PASSWORD VERSION_CODE VERSION_NAME
 # Marca de tiempo de la lista de instructores: la lleva el APK y también el favl-instructores.json publicado.
 export INSTR_VERSION="${INSTR_VERSION:-$(date +%s)}"
 export FAVL_SITE="${FAVL_SITE:-https://yapurnet.github.io}"
@@ -42,7 +42,9 @@ node "$ROOT/tools/extract_instructores.js" "$RAW" "$INSTR_JSON_OUT" "$INSTR_VERS
 python3 "$ROOT/tools/patch_examen.py" "$WORK/examen_fusionado.html" "$WORK/assets/www/examen.html"
 
 echo "==> 2/6 Páginas de la app"
-cp "$ROOT/www/index.html" "$ROOT/www/cuestionario.html" "$WORK/assets/www/"
+cp "$ROOT/www/cuestionario.html" "$WORK/assets/www/"
+# El menú lleva el aviso de «hay una versión nueva» (usa VERSION_CODE y VERSION_NAME)
+python3 "$ROOT/tools/aviso_lib.py" inyectar "$ROOT/www/index.html" "$WORK/assets/www/index.html"
 cp "$ROOT/www/js/jspdf.umd.min.js" "$WORK/assets/www/js/"
 
 echo "==> 3/6 Manifiesto (versión $VERSION_NAME / código $VERSION_CODE)"

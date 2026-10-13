@@ -42,6 +42,18 @@ Se hace en el repositorio que publica `yapurnet.github.io` (normalmente se llama
 **Cambiar el cuestionario o el menú:** reemplazar `favl-app/www/cuestionario.html` o `favl-app/www/index.html`
 por la versión final (la del cuestionario lleva incluido el narrador de voz de la app).
 
+## Aviso de «hay una versión nueva» en la app
+
+Cada compilación publica `favl-version.json` (en la raíz del sitio) con la última versión del APK. Las apps instaladas
+(desde la 12.15 en adelante) lo consultan al abrirse y muestran abajo un aviso con **Cómo actualizar** (copia el enlace del APK
+para pegarlo en Chrome). Nunca bloquea la app, y sin internet no muestra nada.
+
+- **Versión mínima:** para pedir que todos actualicen, editá `favl-version.json` y subí el número de `"minimo"` (es el código de
+  versión: la `12.20` tiene código `120`, o sea `100 + número`). Las apps más viejas que ese número muestran el aviso en naranja y
+  más insistente (se puede postergar 2 horas). Si ponés una mínima mayor que la última versión publicada, se ignora.
+- En Modo instructor > Instructores se ve la versión de cada celular, y en la pantalla de acceso al examen aparece «App 12.xx».
+- La compilación siguiente conserva el `"minimo"` y la `"nota"` que dejaste en el archivo.
+
 ## Si algo falla
 
 Pestaña *Actions* → entrar al intento con la cruz roja → leer el mensaje del paso que falló:
