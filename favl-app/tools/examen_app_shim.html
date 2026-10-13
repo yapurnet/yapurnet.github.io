@@ -589,7 +589,7 @@ function entregarPdfApp(nombre, b64){
       b.onclick = fn; d.appendChild(b); return b;
     }
     if (!TOKEN) {
-      linea('Publicación automática: no está activada en esta versión de la app.');
+      linea('Publicación automática: no está activada en esta versión de la app (a la compilación le falta la clave de GitHub). Lo que agregues, edites o quites queda solo en este celular y no llega a los demás.', true);
     } else if (leer(K_NO, false)) {
       linea('La publicación a todos los celulares está desactivada en este celular.');
       chico('Activar', function(){ borrar(K_NO); noPreguntarSesion = false; estado(); });
