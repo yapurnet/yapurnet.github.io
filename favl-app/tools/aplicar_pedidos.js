@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Aplica los pedidos de instructores que mandan las apps (issues «FAVL-INSTR …»).
-//   Uso: node aplicar_pedidos.js <issues.json> <cambios.json> <resultado.json> <examen_original.html>
+//   Uso: node aplicar_pedidos.js <issues.json> <cambios.json> <resultado.json> <examen_original.html> [claves.json]
 //   Entorno: FAVL_OWNER (dueño del repositorio)
+//   Pedidos: set / del (instructores) y ck-new / ck-use / ck-del / ck-cfg (claves personales de examen).
 //
 // Seguridad: el texto de los issues es PÚBLICO y no es confiable. Un pedido solo se aplica si
 //   1) lo abrió el dueño del repositorio: cualquiera puede abrir issues, pero a nombre del dueño solo se puede
@@ -12,8 +13,10 @@
 'use strict';
 const fs = require('fs');
 const L = require('./instructores_lib.js');
+const C = require('./claves_lib.js');
 
-const [, , issuesPath, cambiosPath, resultadoPath, rawPath] = process.argv;
+const [, , issuesPath, cambiosPath, resultadoPath, rawPath, clavesPathArg] = process.argv;
+const clavesPath = clavesPathArg || 'favl-claves.json';
 if (!issuesPath || !cambiosPath || !resultadoPath || !rawPath) {
   console.error('Uso: node aplicar_pedidos.js <issues.json> <cambios.json> <resultado.json> <examen.html>');
   process.exit(2);
@@ -38,17 +41,20 @@ try { issues = JSON.parse(fs.readFileSync(issuesPath, 'utf8')); } catch (e) { is
 if (!Array.isArray(issues)) issues = [];
 issues = issues.filter(i => i && Number.isInteger(i.number)).sort((a, b) => a.number - b.number);
 
-let base, cambios;
+let base, cambios, registro;
+const ahora = process.env.FAVL_AHORA ? Number(process.env.FAVL_AHORA) : Date.now();   // (FAVL_AHORA: solo para pruebas)
 try {
   base = L.validarLista(L.leerBase(fs.readFileSync(rawPath, 'utf8')), 'instructor');
   cambios = L.leerCambios(cambiosPath);
+  registro = C.leerRegistro(clavesPath);
 } catch (e) {
   console.error('ERROR: ' + e.message);
   process.exit(1);
 }
 const idsBase = new Set(base.map(b => b.id));
 const resultados = [];
-let huboCambios = false;
+let huboCambios = false;       // cambió la lista de instructores
+let huboClaves = false;        // cambió el registro de claves
 
 function resultado(number, estado, mensaje) { resultados.push({ number: number, estado: estado, mensaje: mensaje }); }
 
@@ -100,6 +106,42 @@ function aplicarSet(p) {
   return null;
 }
 
+// ---- claves personales de examen ----
+function aplicarClave(p) {
+  C.podar(registro, ahora);
+  const h = p.id;
+  if (typeof h !== 'string' || !C.RE_HASH.test(h)) return { error: 'La clave no tiene el formato esperado.' };
+  const e = registro.claves.find(k => k.h === h);
+  if (p.op === 'ck-new') {
+    const d = (p.d && typeof p.d === 'object') ? p.d : {};
+    const dias = d.dias === undefined ? 7 : d.dias;
+    if (!Number.isInteger(dias) || dias < 1 || dias > C.MAX_DIAS) return { error: 'El vencimiento de la clave no es válido.' };
+    const inst = (typeof d.i === 'string' && L.RE_ID.test(d.i)) ? d.i : '';
+    if (e) return { aviso: 'Esa clave ya estaba publicada.' };
+    if (C.activas(registro, ahora) >= C.MAX_ACTIVAS) return { error: 'Hay demasiadas claves activas. Esperá a que venzan o anulá algunas.' };
+    registro.claves.push({ h: h, i: inst, c: ahora, e: ahora + dias * C.DIA, u: 0 });
+    return { cambio: true, mensaje: 'Clave publicada: ya se puede usar.' };
+  }
+  if (p.op === 'ck-use') {
+    if (!e) return { error: 'La clave no existe, fue anulada o venció. Revisala o pedile una nueva a tu instructor.' };
+    if (e.u > 0) return { error: 'Esta clave ya fue usada. Pedile una nueva a tu instructor.' };
+    if (e.e <= ahora) return { error: 'Esta clave venció. Pedile una nueva a tu instructor.' };
+    e.u = ahora;
+    return { cambio: true, mensaje: 'Clave válida. Ya podés rendir.' };
+  }
+  // ck-del
+  if (!e) return { aviso: 'Esa clave ya no estaba.' };
+  registro.claves = registro.claves.filter(k => k.h !== h);
+  return { cambio: true, mensaje: 'Clave anulada.' };
+}
+
+function aplicarConfigClaves(p) {
+  const d = (p.d && typeof p.d === 'object') ? p.d : {};
+  if (typeof d.exigir !== 'boolean') return { error: 'El pedido no tiene el formato esperado.' };
+  if (registro.exigir !== d.exigir) { registro.exigir = d.exigir; return { cambio: true, mensaje: d.exigir ? 'Listo: ahora se exige la clave personal para rendir.' : 'Listo: ya sirve también el código del día.' }; }
+  return { aviso: 'Ya estaba así.' };
+}
+
 function aplicarDel(p) {
   if (typeof p.id !== 'string' || !L.RE_ID.test(p.id)) return { error: 'El identificador del instructor no es válido.' };
   const actual = L.fusionar(base, cambios);
@@ -123,8 +165,16 @@ issues.slice(0, MAX_PEDIDOS_POR_CORRIDA).forEach(it => {
   if (typeof it.body !== 'string' || it.body.length > MAX_CUERPO) return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.');
   let p;
   try { p = JSON.parse(it.body); } catch (e) { return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.'); }
-  if (!p || p.v !== 1 || typeof p.n !== 'string' || !/^[a-f0-9]{16,32}$/.test(p.n) || (p.op !== 'set' && p.op !== 'del')) {
+  const OPS = ['set', 'del', 'ck-new', 'ck-use', 'ck-del', 'ck-cfg'];
+  if (!p || p.v !== 1 || typeof p.n !== 'string' || !/^[a-f0-9]{16,32}$/.test(p.n) || OPS.indexOf(p.op) < 0) {
     return resultado(n, 'rechazado', 'El pedido no tiene el formato esperado.');
+  }
+  if (p.op.startsWith('ck-')) {
+    // las claves no necesitan registro de repetidos: cada pedido es idempotente (una clave usada no se puede usar de nuevo)
+    const r = p.op === 'ck-cfg' ? aplicarConfigClaves(p) : aplicarClave(p);
+    if (r.cambio) huboClaves = true;
+    if (r.error) return resultado(n, 'rechazado', r.error);
+    return resultado(n, 'aplicado', r.mensaje || r.aviso || 'Listo.');
   }
   if (cambios.aplicados.includes(p.n)) return resultado(n, 'repetido', 'Este pedido ya se había aplicado.');
 
@@ -142,7 +192,8 @@ issues.slice(0, MAX_PEDIDOS_POR_CORRIDA).forEach(it => {
 });
 
 if (huboCambios) fs.writeFileSync(cambiosPath, JSON.stringify(cambios) + '\n');
-fs.writeFileSync(resultadoPath, JSON.stringify({ huboCambios: huboCambios, issues: resultados }));
+if (huboClaves) { C.podar(registro, ahora); C.escribirRegistro(clavesPath, registro, ahora); }
+fs.writeFileSync(resultadoPath, JSON.stringify({ huboCambios: huboCambios, huboClaves: huboClaves, issues: resultados }));
 const cuenta = {};
 resultados.forEach(r => { cuenta[r.estado] = (cuenta[r.estado] || 0) + 1; });
 console.log('Pedidos: ' + JSON.stringify(cuenta) + (issues.length > MAX_PEDIDOS_POR_CORRIDA ? ' (quedan más para la próxima corrida)' : ''));

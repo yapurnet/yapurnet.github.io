@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Procesa los pedidos de instructores que mandan las apps y publica la lista nueva.
+# Procesa los pedidos que mandan las apps (instructores y claves personales de examen) y publica lo que cambió.
 # Lo ejecuta el workflow «Instructores automático» (ver .github/workflows/instructores-auto.yml).
 # Entorno: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_REPOSITORY_OWNER
 # Opcional: FAVL_NO_PUSH=1 (solo para pruebas: no sube nada)
@@ -15,6 +15,7 @@ main() {
   BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   case "$BRANCH" in ''|HEAD) BRANCH="main";; esac
   CAMBIOS="favl-app/data/instructores-cambios.json"
+  CLAVES="favl-claves.json"
   PUBLICADO=0
 
   for intento in 1 2 3 4 5; do
@@ -27,19 +28,28 @@ main() {
     RAW="$(python3 favl-app/tools/pick_raw.py favl-app/raw)"
     mkdir -p favl-app/data
     FAVL_OWNER="$GITHUB_REPOSITORY_OWNER" node favl-app/tools/aplicar_pedidos.js \
-       "$TMP/issues.json" "$CAMBIOS" "$TMP/resultado.json" "$RAW"
+       "$TMP/issues.json" "$CAMBIOS" "$TMP/resultado.json" "$RAW" "$CLAVES"
 
-    HUBO="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).huboCambios ? 'si' : 'no')" "$TMP/resultado.json")"
-    if [ "$HUBO" != "si" ]; then
+    HUBO_I="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).huboCambios ? 'si' : 'no')" "$TMP/resultado.json")"
+    HUBO_C="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).huboClaves ? 'si' : 'no')" "$TMP/resultado.json")"
+    if [ "$HUBO_I" != "si" ] && [ "$HUBO_C" != "si" ]; then
       echo "No hay cambios para publicar."
       PUBLICADO=1
       break
     fi
 
-    node favl-app/tools/extract_instructores.js "$RAW" favl-instructores.json auto "$CAMBIOS"
-    git add "$CAMBIOS" favl-instructores.json
+    MSG="Pedidos de la app aplicados:"
+    if [ "$HUBO_I" = "si" ]; then
+      node favl-app/tools/extract_instructores.js "$RAW" favl-instructores.json auto "$CAMBIOS"
+      git add "$CAMBIOS" favl-instructores.json
+      MSG="$MSG instructores"
+    fi
+    if [ "$HUBO_C" = "si" ]; then
+      git add "$CLAVES"
+      MSG="$MSG claves de examen"
+    fi
     git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-        commit -q -m "Instructores: pedidos de la app aplicados (lista publicada)"
+        commit -q -m "$MSG"
     if [ "${FAVL_NO_PUSH:-}" = "1" ]; then PUBLICADO=1; break; fi
     if git push -q origin "HEAD:$BRANCH"; then
       PUBLICADO=1

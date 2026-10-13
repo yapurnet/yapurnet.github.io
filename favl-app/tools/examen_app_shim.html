@@ -172,6 +172,7 @@ function entregarPdfApp(nombre, b64){
    la lista nueva y las demás apps la bajan solas. La clave puede venir dentro del APK (compilación con el secreto
    FAVL_ISSUES_TOKEN): entonces cualquier instructor publica sin escribir nada. Si el APK no la trae (o venció),
    se pega a mano UNA vez en el celular. Sin clave, los cambios quedan solo en este celular (como antes).
+   La misma vía sirve para las claves personales de examen (una por alumno, de un solo uso).
    Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión. */
 (function(){
   if (!window.AndroidBridge) return;
@@ -181,6 +182,11 @@ function entregarPdfApp(nombre, b64){
   var K_TOK = 'favlGhKeyV1', K_COLA = 'favlColaPublicarV1', K_VERIF = 'favlVerificarV1',
       K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1';
   var RE_CLAVE = /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/;
+  var SITE = '__FAVL_SITE__';
+  var K_EMIT = 'favlClavesEmitidasV1', K_REG = 'favlClavesRegV1', K_CANJE = 'favlCanjeV1', K_EXIGIR = 'favlExigirLocalV1';
+  var ALFA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';     // 31 caracteres, sin I, L, O, 0, 1 (no se confunden al copiar)
+  var RE_CK = /^[A-HJKMNP-Z2-9]{12}$/;
+  var DIAS_CK = 7;                                // vencimiento de cada clave personal
   var MAX_LOGO = 60000;                          // el cuerpo de un pedido admite 65536 caracteres
 
   /* ---------- almacenamiento ---------- */
@@ -286,6 +292,8 @@ function entregarPdfApp(nombre, b64){
       if (item.op === 'set') {
         datos = { nombre: item.d.nombre, licencia: item.d.licencia, emails: item.d.emails || [] };
         if (logo) datos.logo = logo;
+      } else if (item.op.indexOf('ck-') === 0) {
+        datos = item.d;
       }
       var cuerpo = JSON.stringify({ v: 1, n: item.n, t: Date.now(), op: item.op, id: item.id, d: datos });
       if (cuerpo.length > 65000) throw { tipo: 'datos', status: 0 };
@@ -307,7 +315,7 @@ function entregarPdfApp(nombre, b64){
         v.push({ num: r.num, n: item.n, op: item.op, id: item.id, nombre: item.d && item.d.nombre, licencia: item.d && item.d.licencia, t: Date.now() });
         guardar(K_VERIF, v);
         enviando = false; avisoRed = false;
-        toast('Enviando el cambio a todos los celulares…');
+        toast(item.op.indexOf('ck-') === 0 ? 'Enviando a GitHub…' : 'Enviando el cambio a todos los celulares…');
         estado();
         setTimeout(procesar, 0);
         setTimeout(verificar, 6000);
@@ -321,7 +329,7 @@ function entregarPdfApp(nombre, b64){
         } else if (tipo === 'auth' || tipo === 'repo') {
           bloqueoHasta = Date.now() + 5 * 60000;
           var vencida = !!(err && err.status === 401);
-          if (vencida) { if (claveGuardada()) borrar(K_TOK); else guardar(K_MALA, TOKEN_APK.slice(-10)); }   // vencida o revocada: se vuelve a pedir una nueva
+          if (vencida) claveRechazadaPorGitHub(401);   // vencida o revocada: se vuelve a pedir una nueva
           if (!avisoAuth) {
             avisoAuth = true;
             toast(vencida
@@ -333,6 +341,7 @@ function entregarPdfApp(nombre, b64){
         } else {
           // el pedido es inválido: no tiene sentido reintentarlo
           guardar(K_COLA, leer(K_COLA, []).filter(function(x){ return x.n !== item.n; }));
+          if (item.op === 'ck-new') marcarEmitida(item.id, -1, 'GitHub no aceptó el pedido');
           toast('No se pudo publicar el cambio' + (item.d && item.d.nombre ? ' de ' + item.d.nombre : '') + ' (datos o foto no aceptados). Quedó solo en este celular.', 'err', true);
         }
         estado();
@@ -372,7 +381,7 @@ function entregarPdfApp(nombre, b64){
       hechos.forEach(function(h){ cerrados[h.it.n] = 1; });
       var resto = leer(K_VERIF, []).filter(function(x){
         if (cerrados[x.n]) return false;
-        if (ahora - x.t > 40 * 60000) { toast('GitHub no confirmó un cambio de instructores. Si no aparece en los otros celulares, repetilo.', 'err', true); return false; }
+        if (ahora - x.t > 40 * 60000) { if (x.op === 'ck-new') marcarEmitida(x.id, -1, 'GitHub no confirmó'); toast('GitHub no confirmó un cambio de instructores. Si no aparece en los otros celulares, repetilo.', 'err', true); return false; }
         return true;
       });
       guardar(K_VERIF, resto);
@@ -381,6 +390,7 @@ function entregarPdfApp(nombre, b64){
     });
   }
   function resultado(it, res){
+    if (it.op.indexOf('ck-') === 0) return resultadoClave(it, res);
     if (res.tipo === 'RECHAZADO') {
       toast('No se publicó: ' + (res.texto || 'GitHub rechazó el cambio.'), 'err', true);
       return;
@@ -523,30 +533,33 @@ function entregarPdfApp(nombre, b64){
     return cambio;
   };
 
-  /* ---------- copiar la clave para pasársela a otro instructor ---------- */
-  var claveVisible = false;
-  function copiarClave(){
-    var c = claveGuardada(); if (!c) return;
-    function exito(){
-      claveVisible = false;
-      toast('Clave copiada. Pegala en un mensaje para pasársela a los otros instructores (es secreta: no la compartas con alumnos).', 'ok', true);
-      estado();
-    }
-    function fallo(){ claveVisible = true; estado(); }      // se muestra la clave para copiarla a mano
+  /* ---------- copiar al portapapeles ---------- */
+  function copiarTexto(texto, exito, fallo){
     var ok = false;
     try {
       var ta = document.createElement('textarea');
-      ta.value = c; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+      ta.value = texto; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
       document.body.appendChild(ta); ta.focus(); ta.select();
-      try { ta.setSelectionRange(0, c.length); } catch (e) {}
+      try { ta.setSelectionRange(0, texto.length); } catch (e) {}
       ok = !!document.execCommand('copy');
       document.body.removeChild(ta);
     } catch (e) { ok = false; }
     if (ok) return exito();
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(c).then(exito, fallo);
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(texto).then(exito, fallo);
     } catch (e) {}
     fallo();
+  }
+
+  /* ---------- copiar la clave de GitHub para pasársela a otro instructor ---------- */
+  var claveVisible = false;
+  function copiarClave(){
+    var c = claveGuardada(); if (!c) return;
+    copiarTexto(c, function(){
+      claveVisible = false;
+      toast('Clave copiada. Pegala en un mensaje para pasársela a los otros instructores (es secreta: no la compartas con alumnos).', 'ok', true);
+      estado();
+    }, function(){ claveVisible = true; estado(); });      // si no se puede copiar, se muestra la clave para copiarla a mano
   }
 
   /* ---------- estado en el panel de instructores ---------- */
@@ -555,6 +568,7 @@ function entregarPdfApp(nombre, b64){
   window.pintarEstadoGuardado = function(){
     try { if (typeof pintarBase === 'function') pintarBase.apply(this, arguments); } catch (e) {}
     try { pintarPublicacion(); } catch (e) { console.error(e); }
+    try { if (document.getElementById('favlClavesAlumno')) pintarClaves(); } catch (e) { console.error(e); }
   };
   function pintarPublicacion(){
     var box = document.getElementById('estadoGuardadoInstr');
@@ -614,8 +628,338 @@ function entregarPdfApp(nombre, b64){
     box.appendChild(d);
   }
 
+  /* ---------- claves personales: una por alumno, de un solo uso ----------
+     El instructor crea una clave por alumno (Modo instructor > Claves). La app publica solo su HASH en GitHub
+     (nunca el nombre del alumno). En la pantalla «Acceso al examen» el alumno escribe su clave: la app abre un
+     pedido «ck-use»; GitHub lo anota como usado (la primera vez) y contesta; recién ahí se abre el examen.
+     Una clave ya usada, vencida o anulada no sirve. Si se activa «Exigir clave personal», el código del día deja de servir. */
+  function normalizarCk(s){ return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function formatoCk(c){ return c.slice(0, 4) + '-' + c.slice(4, 8) + '-' + c.slice(8, 12); }
+  function generarCk(){
+    var out = '', u = new Uint8Array(32), i;
+    while (out.length < 12) {
+      (window.crypto || window.msCrypto).getRandomValues(u);
+      for (i = 0; i < u.length && out.length < 12; i++) if (u[i] < 248) out += ALFA.charAt(u[i] % 31);   // 248 = 31 × 8: sin sesgo
+    }
+    return out;
+  }
+  function hashCk(c){ return sha256Hex('FAVL|' + c); }
+  function esperar(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  function dos(n){ return ('0' + n).slice(-2); }
+  function fechaDia(ms){ var d = new Date(ms); return dos(d.getDate()) + '/' + dos(d.getMonth() + 1); }
+  function fechaHora(ms){ var d = new Date(ms); return fechaDia(ms) + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes()); }
+
+  /* registro público de claves (solo hashes y fechas) */
+  function regGuardado(){ var r = leer(K_REG, null); return (r && Array.isArray(r.claves)) ? r : { version: 0, exigir: false, claves: [], t: 0 }; }
+  var bajandoReg = null;
+  function bajarRegistro(maxMs){
+    var p = bajandoReg || (bajandoReg = fetch(SITE + '/favl-claves.json?x=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){
+        if (r.status === 404) return { version: 0, exigir: false, claves: [] };      // todavía no se creó ninguna clave
+        if (!r.ok) throw new Error('http');
+        return r.json();
+      })
+      .then(function(j){
+        if (!j || typeof j !== 'object' || !Array.isArray(j.claves)) throw new Error('formato');
+        var reg = { version: Number(j.version) || 0, exigir: j.exigir === true, claves: [], t: Date.now() };
+        j.claves.slice(0, 600).forEach(function(k){
+          if (k && typeof k.h === 'string' && /^[0-9a-f]{64}$/.test(k.h)) reg.claves.push({ h: k.h, c: Number(k.c) || 0, e: Number(k.e) || 0, u: Number(k.u) || 0 });
+        });
+        guardar(K_REG, reg);
+        return reg;
+      })
+      .then(function(r){ bajandoReg = null; return r; }, function(){ bajandoReg = null; return null; }));
+    return Promise.race([p, esperar(maxMs || 8000).then(function(){ return null; })]);
+  }
+  function exigirEfectivo(reg){
+    var l = leer(K_EXIGIR, null);          // lo que acaba de tocar este instructor manda unos minutos, hasta que llegue el registro
+    if (l && typeof l.v === 'boolean' && Date.now() - l.t < 10 * 60000) return l.v;
+    return !!(reg && reg.exigir);
+  }
+
+  /* claves que emitió este celular (con el nombre del alumno, que NO se publica) */
+  function emitidas(){ var a = leer(K_EMIT, []); return Array.isArray(a) ? a : []; }
+  function marcarEmitida(h, ok, msg){
+    var a = emitidas();
+    a.forEach(function(x){ if (x.h === h) { x.ok = ok; x.okT = Date.now(); x.msg = msg || ''; } });
+    guardar(K_EMIT, a);
+  }
+  function estadoClave(em, reg){
+    var ahora = Date.now(), r = null, i;
+    if (em.anulada) return { txt: 'Anulada', cls: 'x' };
+    if (em.ok === -1) return { txt: 'No se pudo publicar' + (em.msg ? ': ' + em.msg : '') + '. Creá otra clave.', cls: 'x' };
+    for (i = 0; i < reg.claves.length; i++) if (reg.claves[i].h === em.h) r = reg.claves[i];
+    if (r) {
+      if (r.u > 0) return { txt: 'Usada el ' + fechaHora(r.u), cls: 'u' };
+      if (r.e <= ahora) return { txt: 'Vencida', cls: 'x' };
+      return { txt: '✔ Lista para usar · vence el ' + fechaDia(r.e), cls: 'ok' };
+    }
+    if (em.ok === 1) {
+      if (ahora > em.e) return { txt: 'Vencida', cls: 'x' };
+      if (reg.t && reg.version * 1000 > em.okT + 10 * 60000) return { txt: 'Anulada o vencida', cls: 'x' };
+      return { txt: '✔ Lista para usar · vence el ' + fechaDia(em.e), cls: 'ok' };
+    }
+    return { txt: 'Publicando… (tarda 1 o 2 minutos)', cls: 'w' };
+  }
+
+  function haceFaltaClave(){
+    if (clave()) return false;
+    msgClaves('Esta app no tiene la clave de GitHub, así que no puede crear claves personales. Pedí el APK actualizado o cargá la clave en Instructores > Publicación automática.', true);
+    return true;
+  }
+  function msgClaves(txt, malo){
+    var m = document.getElementById('favlCkMsg'); if (!m) return;
+    m.textContent = txt || ''; m.style.color = malo ? '#ff9b9b' : '#7ee787';
+  }
+  function crearClaveAlumno(){
+    var inp = document.getElementById('favlCkAlumno'); if (!inp) return;
+    var nombre = String(inp.value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!nombre) { msgClaves('Escribí el nombre del alumno para reconocer la clave.', true); return; }
+    if (haceFaltaClave()) return;
+    var cod = generarCk();
+    hashCk(cod).then(function(h){
+      var em = emitidas();
+      var inst = (typeof instructorActual !== 'undefined' && instructorActual && typeof instructorActual.id === 'string') ? instructorActual.id : '';
+      em.unshift({ h: h, code: cod, alumno: nombre, t: Date.now(), e: Date.now() + DIAS_CK * 86400000, ok: 0, okT: 0, msg: '' });
+      guardar(K_EMIT, em.slice(0, 200));
+      encolar('ck-new', h, { dias: DIAS_CK, i: inst });
+      inp.value = '';
+      msgClaves('Clave creada para ' + nombre + '. En 1 o 2 minutos queda lista para usar.', false);
+      pintarClaves();
+    });
+  }
+  var anulando = null, anulandoT = null;
+  function anularClave(h){
+    if (anulando !== h) {
+      anulando = h; if (anulandoT) clearTimeout(anulandoT);
+      anulandoT = setTimeout(function(){ anulando = null; pintarClaves(); }, 4000);
+      pintarClaves(); return;
+    }
+    anulando = null;
+    if (haceFaltaClave()) return;
+    var a = emitidas();
+    a.forEach(function(x){ if (x.h === h) x.anulada = Date.now(); });
+    guardar(K_EMIT, a);
+    encolar('ck-del', h);
+    pintarClaves();
+  }
+  function quitarClave(h){ guardar(K_EMIT, emitidas().filter(function(x){ return x.h !== h; })); pintarClaves(); }
+  function cambiarExigir(v){
+    if (haceFaltaClave()) { pintarClaves(); return; }
+    guardar(K_EXIGIR, { v: !!v, t: Date.now() });
+    encolar('ck-cfg', 'cfg', { exigir: !!v });
+    msgClaves(v ? 'Listo: en 1 o 2 minutos solo entran los alumnos con su clave personal.' : 'Listo: en 1 o 2 minutos también sirve el código del día.', false);
+    pintarClaves();
+  }
+
+  function armarFormularioClaves(caja){
+    function el(tag, css, txt){ var e = document.createElement(tag); if (css) e.style.cssText = css; if (txt) e.textContent = txt; return e; }
+    caja.appendChild(el('h4', 'margin:6px 0 4px', 'Claves personales para rendir'));
+    caja.appendChild(el('p', 'font-size:12px;opacity:.85;margin:0 0 8px;line-height:1.4',
+      'Creá una clave para cada alumno que va a rendir y pasásela (por mensaje o en persona). Cada clave se usa una sola vez y vence a los ' + DIAS_CK +
+      ' días. El alumno la escribe en «Acceso al examen» y la app la valida con GitHub (puede tardar hasta 2 minutos). Del alumno solo se publica un código secreto: su nombre queda únicamente en este celular.'));
+    var inp = el('input', 'width:100%;box-sizing:border-box;padding:9px;font-size:15px;border:1px solid #888;border-radius:8px;margin-bottom:6px;background:#fff !important;color:#111 !important');
+    inp.type = 'text'; inp.id = 'favlCkAlumno'; inp.placeholder = 'Nombre del alumno'; inp.maxLength = 60; inp.autocomplete = 'off';
+    inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); crearClaveAlumno(); } });
+    caja.appendChild(inp);
+    var b = el('button'); b.type = 'button'; b.textContent = 'Crear clave'; b.className = 'ibtn'; b.id = 'favlCkCrear';
+    b.onclick = crearClaveAlumno; caja.appendChild(b);
+    var b2 = el('button'); b2.type = 'button'; b2.textContent = 'Actualizar estado'; b2.className = 'ibtn ibtn-sec';
+    b2.onclick = function(){ refrescarRegistro(true); }; caja.appendChild(b2);
+    var m = el('div', 'font-size:13px;min-height:1.3em;line-height:1.4;margin-top:4px'); m.id = 'favlCkMsg'; caja.appendChild(m);
+    var lista = el('div', 'margin-top:6px'); lista.id = 'favlCkLista'; caja.appendChild(lista);
+    var ex = el('div', 'margin-top:10px'); ex.id = 'favlCkExigir'; caja.appendChild(ex);
+  }
+  function pintarClaves(){
+    var sec = document.getElementById('isec-claves'); if (!sec) return;
+    var caja = document.getElementById('favlClavesAlumno');
+    if (!caja) {
+      caja = document.createElement('div'); caja.id = 'favlClavesAlumno';
+      caja.style.cssText = 'padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid #333';
+      armarFormularioClaves(caja);
+      sec.insertBefore(caja, sec.firstChild);
+    }
+    var reg = regGuardado(), lista = document.getElementById('favlCkLista'), ex = document.getElementById('favlCkExigir');
+    if (lista) {
+      lista.innerHTML = '';
+      var em = emitidas();
+      if (!em.length) {
+        var v = document.createElement('div'); v.style.cssText = 'font-size:13px;opacity:.75'; v.textContent = 'Todavía no creaste claves en este celular.'; lista.appendChild(v);
+      }
+      em.forEach(function(x){
+        var st = estadoClave(x, reg);
+        var fila = document.createElement('div'); fila.className = 'irow';
+        var info = document.createElement('div'); info.className = 'iinfo';
+        var n = document.createElement('b'); n.textContent = x.alumno; info.appendChild(n);
+        var c = document.createElement('span');
+        c.style.cssText = 'display:block;font:700 18px/1.3 monospace;letter-spacing:1px;margin:2px 0;' + (st.cls === 'x' || st.cls === 'u' ? 'opacity:.5;text-decoration:line-through' : '');
+        c.textContent = formatoCk(x.code); info.appendChild(c);
+        var s = document.createElement('small'); s.style.cssText = 'display:block;opacity:1;color:' + (st.cls === 'ok' ? '#7ee787' : (st.cls === 'w' ? '#ffd479' : (st.cls === 'u' ? '#9ecbff' : '#ff9b9b')));
+        s.textContent = st.txt; info.appendChild(s);
+        fila.appendChild(info);
+        var ac = document.createElement('div'); ac.className = 'iacciones';
+        function bt(txt, fn, extra){ var b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.className = 'ibtn ' + (extra || 'ibtn-sec'); b.onclick = fn; ac.appendChild(b); }
+        var vigente = st.cls === 'ok' || st.cls === 'w';
+        if (vigente) {
+          bt('Copiar', function(){
+            copiarTexto(formatoCk(x.code),
+              function(){ msgClaves('Clave de ' + x.alumno + ' copiada: pegásela al alumno.', false); },
+              function(){ msgClaves('No se pudo copiar solo: anotá la clave que figura en la lista.', true); });
+          });
+          bt(anulando === x.h ? '¿Seguro? Tocá otra vez' : 'Anular', function(){ anularClave(x.h); }, 'ibtn-peligro');
+        } else {
+          bt('Quitar de la lista', function(){ quitarClave(x.h); });
+        }
+        fila.appendChild(ac); lista.appendChild(fila);
+      });
+    }
+    if (ex) {
+      ex.innerHTML = '';
+      var on = exigirEfectivo(reg);
+      var lab = document.createElement('label'); lab.style.cssText = 'display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.4';
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'favlCkExigirCb'; cb.checked = on;
+      cb.style.cssText = 'width:20px;height:20px;flex:none;margin:2px 0 0 0';
+      cb.onchange = function(){ cambiarExigir(cb.checked); };
+      var tx = document.createElement('span'); tx.textContent = 'Exigir la clave personal para rendir (el código del día deja de servir)';
+      lab.appendChild(cb); lab.appendChild(tx); ex.appendChild(lab);
+      var ay = document.createElement('div'); ay.style.cssText = 'font-size:12px;opacity:.8;margin:4px 0 0 28px;line-height:1.4';
+      ay.textContent = on ? 'Ahora solo entran los alumnos con una clave personal. Antes de empezar, asegurate de haberle pasado una a cada uno.'
+                          : 'Ahora los alumnos pueden entrar con el código del día o con una clave personal.';
+      ex.appendChild(ay);
+    }
+  }
+  function seccionClavesActiva(){
+    var p = document.getElementById('panelInstructor'), s = document.getElementById('isec-claves');
+    return !!(p && s && p.style.display === 'block' && s.classList.contains('activo'));
+  }
+  function refrescarRegistro(forzar){
+    if (!forzar && Date.now() - (regGuardado().t || 0) < 60000) return;
+    bajarRegistro(10000).then(function(r){
+      if (forzar && !r) msgClaves('No se pudo consultar el estado (¿hay internet?).', true);
+      pintarClaves();
+    });
+  }
+  var oTab = window.mostrarTabInstructor;
+  if (typeof oTab === 'function') window.mostrarTabInstructor = function(nombre){
+    var r = oTab.apply(this, arguments);
+    try { if (nombre === 'claves') { pintarClaves(); refrescarRegistro(false); } } catch (e) { console.error(e); }
+    return r;
+  };
+
+  /* resultado de los pedidos de claves (los avisa el bot de GitHub en el mismo pedido) */
+  function resultadoClave(it, res){
+    if (it.op === 'ck-new') {
+      if (res.tipo === 'RECHAZADO') { marcarEmitida(it.id, -1, res.texto); toast('No se creó la clave: ' + (res.texto || 'GitHub la rechazó.'), 'err', true); }
+      else { marcarEmitida(it.id, 1, ''); toast('✔ Clave lista para usar.', 'ok'); }
+    } else if (it.op === 'ck-del') {
+      toast(res.tipo === 'RECHAZADO' ? 'No se pudo anular la clave: ' + (res.texto || '') : '✔ Clave anulada: ya no sirve.', res.tipo === 'RECHAZADO' ? 'err' : 'ok');
+    } else {
+      if (res.tipo === 'RECHAZADO') { borrar(K_EXIGIR); toast('No se pudo cambiar la opción: ' + (res.texto || ''), 'err', true); }
+      else toast('✔ Listo: el cambio llega a todos los celulares en 1 o 2 minutos.', 'ok');
+    }
+    pintarClaves();
+    refrescarRegistroTarde();
+  }
+  function refrescarRegistroTarde(){ setTimeout(function(){ if (seccionClavesActiva()) refrescarRegistro(true); }, 90000); }
+
+  /* ---------- pantalla «Acceso al examen» (alumno) ---------- */
+  var canjeando = false;
+  function textoGate(txt){ var e = document.getElementById('errorCodigoAcceso'); if (e) e.textContent = txt || ''; }
+  function gateOcupado(si){
+    var i = document.getElementById('codigoAcceso'); if (i) i.disabled = !!si;
+    var b = document.querySelector('#gateAcceso button'); if (b) b.disabled = !!si;
+  }
+  function abrirExamen(){
+    var g = document.getElementById('gateAcceso'); if (g) g.style.display = 'none';
+    var pb = document.getElementById('progressBarContainer'); if (pb) pb.style.display = 'block';
+    var m = document.querySelector('main'); if (m) m.style.display = 'block';
+    try { document.getElementById('codigoAcceso').removeEventListener('keydown', onEnterCodigoAcceso); } catch (e) {}
+  }
+  function claveRechazadaPorGitHub(status){
+    if (status === 401) { if (claveGuardada()) borrar(K_TOK); else guardar(K_MALA, TOKEN_APK.slice(-10)); }
+  }
+  async function canjear(cod){
+    if (canjeando) return;
+    canjeando = true;
+    var input = document.getElementById('codigoAcceso');
+    try {
+      var h = await hashCk(cod);
+      var prev = leer(K_CANJE, null), num = null;
+      if (prev && prev.h === h && typeof prev.num === 'number' && Date.now() - prev.t < 15 * 60000) {
+        num = prev.num;                      // mismo celular y misma clave: se recupera el intento anterior (no se gasta otra vez)
+      } else {
+        var reg = regGuardado(), k = null, i;
+        for (i = 0; i < reg.claves.length; i++) if (reg.claves[i].h === h) k = reg.claves[i];
+        if (k && k.u > 0) { textoGate('Esta clave ya fue usada. Pedile una nueva a tu instructor.'); return; }
+        if (k && k.e <= Date.now()) { textoGate('Esta clave venció. Pedile una nueva a tu instructor.'); return; }
+        if (!clave()) { textoGate('Esta versión de la app no puede validar claves personales. Actualizá la app o pedile a tu instructor otra forma de ingresar.'); return; }
+      }
+      gateOcupado(true);
+      textoGate('Validando tu clave… puede tardar hasta 2 minutos. No cierres la app.');
+      if (num == null) {
+        var r = await crearPedido(JSON.stringify({ v: 1, n: nonce(), t: Date.now(), op: 'ck-use', id: h }), 'FAVL-INSTR ck-use ' + nonce().slice(0, 8));
+        num = r.num;
+        guardar(K_CANJE, { h: h, num: num, t: Date.now() });
+      }
+      var inicio = Date.now(), res = null;
+      var tope = window.__favlCkTope || 240000, cada = window.__favlCkCada || 5000;
+      var primera = window.__favlCkPrimera != null ? window.__favlCkPrimera : 10000;
+      await esperar(primera);
+      while (true) {
+        try { res = await consultar({ num: num }); } catch (e) { res = null; }
+        if (res || Date.now() - inicio >= tope) break;
+        textoGate('Validando tu clave… (' + Math.round((Date.now() - inicio) / 1000) + ' s). Puede tardar hasta 2 minutos; no cierres la app.');
+        await esperar(cada);
+      }
+      if (!res) { textoGate('GitHub está tardando más de lo normal. Esperá un momento y tocá «Ingresar» otra vez con la misma clave: no se pierde.'); return; }
+      if (res.tipo === 'RECHAZADO') {
+        borrar(K_CANJE);
+        textoGate(res.texto || 'La clave no es válida. Pedile una nueva a tu instructor.');
+        if (input) { input.value = ''; }
+        return;
+      }
+      textoGate('');
+      abrirExamen();
+    } catch (e) {
+      var st = (e && e.status) || 0;
+      if (e && (e.tipo === 'auth' || e.tipo === 'repo')) {
+        claveRechazadaPorGitHub(st);
+        textoGate('La app no pudo validar la clave (problema de la app, no tuyo). Avisale a tu instructor.');
+      } else if (e && e.tipo === 'red') {
+        textoGate('Sin conexión con el servidor. Revisá tu internet y probá de nuevo: tu clave no se gastó.');
+      } else {
+        textoGate('No se pudo validar la clave. Probá de nuevo; si sigue igual, avisale a tu instructor.');
+      }
+    } finally {
+      canjeando = false; gateOcupado(false);
+      try { if (input && document.getElementById('gateAcceso').style.display !== 'none') input.focus(); } catch (e) {}
+    }
+  }
+  var validarOriginal = window.validarCodigoAcceso;
+  if (typeof validarOriginal === 'function') window.validarCodigoAcceso = async function(){
+    var input = document.getElementById('codigoAcceso');
+    var texto = String((input && input.value) || '');
+    if (canjeando) return;
+    if (!texto.trim()) return validarOriginal.apply(this, arguments);
+    var cod = normalizarCk(texto);
+    if (RE_CK.test(cod)) return canjear(cod);
+    // otro código (el del día o uno fijo): sirve salvo que el instructor haya pedido exigir la clave personal
+    var reg = regGuardado();
+    if (Date.now() - (reg.t || 0) > 2 * 60000) { var nueva = await bajarRegistro(2500); if (nueva) reg = nueva; }
+    if (exigirEfectivo(reg)) {
+      textoGate('Para rendir necesitás tu clave personal (formato XXXX-XXXX-XXXX), que te da tu instructor.');
+      if (input) { input.value = ''; input.focus(); }
+      return;
+    }
+    return validarOriginal.apply(this, arguments);
+  };
+
   /* ---------- arranque y reintentos ---------- */
-  function tic(){ if (document.hidden) return; procesar(); if (leer(K_VERIF, []).length) verificar(); }
+  function tic(){
+    if (document.hidden) return;
+    procesar(); if (leer(K_VERIF, []).length) verificar();
+    try { if (seccionClavesActiva()) refrescarRegistro(false); } catch (e) {}
+  }
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) { bloqueoHasta = Math.min(bloqueoHasta, Date.now() + 2000); tic(); } });
   window.addEventListener('online', function(){ bloqueoHasta = 0; tic(); });
   setInterval(tic, 10000);
