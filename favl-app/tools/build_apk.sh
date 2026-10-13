@@ -10,7 +10,8 @@
 #   VERSION_NAME        texto de versión (se ve en Ajustes > Aplicaciones)
 # Opcional: EXPECTED_CERT_SHA256 (huella de la clave de FAVL), ANDROID_JAR,
 #           INSTR_VERSION (marca de tiempo), FAVL_SITE (https://<usuario>.github.io), INSTR_JSON_OUT (dónde dejar favl-instructores.json),
-#           FAVL_REPO (usuario/repositorio al que la app manda los cambios de instructores)
+#           FAVL_REPO (usuario/repositorio al que la app manda los cambios de instructores),
+#           FAVL_ISSUES_TOKEN (clave de GitHub que lleva la app para publicar sin que nadie la escriba)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,6 +24,7 @@ export KEYSTORE_PASSWORD KEY_PASSWORD
 export INSTR_VERSION="${INSTR_VERSION:-$(date +%s)}"
 export FAVL_SITE="${FAVL_SITE:-https://yapurnet.github.io}"
 export FAVL_REPO="${FAVL_REPO:-${GITHUB_REPOSITORY:-yapurnet/yapurnet.github.io}}"
+export FAVL_ISSUES_TOKEN="${FAVL_ISSUES_TOKEN:-}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -36,6 +38,7 @@ mkdir -p "$WORK/assets/www/js"
 INSTR_JSON_OUT="${INSTR_JSON_OUT:-$WORK/favl-instructores.json}"
 node "$ROOT/tools/extract_instructores.js" "$RAW" "$INSTR_JSON_OUT" "$INSTR_VERSION" \
      "$ROOT/data/instructores-cambios.json" "$WORK/examen_fusionado.html"
+[ -n "$FAVL_ISSUES_TOKEN" ] || echo "    AVISO: esta versión de la app no trae la clave de GitHub: cada instructor que cargue instructores tendrá que pegarla una vez."
 python3 "$ROOT/tools/patch_examen.py" "$WORK/examen_fusionado.html" "$WORK/assets/www/examen.html"
 
 echo "==> 2/6 Páginas de la app"

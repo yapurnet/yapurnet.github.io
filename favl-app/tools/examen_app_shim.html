@@ -169,15 +169,17 @@ function entregarPdfApp(nombre, b64){
 /* ===== Publicar los cambios de instructores a todos los celulares (solo dentro de la app) =====
    Al agregar, editar o quitar un instructor en el panel, la app manda el cambio a GitHub (abre un pedido
    «FAVL-INSTR» a nombre del dueño del repositorio, con su clave de GitHub). GitHub lo valida, lo aplica, publica
-   la lista nueva y las demás apps la bajan solas. La clave se pega UNA sola vez en el celular que carga
-   instructores y queda guardada solo ahí (no viaja dentro del APK). Sin clave, los cambios quedan solo en
-   este celular (como antes). Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión. */
+   la lista nueva y las demás apps la bajan solas. La clave puede venir dentro del APK (compilación con el secreto
+   FAVL_ISSUES_TOKEN): entonces cualquier instructor publica sin escribir nada. Si el APK no la trae (o venció),
+   se pega a mano UNA vez en el celular. Sin clave, los cambios quedan solo en este celular (como antes).
+   Sin internet, el cambio queda en cola y se envía cuando vuelve la conexión. */
 (function(){
   if (!window.AndroidBridge) return;
   var REPO = '__FAVL_REPO__';
+  var TOKEN_APK = '__FAVL_ISSUES_TOKEN__';       // clave que trae el APK (puede estar vacía)
   var API = 'https://api.github.com/repos/' + REPO;
   var K_TOK = 'favlGhKeyV1', K_COLA = 'favlColaPublicarV1', K_VERIF = 'favlVerificarV1',
-      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1';
+      K_PUB = 'favlPublicadosV1', K_NO = 'favlNoPublicarV1', K_MALA = 'favlClaveApkVencidaV1';
   var RE_CLAVE = /^(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,255}$/;
   var MAX_LOGO = 60000;                          // el cuerpo de un pedido admite 65536 caracteres
 
@@ -186,7 +188,10 @@ function entregarPdfApp(nombre, b64){
   function guardar(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
   function borrar(k){ try { localStorage.removeItem(k); } catch (e) {} }
   function limpiarClave(c){ return String(c == null ? '' : c).replace(/\s+/g, ''); }
-  function clave(){ var c = leer(K_TOK, ''); return (typeof c === 'string' && RE_CLAVE.test(c)) ? c : ''; }
+  function claveGuardada(){ var c = leer(K_TOK, ''); return (typeof c === 'string' && RE_CLAVE.test(c)) ? c : ''; }
+  // la clave pegada a mano manda; si no hay, la que trae el APK (salvo que GitHub ya la haya rechazado)
+  function claveDelApk(){ return RE_CLAVE.test(TOKEN_APK) && leer(K_MALA, '') !== TOKEN_APK.slice(-10) ? TOKEN_APK : ''; }
+  function clave(){ return claveGuardada() || claveDelApk(); }
 
   function nonce(){
     var a = '', i;
@@ -316,11 +321,11 @@ function entregarPdfApp(nombre, b64){
         } else if (tipo === 'auth' || tipo === 'repo') {
           bloqueoHasta = Date.now() + 5 * 60000;
           var vencida = !!(err && err.status === 401);
-          if (vencida) borrar(K_TOK);             // clave vencida o revocada: se vuelve a pedir una nueva
+          if (vencida) { if (claveGuardada()) borrar(K_TOK); else guardar(K_MALA, TOKEN_APK.slice(-10)); }   // vencida o revocada: se vuelve a pedir una nueva
           if (!avisoAuth) {
             avisoAuth = true;
             toast(vencida
-              ? 'La clave de GitHub venció o dejó de valer. Pedile la nueva al administrador y cargala en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
+              ? 'La clave de GitHub venció o dejó de valer. Pedile la nueva al administrador (o el APK actualizado) y cargala en Modo instructor > Instructores > Publicación automática; los cambios quedan guardados y se publican apenas la cargues.'
               : (tipo === 'auth'
                 ? 'GitHub no dejó publicar: a la clave le falta el permiso «Issues: Read and write» sobre el repositorio (o hay demasiados pedidos juntos). Los cambios quedan guardados y se reintentan.'
                 : 'GitHub no encontró el repositorio o tiene desactivados los pedidos (Issues). Los cambios quedan guardados.'), 'err', true);
@@ -521,7 +526,7 @@ function entregarPdfApp(nombre, b64){
   /* ---------- copiar la clave para pasársela a otro instructor ---------- */
   var claveVisible = false;
   function copiarClave(){
-    var c = clave(); if (!c) return;
+    var c = claveGuardada(); if (!c) return;
     function exito(){
       claveVisible = false;
       toast('Clave copiada. Pegala en un mensaje para pasársela a los otros instructores (es secreta: no la compartas con alumnos).', 'ok', true);
@@ -573,10 +578,14 @@ function entregarPdfApp(nombre, b64){
       var pend = leer(K_COLA, []).length, esp = leer(K_VERIF, []).length;
       if (pend) linea('Pendiente de enviar (falta internet): ' + pend);
       if (esp) linea('Esperando la confirmación de GitHub: ' + esp);
-      linea('Para que otro instructor también pueda agregar instructores desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la pegue una vez en su app. Es secreta: no se la des a los alumnos.');
-      chico('Copiar clave', function(){ copiarClave(); });
-      chico('Cambiar clave', function(){ borrar(K_TOK); claveVisible = false; estado(); });
-      if (claveVisible) {
+      if (claveGuardada()) {
+        linea('Para que otro instructor también pueda agregar instructores desde su celular: tocá «Copiar clave», pegásela en un mensaje y que la pegue una vez en su app. Es secreta: no se la des a los alumnos.');
+        chico('Copiar clave', function(){ copiarClave(); });
+        chico('Cambiar clave', function(){ borrar(K_TOK); claveVisible = false; estado(); });
+      } else {
+        linea('Esta app ya trae la clave: cualquier instructor puede agregar, editar o quitar instructores desde su celular sin escribir nada.');
+      }
+      if (claveVisible && claveGuardada()) {
         var ver = document.createElement('input'); ver.type = 'text'; ver.readOnly = true; ver.value = clave();
         ver.style.cssText = 'width:100%;box-sizing:border-box;margin-top:8px;padding:8px;font-size:14px;border:1px solid #888;border-radius:8px;background:#fff !important;color:#111 !important';
         ver.onfocus = function(){ try { ver.select(); } catch (e) {} };
