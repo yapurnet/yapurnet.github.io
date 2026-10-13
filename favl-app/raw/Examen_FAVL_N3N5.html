@@ -1508,18 +1508,11 @@ function codigoAccesoDeHoy(){
   return PREFIJOS_DIA[f.diaIndex] + f.dd + f.mm + f.aa;
 }
 
-// Lista de códigos fijos que siempre funcionan, además del código del día
-// (por si querés mantener alguno de los códigos anteriores como respaldo,
-// o dar uno especial para un turno puntual). Podés dejarla vacía si no la
-// necesitás; el código del día va a seguir funcionando igual.
-const CODIGOS_ACCESO_HASH = [
-  "2e1a8f0346ab0212831b0eb53078c9e0fe3ec0123910b2fb75cb9d95b3138c48", // FAVL-EXAMEN-2026 (default original)
-  "3a8d17e85d02f308b1e3797f4ddf46ed3318adeac524c89c9f8ac84034cb7aa1", // 2026favl
-  "f6d452691967ad99e59367ecd98eec7f4ac5e44bd0efd81d4cd8186d7a2de18a", // favl2027
-  "eaf4b4ac6b3aef158c37d59e759126127ee46fd1b28d79eca70a506663bc9922", // 2028favl
-  "b61821874a5ba0415dad769adaf22ee0ab25b2fdc2563764e623abea22ce830d", // falv2029 (tal cual me lo pasaste)
-  "1756654f818fc1c10005567b0060a8ea152a0a37bef677def63664ee99d69e8c"  // 2030favl
-];
+// Lista de códigos fijos que siempre funcionan, además del código del día.
+// Está vacía a propósito: hoy solo sirve el código del día (dos letras del día de la semana +
+// día + mes + año de dos cifras; por ejemplo, martes 13/10/2026 = ma131026).
+// Si alguna vez hace falta un código fijo, se agrega acá su hash (ver la pestaña «Claves» del modo instructor).
+const CODIGOS_ACCESO_HASH = [];
 
 async function sha256Hex(texto){
   const enc = new TextEncoder().encode(texto.trim().toUpperCase());
