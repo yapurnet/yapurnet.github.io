@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacidad — FAVL Bandera Vuela</title>
+<meta name="description" content="Política de privacidad de la app FAVL Bandera Vuela: qué datos usa, para qué, con quién se comparten y cómo pedir su eliminación.">
+<style>
+  :root{ --bg:#f4f7fb; --surface:#ffffff; --text:#172033; --muted:#5b6476; --border:#e3e9f2; --accent:#0b5cab; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0e1522; --surface:#152033; --text:#e8edf5; --muted:#a7b1c2; --border:#26344d; --accent:#5fb3ff; }
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  main{ max-width:760px; margin:0 auto; padding:32px 16px 56px; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:24px 20px; }
+  h1{ font-size:1.6rem; line-height:1.25; margin:0 0 4px; }
+  h2{ font-size:1.15rem; margin:28px 0 8px; }
+  p, li{ margin:0 0 10px; }
+  ul{ padding-left:22px; margin:0 0 10px; }
+  .sub{ color:var(--muted); margin:0 0 20px; }
+  table{ width:100%; border-collapse:collapse; margin:8px 0 12px; font-size:.95rem; }
+  th, td{ text-align:left; vertical-align:top; padding:8px; border-bottom:1px solid var(--border); }
+  th{ color:var(--muted); font-weight:600; }
+  .tabla{ overflow-x:auto; }
+  a{ color:var(--accent); }
+  footer{ color:var(--muted); font-size:.9rem; margin-top:20px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+  <h1>Política de privacidad — FAVL Bandera Vuela</h1>
+  <p class="sub">Última actualización: 14 de octubre de 2026</p>
+
+  <p>La app <b>FAVL Bandera Vuela</b> (paquete <code>ar.com.banderavuela.favlapp</code>) sirve para estudiar y rendir el examen teórico
+  de vuelo libre (niveles 3, 4 y 5) que toman los instructores. Esta página explica qué datos usa la app, para qué y cómo pedir que se borren.</p>
+
+  <p><b>Responsable:</b> Mauro Yapur, desarrollador de la app. <b>Contacto:</b> <a href="mailto:CORREO_DE_CONTACTO">CORREO_DE_CONTACTO</a>.</p>
+
+  <h2>Resumen</h2>
+  <ul>
+    <li>El <b>cuestionario de estudio</b> funciona sin datos personales: lo que marcás queda solo en tu celular.</li>
+    <li>Al <b>rendir un examen</b> se envían tus datos y tu resultado al instructor que elegiste.</li>
+    <li>La app <b>no muestra publicidad</b>, <b>no vende datos</b> y <b>no usa herramientas de seguimiento ni estadísticas</b>.</li>
+    <li>Todo lo que sale del celular viaja cifrado (HTTPS).</li>
+  </ul>
+
+  <h2>Qué datos se usan y para qué</h2>
+  <div class="tabla">
+  <table>
+    <tr><th>Datos</th><th>Para qué</th><th>A dónde van</th></tr>
+    <tr>
+      <td><b>Alumno que rinde:</b> nombre y apellido, DNI, fecha del examen y, si los cargás, número de licencia y teléfono. Respuestas, puntaje y resultado del examen.</td>
+      <td>Identificar el examen, corregirlo y enviárselo al instructor elegido.</td>
+      <td>Se envían a un servicio de Google (Google Apps Script) administrado por el responsable, que registra el resultado y manda por correo el examen en PDF a los correos del instructor elegido. Además, el PDF se puede guardar en el celular y compartir si vos lo decidís.</td>
+    </tr>
+    <tr>
+      <td><b>Clave personal de examen</b> (la que te da tu instructor)</td>
+      <td>Comprobar que la clave existe y que se usa una sola vez.</td>
+      <td>Pasa por un servicio propio en Cloudflare. A GitHub solo llega un código derivado de la clave (un <i>hash</i>), del que no se puede obtener la clave ni tu nombre. El nombre del alumno asociado a la clave queda únicamente en el celular del instructor.</td>
+    </tr>
+    <tr>
+      <td><b>Instructores:</b> nombre, número de licencia, correos donde reciben los exámenes y, opcionalmente, un logo.</td>
+      <td>Que los alumnos elijan a su instructor y que los exámenes le lleguen.</td>
+      <td>Cuando un instructor decide publicarlos, se guardan en el repositorio de GitHub de la app (público) para que lleguen a todos los celulares.</td>
+    </tr>
+    <tr>
+      <td><b>Datos técnicos:</b> dirección IP y versión de la app.</td>
+      <td>Seguridad del servicio (limitar abusos) y avisar cuando hay una versión nueva.</td>
+      <td>Los servidores que atienden los pedidos (Google, Cloudflare y GitHub) registran la dirección IP como cualquier sitio web. La app no la guarda.</td>
+    </tr>
+  </table>
+  </div>
+
+  <h2>Lo que queda solo en tu celular</h2>
+  <p>Las preguntas marcadas del cuestionario, las preferencias del narrador de voz (que usa el motor de voz del propio celular) y, en el caso
+  de los instructores, la lista de claves creadas con el nombre de cada alumno. Se borran al desinstalar la app o al borrar sus datos
+  desde los ajustes de Android.</p>
+
+  <h2>Con quién se comparten</h2>
+  <p>Solo con el instructor que el alumno elige al rendir. Los proveedores mencionados (Google, Cloudflare y GitHub) prestan el servicio técnico y no
+  usan estos datos para fines propios. No se venden ni se ceden datos a terceros, ni se usan para publicidad.</p>
+
+  <h2>Cuánto tiempo se guardan</h2>
+  <p>Los resultados de los exámenes se conservan mientras sean necesarios como registro de la evaluación del alumno. Podés pedir que se borren
+  en cualquier momento (ver abajo). El instructor conserva el PDF recibido por correo según sus propias necesidades.</p>
+
+  <h2>Tus derechos y cómo pedir la eliminación</h2>
+  <p>Podés pedir acceso, corrección o eliminación de tus datos escribiendo a
+  <a href="mailto:CORREO_DE_CONTACTO">CORREO_DE_CONTACTO</a>. Indicá tu nombre, DNI y la fecha aproximada del examen. Respondemos dentro
+  de los plazos de la ley: 10 días corridos para el acceso y 5 días hábiles para corregir o borrar.</p>
+  <p>En Argentina, estos derechos están protegidos por la Ley 25.326 de Protección de los Datos Personales. La Agencia de Acceso a la Información
+  Pública, órgano de control de esa ley, atiende las denuncias y reclamos de quienes consideren afectados sus derechos.</p>
+
+  <h2>Menores de edad</h2>
+  <p>La app está pensada para alumnos de vuelo libre e instructores. Si un menor de edad rinde un examen, debe hacerlo con la autorización de
+  sus padres o tutores y bajo la supervisión de su instructor.</p>
+
+  <h2>Permisos de la app</h2>
+  <ul>
+    <li><b>Internet:</b> enviar el examen, validar claves y buscar actualizaciones.</li>
+    <li><b>Almacenamiento</b> (solo en Android 9 o anterior): guardar el PDF del examen en Descargas.</li>
+  </ul>
+
+  <h2>Cambios en esta política</h2>
+  <p>Si esta política cambia, se actualiza esta página y la fecha de arriba.</p>
+</div>
+<footer>FAVL Bandera Vuela</footer>
+</main>
+</body>
+</html>
