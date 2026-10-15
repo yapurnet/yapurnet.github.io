@@ -62,15 +62,6 @@ el **Worker de Cloudflare** (`favl-app/worker/`): la clave de GitHub vive solo e
 su dirección. Se activa poniendo la dirección en `favl-app/worker/worker-url.txt` (o en la variable `FAVL_WORKER_URL`
 de Actions); entonces el APK se compila sin ninguna clave de GitHub. Pasos completos en `favl-app/worker/LEEME.md`.
 
-## Google Play y código de la app
-
-- La parte Android de la app (la pantalla que muestra las páginas, el narrador de voz y guardar el PDF) está en
-  `favl-app/app/src` y se compila en cada versión. Apunta a **Android 16 (API 36)**, como exige Google Play.
-- Cada compilación genera también el **AAB** para Google Play (queda en *Actions → la corrida → Artifacts*).
-  Pasos para publicar en Play: [`PLAY.md`](PLAY.md). Política de privacidad: `https://yapurnet.github.io/favl-privacidad.html`.
-- Antes de tocar el código de la app conviene hacerlo en una rama: el flujo **Probar app FAVL** la compila y la prueba en
-  emuladores de Android 16 y Android 11 (con capturas de pantalla) sin publicar nada.
-
 ## Si algo falla
 
 Pestaña *Actions* → entrar al intento con la cruz roja → leer el mensaje del paso que falló:

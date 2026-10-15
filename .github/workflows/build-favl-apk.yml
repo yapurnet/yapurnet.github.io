@@ -30,18 +30,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
       - name: Instalar herramientas de Android
         run: |
-          set -euo pipefail
-          # El SDK de Android ya viene en la máquina de GitHub: se asegura la versión que pide Google Play (Android 16, API 36)
-          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" > /dev/null
-          # bundletool arma el AAB (el formato que pide Google Play)
-          curl -sSLf -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt apksigner zipalign android-sdk-platform-23 zip python3
 
       - name: Compilar y firmar con la clave de FAVL
         env:
@@ -61,7 +53,7 @@ jobs:
             exit 1
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/favl.keystore"
-          export KEYSTORE="$RUNNER_TEMP/favl.keystore" BUNDLETOOL_JAR="$RUNNER_TEMP/bundletool.jar" BUILD_TOOLS=36.0.0
+          export KEYSTORE="$RUNNER_TEMP/favl.keystore"
           # El número de versión siempre crece (Android lo exige para actualizar encima).
           export VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))
           export VERSION_NAME="12.${GITHUB_RUN_NUMBER}"
@@ -69,38 +61,10 @@ jobs:
           export INSTR_VERSION="$(date +%s)"
           export FAVL_SITE="https://${GITHUB_REPOSITORY_OWNER}.github.io"
           export INSTR_JSON_OUT="$RUNNER_TEMP/favl-instructores.json"
-          bash favl-app/tools/build_apk.sh "$RUNNER_TEMP/FAVL-BanderaVuela.apk" "$RUNNER_TEMP/FAVL-BanderaVuela.aab"
+          bash favl-app/tools/build_apk.sh "$RUNNER_TEMP/FAVL-BanderaVuela.apk"
           rm -f "$KEYSTORE"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-
-      - name: Guardar el AAB (para Google Play)
-        uses: actions/upload-artifact@v4
-        with:
-          name: FAVL-BanderaVuela-${{ env.VERSION_NAME }}-aab
-          path: ${{ runner.temp }}/FAVL-BanderaVuela.aab
-          retention-days: 90
-
-      # Subida automática a Google Play: se activa sola cuando existe el secreto PLAY_SERVICE_ACCOUNT_JSON
-      # (ver favl-app/PLAY.md). Pista: variable FAVL_PLAY_TRACK (por defecto «internal»).
-      # Estado: variable FAVL_PLAY_STATUS (por defecto «draft»: queda como borrador y se publica a mano desde Play Console).
-      - name: ¿Hay acceso a Google Play?
-        id: play
-        env:
-          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-        run: echo "activo=$([ -n "$PLAY_JSON" ] && echo si || echo no)" >> "$GITHUB_OUTPUT"
-
-      - name: Subir a Google Play
-        if: steps.play.outputs.activo == 'si'
-        continue-on-error: true      # si Google Play falla, el APK del enlace se publica igual
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ar.com.banderavuela.favlapp
-          releaseFiles: ${{ runner.temp }}/FAVL-BanderaVuela.aab
-          releaseName: ${{ env.VERSION_NAME }}
-          track: ${{ vars.FAVL_PLAY_TRACK || 'internal' }}
-          status: ${{ vars.FAVL_PLAY_STATUS || 'draft' }}
 
       - name: Publicar el APK en la raíz del sitio
         run: |
