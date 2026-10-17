@@ -1318,6 +1318,19 @@ function pintarInstructor(instr){
   const logoImg = document.getElementById('instructorLogo');
   logoImg.src = instr.logo;
   logoImg.alt = instr.nombre + ' - Logo';
+  pintarResumenToma();
+}
+
+// Cartel «Toma el examen» (arriba de «Comenzar Examen»): instructor a cargo, nivel y duración,
+// para que nadie empiece con el instructor equivocado (el PDF le llega por mail a ese instructor).
+function pintarResumenToma(){
+  const n = document.getElementById('resumenTomaNombre');
+  const d = document.getElementById('resumenTomaDetalle');
+  if (!n || !d || !instructorActual) return;
+  n.textContent = instructorActual.nombre.toUpperCase() + ' (Lic. ' + instructorActual.licencia + ')';
+  let detalle = '';
+  try { detalle = NIVELES[nivelExamen].label + ' · ' + duracionMin + ' minutos'; } catch (e) { detalle = ''; }   // al cargar, el nivel todavía no existe
+  d.textContent = detalle;
 }
 
 function poblarSelectorInstructores(idSel){
@@ -1564,6 +1577,11 @@ document.getElementById('codigoAcceso').addEventListener('keydown', onEnterCodig
 <label>Teléfono (opcional): <input id="studentPhone" type="text"/></label>
 <label>Fecha del Examen: <input id="examDate" readonly="" type="text"/></label>
 </form>
+<div id="resumenToma" style="margin:14px 0 10px;padding:12px 14px;border-radius:12px;background:#e8f1fb;border:2px solid #1565C0;color:#0d2b4f;text-align:center;">
+<div style="font-size:13px;opacity:.8;">Toma el examen</div>
+<div id="resumenTomaNombre" style="font-size:20px;font-weight:800;line-height:1.25;"></div>
+<div id="resumenTomaDetalle" style="font-size:13px;margin-top:2px;"></div>
+</div>
 <button onclick="iniciarExamen()">Comenzar Examen</button>
 <p class="error-message" id="errorMessage"></p>
 <p id="nivelIndicador"></p>
@@ -1662,6 +1680,17 @@ function iniciarExamen(){
   const dni = document.getElementById('studentDNI').value.trim();
   if(!name){ alert('Complete Nombre y Apellido'); return; }
   if(!dni){ alert('Complete DNI'); return; }
+  // Confirmar quién toma el examen: a ese instructor le llega el PDF por mail
+  const correos = (instructorActual.emails || []).filter(Boolean);
+  const aviso = '¿El examen lo toma ' + instructorActual.nombre.toUpperCase() + ' (Lic. ' + instructorActual.licencia + ')?\n\n' +
+    NIVELES[nivelExamen].label + ' · ' + duracionMin + ' minutos\n' +
+    (correos.length ? 'El PDF se enviará a: ' + correos.join(', ') : 'Este instructor no tiene correos cargados: el PDF no se enviará por mail.') +
+    '\n\nAceptar: comenzar el examen.\nCancelar: volver y cambiar el instructor en «Instructor a cargo».';
+  if(!confirm(aviso)){
+    const sel = document.getElementById('instructorSelect');
+    if(sel){ sel.scrollIntoView({ block: 'center' }); sel.focus(); }
+    return;
+  }
   const qbt = obtenerBanco(nivelExamen);
   selectedQuestions = selectRandomQuestions(qbt);
   // asignar qid único por pregunta, y mezclar el orden de las opciones
@@ -2773,6 +2802,7 @@ function actualizarIndicadorNivel(){
   if(actual) actual.textContent = `Nivel actual: ${cfg.label} · Duración: ${duracionMin} minutos`;
   const portada = document.getElementById('duracionPortada');
   if(portada) portada.textContent = `${duracionMin} minutos`;
+  pintarResumenToma();
   document.querySelectorAll('#panelNivel .duracion-opcion').forEach(b => b.classList.toggle('activa', Number(b.dataset.min) === duracionMin));
   // Encabezado principal: refleja el nivel elegido (N3/N4/N5) en todo momento,
   // tanto en la pantalla de datos como durante el examen y en los resultados.
