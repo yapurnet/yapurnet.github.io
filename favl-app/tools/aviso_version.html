@@ -157,11 +157,15 @@
       return 'Versión de la app: ' + MI_NOMBRE + '.';
     }
   };
-  // en la pantalla de acceso al examen se ve la versión (sirve para ayudar a un alumno por mensaje)
+  // la leyenda del menú y de la pantalla de acceso al examen («uso interno de la escuela») suma la versión
+  // (sirve para ayudar a un alumno por mensaje); si el examen no la trae, se agrega al final del acceso
   function marcarVersionEnAcceso(){
+    var texto = 'FAVL App ' + MI_NOMBRE + ' \u00b7 uso interno de la escuela';
+    var l = document.getElementById('leyendaUso');
+    if (l) { l.textContent = texto; return; }
     var g = document.getElementById('gateAcceso');
     if (g && !document.getElementById('favlVersionAcceso')) {
-      var p = document.createElement('p'); p.id = 'favlVersionAcceso'; p.textContent = 'App ' + MI_NOMBRE;
+      var p = document.createElement('p'); p.id = 'favlVersionAcceso'; p.textContent = texto;
       p.style.cssText = 'opacity:.6;font-size:11px;margin:10px 0 0';
       g.appendChild(p);
     }

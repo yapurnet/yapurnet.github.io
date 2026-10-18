@@ -1117,7 +1117,7 @@ color:#fff;border-radius:20px;padding:24px 28px;box-shadow:0 14px 32px rgba(0,0,
 </div>
 
 <div style="background:rgba(255,255,255,.12);padding:14px;border-radius:14px">
-⏱ <b>Duración:</b> 40 minutos<br>
+⏱ <b>Duración:</b> <span id="duracionPortada">40 minutos</span><br>
 ❓ <b>Preguntas:</b> 60<br>
 🏆 <b>Puntaje máximo:</b> 360 puntos<br>
 ✅ <b>Puntaje mínimo de aprobación N3:</b> 234 puntos (65 %)<br>
@@ -1318,6 +1318,19 @@ function pintarInstructor(instr){
   const logoImg = document.getElementById('instructorLogo');
   logoImg.src = instr.logo;
   logoImg.alt = instr.nombre + ' - Logo';
+  pintarResumenToma();
+}
+
+// Cartel «Toma el examen» (arriba de «Comenzar Examen»): instructor a cargo, nivel y duración,
+// para que nadie empiece con el instructor equivocado (el PDF le llega por mail a ese instructor).
+function pintarResumenToma(){
+  const n = document.getElementById('resumenTomaNombre');
+  const d = document.getElementById('resumenTomaDetalle');
+  if (!n || !d || !instructorActual) return;
+  n.textContent = instructorActual.nombre.toUpperCase() + ' (Lic. ' + instructorActual.licencia + ')';
+  let detalle = '';
+  try { detalle = NIVELES[nivelExamen].label + ' · ' + duracionMin + ' minutos'; } catch (e) { detalle = ''; }   // al cargar, el nivel todavía no existe
+  d.textContent = detalle;
 }
 
 function poblarSelectorInstructores(idSel){
@@ -1470,6 +1483,7 @@ function ajustarTexto(delta){
 <br/>
 <button type="button" onclick="validarCodigoAcceso()" style="margin-top:16px;">Ingresar</button>
 <p id="errorCodigoAcceso" style="color:#ffd479;min-height:20px;margin-top:12px;font-size:14px;"></p>
+<p id="leyendaUso" style="opacity:.6;font-size:11px;margin:10px 0 0;">Uso interno de la escuela</p>
 </div>
 <script>
 // ===== Código de validación para iniciar el examen =====
@@ -1563,6 +1577,11 @@ document.getElementById('codigoAcceso').addEventListener('keydown', onEnterCodig
 <label>Teléfono (opcional): <input id="studentPhone" type="text"/></label>
 <label>Fecha del Examen: <input id="examDate" readonly="" type="text"/></label>
 </form>
+<div id="resumenToma" style="margin:14px 0 10px;padding:12px 14px;border-radius:12px;background:#e8f1fb;border:2px solid #1565C0;color:#0d2b4f;text-align:center;">
+<div style="font-size:13px;opacity:.8;">Toma el examen</div>
+<div id="resumenTomaNombre" style="font-size:20px;font-weight:800;line-height:1.25;"></div>
+<div id="resumenTomaDetalle" style="font-size:13px;margin-top:2px;"></div>
+</div>
 <button onclick="iniciarExamen()">Comenzar Examen</button>
 <p class="error-message" id="errorMessage"></p>
 <p id="nivelIndicador"></p>
@@ -1661,6 +1680,17 @@ function iniciarExamen(){
   const dni = document.getElementById('studentDNI').value.trim();
   if(!name){ alert('Complete Nombre y Apellido'); return; }
   if(!dni){ alert('Complete DNI'); return; }
+  // Confirmar quién toma el examen: a ese instructor le llega el PDF por mail
+  const correos = (instructorActual.emails || []).filter(Boolean);
+  const aviso = '¿El examen lo toma ' + instructorActual.nombre.toUpperCase() + ' (Lic. ' + instructorActual.licencia + ')?\n\n' +
+    NIVELES[nivelExamen].label + ' · ' + duracionMin + ' minutos\n' +
+    (correos.length ? 'El PDF se enviará a: ' + correos.join(', ') : 'Este instructor no tiene correos cargados: el PDF no se enviará por mail.') +
+    '\n\nAceptar: comenzar el examen.\nCancelar: volver y cambiar el instructor en «Instructor a cargo».';
+  if(!confirm(aviso)){
+    const sel = document.getElementById('instructorSelect');
+    if(sel){ sel.scrollIntoView({ block: 'center' }); sel.focus(); }
+    return;
+  }
   const qbt = obtenerBanco(nivelExamen);
   selectedQuestions = selectRandomQuestions(qbt);
   // asignar qid único por pregunta, y mezclar el orden de las opciones
@@ -1673,8 +1703,9 @@ function iniciarExamen(){
   displayExam(selectedQuestions);
   document.getElementById('examContainer').style.display='block';
   document.getElementById('dataBlock').style.display='none';
-  // Tiempo según el nivel configurado (por defecto N3)
-  timeLeft = NIVELES[nivelExamen].tiempoMin * 60;
+  // Tiempo según la duración elegida en el panel oculto (por defecto 40 minutos)
+  duracionExamenEnCurso = duracionMin;
+  timeLeft = duracionExamenEnCurso * 60;
   const m0 = Math.floor(timeLeft/60), s0 = timeLeft%60;
   document.getElementById('timer').textContent = `Tiempo restante: ${m0}:${s0<10?'0':''}${s0}`;
   startTimer();
@@ -2083,6 +2114,7 @@ function construirPayloadResultado(total, maxScore, percentage, passed, pdf){
     telefono: document.getElementById('studentPhone').value.trim(),
     fecha: document.getElementById('examDate').value,
     nivel: nivelExamen,
+    duracionMin: duracionExamenEnCurso,
     puntaje: total,
     puntajeMaximo: maxScore,
     porcentaje: +percentage.toFixed(2),
@@ -2310,6 +2342,7 @@ function saveExamResults(total, max, percentage, passed) {
 
   addText('RESULTADOS', 12, true);
   addText(`Nivel de examen: ${NIVELES[nivelExamen].label} (mínimo para aprobar: ${NIVELES[nivelExamen].puntajeAprobacion} puntos)`, 10);
+  addText(`Duración del examen: ${duracionExamenEnCurso} minutos`, 10);
   addText(`Puntaje Total: ${total} de ${max}`, 10);
   addText(`Porcentaje: ${percentage.toFixed(2)}%`, 10);
   addText(`Estado: ${passed ? 'APROBADO' : 'NO APROBADO'}`, 10, true);
@@ -2626,6 +2659,10 @@ select{width:100%;margin:5px 0;padding:8px;}
   text-align:left;
 }
 #panelNivel .nivel-opcion small{ display:block; font-weight:normal; opacity:0.8; }
+#panelNivel .duracion-titulo{ font-size:13px; opacity:0.85; margin:4px 0 6px; }
+#panelNivel .duracion-fila{ display:flex; gap:8px; margin-bottom:10px; }
+#panelNivel .duracion-opcion{ flex:1; margin:0; padding:12px 6px; opacity:0.55; }
+#panelNivel .duracion-opcion.activa{ opacity:1; outline:2px solid #fff; outline-offset:-2px; }
 #panelNivel .nivel-actual{
   font-size:13px;
   opacity:0.85;
@@ -2717,20 +2754,32 @@ si es para tu propia clave). No hace falta abrir la consola del navegador.
 </div>
 </div>
 
-<!-- Botón oculto (esquina superior derecha) para configurar el nivel del examen
-     antes de comenzar. No requiere clave: solo se usa para elegir N3, N4 o N5. -->
+<!-- Botón oculto (esquina superior derecha) para configurar el examen antes de comenzar:
+     la duración (40, 50 o 60 minutos) y el nivel (N3, N4 o N5). No requiere clave. -->
 <div id="btnNivel" title="Configurar nivel"></div>
 <div id="panelNivel">
-<h3>NIVEL DEL EXAMEN</h3>
+<h3>DURACIÓN Y NIVEL DEL EXAMEN</h3>
 <p class="nivel-actual" id="nivelActualTexto"></p>
-<button class="nivel-opcion" onclick="elegirNivel('N3')">Nivel 3 – Piloto Básico<small>40 minutos · Aprueba con 234 puntos</small></button>
-<button class="nivel-opcion" onclick="elegirNivel('N4')">Nivel 4 – Piloto<small>40 minutos · Aprueba con 252 puntos</small></button>
-<button class="nivel-opcion" onclick="elegirNivel('N5')">Nivel 5 – Avanzado<small>40 minutos · Aprueba con 270 puntos</small></button>
+<p class="duracion-titulo">Duración (primero elegí la duración, después el nivel)</p>
+<div class="duracion-fila">
+<button class="duracion-opcion" data-min="40" onclick="elegirDuracion(40)">40 min</button>
+<button class="duracion-opcion" data-min="50" onclick="elegirDuracion(50)">50 min</button>
+<button class="duracion-opcion" data-min="60" onclick="elegirDuracion(60)">60 min</button>
+</div>
+<button class="nivel-opcion" onclick="elegirNivel('N3')">Nivel 3 – Piloto Básico<small>Aprueba con 234 puntos</small></button>
+<button class="nivel-opcion" onclick="elegirNivel('N4')">Nivel 4 – Piloto<small>Aprueba con 252 puntos</small></button>
+<button class="nivel-opcion" onclick="elegirNivel('N5')">Nivel 5 – Avanzado<small>Aprueba con 270 puntos</small></button>
 <button onclick="cerrarPanelNivel()">Cerrar</button>
 </div>
 <script>
 
-// Niveles disponibles. Mismo tiempo (40 min) para todos, cambia el puntaje
+// Duración del examen: la elige el instructor en el panel oculto (40, 50 o 60 minutos; por defecto 40).
+// Vale para cualquier nivel y, como el nivel, vuelve a 40 cada vez que se abre el examen.
+const DURACIONES_MIN = [40, 50, 60];
+let duracionMin = 40;
+let duracionExamenEnCurso = 40;   // la que se usó al tocar «Comenzar Examen» (va en el PDF)
+
+// Niveles disponibles. El tiempo es el elegido en «Duración» (40 min por defecto); cambia el puntaje
 // mínimo de aprobación (en puntos, no en porcentaje): N3 65 %, N4 70 %, N5 75 %
 // sobre un máximo de 360 puntos. "enfoque" es la parte (0 a 1) de las preguntas
 // de cada tema que se toma de las preguntas exclusivas de N5 (ver obtenerBanco
@@ -2739,18 +2788,22 @@ si es para tu propia clave). No hace falta abrir la consola del navegador.
 // tuviera suficientes preguntas de N5, se completa con N3/N4. 0 = todo al azar
 // sobre el banco base.
 const NIVELES = {
-  N3: { label: 'Nivel 3 – Piloto Básico', nombreCorto: 'NIVEL 3', tiempoMin: 40, puntajeAprobacion: 234, enfoque: 0 },
-  N4: { label: 'Nivel 4 – Piloto',        nombreCorto: 'NIVEL 4', tiempoMin: 40, puntajeAprobacion: 252, enfoque: 0 },
-  N5: { label: 'Nivel 5 – Avanzado',        nombreCorto: 'NIVEL 5', tiempoMin: 40, puntajeAprobacion: 270, enfoque: 0.6 }
+  N3: { label: 'Nivel 3 – Piloto Básico', nombreCorto: 'NIVEL 3', puntajeAprobacion: 234, enfoque: 0 },
+  N4: { label: 'Nivel 4 – Piloto',        nombreCorto: 'NIVEL 4', puntajeAprobacion: 252, enfoque: 0 },
+  N5: { label: 'Nivel 5 – Avanzado',        nombreCorto: 'NIVEL 5', puntajeAprobacion: 270, enfoque: 0.6 }
 };
 let nivelExamen = 'N3'; // nivel por defecto si no se configura nada
 
 function actualizarIndicadorNivel(){
   const cfg = NIVELES[nivelExamen];
   const el = document.getElementById('nivelIndicador');
-  if(el) el.textContent = `Nivel configurado: ${cfg.label} · ${cfg.tiempoMin} min · aprueba con ${cfg.puntajeAprobacion} puntos`;
+  if(el) el.textContent = `Nivel configurado: ${cfg.label} · ${duracionMin} min · aprueba con ${cfg.puntajeAprobacion} puntos`;
   const actual = document.getElementById('nivelActualTexto');
-  if(actual) actual.textContent = `Nivel actual: ${cfg.label}`;
+  if(actual) actual.textContent = `Nivel actual: ${cfg.label} · Duración: ${duracionMin} minutos`;
+  const portada = document.getElementById('duracionPortada');
+  if(portada) portada.textContent = `${duracionMin} minutos`;
+  pintarResumenToma();
+  document.querySelectorAll('#panelNivel .duracion-opcion').forEach(b => b.classList.toggle('activa', Number(b.dataset.min) === duracionMin));
   // Encabezado principal: refleja el nivel elegido (N3/N4/N5) en todo momento,
   // tanto en la pantalla de datos como durante el examen y en los resultados.
   const titulo = document.getElementById('tituloExamen');
@@ -2765,6 +2818,15 @@ function elegirNivel(nivel){
   nivelExamen = nivel;
   actualizarIndicadorNivel();
   cerrarPanelNivel();
+}
+
+function elegirDuracion(min){
+  if(DURACIONES_MIN.indexOf(min) < 0) return;
+  if(document.getElementById('examContainer').style.display === 'block'){
+    alert('El examen ya está en curso; la duración elegida se aplicará recién al próximo examen.');
+  }
+  duracionMin = min;
+  actualizarIndicadorNivel();   // el panel queda abierto para elegir el nivel
 }
 
 function abrirPanelNivel(){
