@@ -6,5 +6,7 @@
   "name": "favl",
   "main": "favl-worker.js",
   "compatibility_date": "2025-09-01",
-  "workers_dev": true
+  "workers_dev": true,
+  // Las ramas que no son «main» Cloudflare las publica como vista previa con «wrangler preview», que exige este bloque
+  "previews": {}
 }
