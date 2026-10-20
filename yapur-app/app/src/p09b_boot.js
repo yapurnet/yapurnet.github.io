@@ -226,6 +226,8 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   S.ready=true;refreshAll();updateNetBar();
 })();
 
+startUpdateWatch();
+
 /* ===== abrir sin señal: el service worker guarda la pantalla principal (solo con https o en la propia computadora) ===== */
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
   window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(()=>{});});
