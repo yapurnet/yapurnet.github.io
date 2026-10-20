@@ -1,0 +1,25 @@
+// Gestión YAPUR.NET en Cloudflare: Worker + base de datos (Durable Object con SQLite) + la app web.
+// Para que Cloudflare lo compile y publique desde este repositorio:
+//   Workers & Pages > Create application > Import a repository, con «Root directory» = /yapur-app/worker y nombre de proyecto «yapur».
+// El nombre tiene que ser igual al de este archivo. No hace falta cargar ningún secreto.
+{
+  "name": "yapur",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+  // La app web (public/) la sirve Cloudflare directamente; el Worker solo atiende /api/* y /healthz
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/healthz"]
+  },
+  // La base de datos: un único objeto con SQLite, plan gratuito
+  "durable_objects": {
+    "bindings": [{ "name": "YAPUR", "class_name": "YapurDB" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["YapurDB"] }],
+  // Huella (SHA-256) del código de instalación para crear al primer administrador. El código en sí no está en ningún archivo.
+  "vars": { "SETUP_HASH": "cb554341772cbb77a50032029f43bc0aeabb49947c769f90dcd849cbd4e378c6" },
+  // Las ramas que no son «main» Cloudflare las publica como vista previa con «wrangler preview», que exige este bloque
+  "previews": {}
+}

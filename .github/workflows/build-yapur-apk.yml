@@ -1,0 +1,81 @@
+name: Compilar APK Gestión YAPUR
+
+# Arma el APK de Gestión YAPUR.NET y lo publica en https://<usuario>.github.io/YAPUR-Gestion.apk
+# Se ejecuta solo cuando cambia el programa de Android o la dirección del sistema (la app web se actualiza sola desde Cloudflare).
+# También se puede lanzar a mano: pestaña Actions > "Compilar APK Gestión YAPUR" > Run workflow.
+# Usa los mismos 4 secretos de la clave de firma que la app de FAVL (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD).
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'yapur-app/android/**'
+      - '.github/workflows/build-yapur-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-yapur-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas de Android
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt apksigner zipalign android-sdk-platform-23 dalvik-exchange zip unzip
+
+      - name: Compilar y firmar con la clave de FAVL
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::Faltan los secretos de la clave (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD). Son los mismos que usa la app de FAVL: Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/yapur.keystore"
+          export KEYSTORE="$RUNNER_TEMP/yapur.keystore"
+          # El número de versión siempre crece (Android lo exige para actualizar encima).
+          export VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))
+          export VERSION_NAME="2.${GITHUB_RUN_NUMBER}"
+          bash yapur-app/android/build_apk.sh "$RUNNER_TEMP/YAPUR-Gestion.apk"
+          rm -f "$KEYSTORE"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+
+      - name: Publicar el APK en la raíz del sitio
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for intento in 1 2 3 4 5; do
+            # Se parte de lo último que hay en GitHub (otra corrida pudo publicar mientras esta compilaba;
+            # lo compilado ya está guardado en RUNNER_TEMP, así que no se pierde nada).
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            cp "$RUNNER_TEMP/YAPUR-Gestion.apk" YAPUR-Gestion.apk
+            git add YAPUR-Gestion.apk
+            if git diff --cached --quiet; then
+              echo "El APK no cambió."
+              break
+            fi
+            git commit -m "APK Gestión YAPUR ${VERSION_NAME}: compilación automática"
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then break; fi
+            echo "Otro proceso publicó al mismo tiempo (intento $intento). Reintento."
+            sleep $((intento * 3))
+            [ "$intento" -lt 5 ] || { echo "::error::No se pudo publicar el APK después de 5 intentos."; exit 1; }
+          done
+          {
+            echo "### APK Gestión YAPUR ${VERSION_NAME} publicado"
+            echo "Descarga: https://${GITHUB_REPOSITORY_OWNER}.github.io/YAPUR-Gestion.apk (puede tardar 1-2 minutos en aparecer)"
+            echo "En el celular: Ajustes > Aplicaciones > Gestión YAPUR debe decir **Versión ${VERSION_NAME}**."
+          } >> "$GITHUB_STEP_SUMMARY"

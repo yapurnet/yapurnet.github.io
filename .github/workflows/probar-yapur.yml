@@ -1,0 +1,26 @@
+name: Probar Gestión YAPUR
+
+# Corre las pruebas automáticas (servidor en Cloudflare con wrangler dev, permisos, cobranzas, ciclos) en cada pedido de cambios.
+on:
+  pull_request:
+    paths:
+      - 'yapur-app/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar wrangler
+        working-directory: yapur-app/tests
+        run: npm install --no-audit --no-fund
+      - name: Pruebas
+        working-directory: yapur-app/tests
+        run: npm test
