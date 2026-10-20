@@ -48,6 +48,7 @@ jobs:
           # El número de versión siempre crece (Android lo exige para actualizar encima).
           export VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))
           export VERSION_NAME="2.${GITHUB_RUN_NUMBER}"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           bash yapur-app/android/build_apk.sh "$RUNNER_TEMP/YAPUR-Gestion.apk"
           rm -f "$KEYSTORE"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
@@ -64,6 +65,9 @@ jobs:
             git reset --hard "origin/$GITHUB_REF_NAME"
             cp "$RUNNER_TEMP/YAPUR-Gestion.apk" YAPUR-Gestion.apk
             git add YAPUR-Gestion.apk
+            # Lo que consulta la app para avisar «hay un APK nuevo» (los celulares con una versión anterior)
+            node yapur-app/android/escribir_version.js yapur-version.json "$VERSION_CODE" "$VERSION_NAME" "https://${GITHUB_REPOSITORY_OWNER}.github.io/YAPUR-Gestion.apk"
+            git add yapur-version.json
             if git diff --cached --quiet; then
               echo "El APK no cambió."
               break

@@ -38,6 +38,12 @@ En la ficha del cliente, en «Cargar ubicación» y al terminar una orden de ins
 - En Chrome (sin APK) también funciona, con el permiso de ubicación del sitio.
 - Al terminar una instalación, el técnico ya no ve la opción de «activar al cliente»: eso cambia la facturación y solo lo puede hacer quien edita clientes (antes la opción aparecía igual y fallaba, y con ella se perdía la ubicación).
 
+## Avisos de actualización
+
+- **App nueva (la mayoría de los cambios):** cuando se publica una versión nueva en Cloudflare, quien tenga la app abierta (o la abra) ve arriba **«Hay una versión nueva de la app»** con el botón **Actualizar**. Revisa al abrir, al volver a la app y cada 10 minutos. No hace falta reinstalar el APK.
+- **APK nuevo (solo cuando cambia la parte de Android, por ejemplo un permiso nuevo):** el celular ve **«Hay un APK nuevo (2.X) con mejoras»** con el botón **Descargar**, que abre la descarga en el navegador. Se instala encima, sin perder nada. Lo informa el archivo `yapur-version.json` que publica solo el flujo que compila el APK.
+- «Después» esconde el aviso hasta que se vuelva a abrir la app.
+
 ## Copias de seguridad
 
 - El sistema guarda **solas 2 copias por día** (la primera escritura del día y otra 8 horas después) y conserva las últimas 28 (14 días). **Ajustes → «Copias automáticas…»** las lista y permite volver a una (antes de restaurar guarda una copia del estado actual, por si te arrepentís).
@@ -57,7 +63,7 @@ La misma app funciona como página: abrir la dirección en Chrome del celular �
 
 ## Cómo se probó
 
-Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación).
+Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y los avisos de actualización y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación).
 
 **No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso y la lectura real del GPS) (se verificó que el APK se arma, firma y alinea bien, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
 

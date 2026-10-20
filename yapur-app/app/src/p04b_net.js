@@ -259,6 +259,8 @@ const NET=(function(){
   return {
     native,get base(){return base;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
     api,init,bring,login,setup,logout,status,saveFile,
+    get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
+    openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},
     db:dbApi,
     on:(k,f)=>{handlers[k].push(f);},
     hasSession:()=>!!token
