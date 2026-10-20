@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gestión YAPUR</title>
+<style>
+:root{color-scheme:light dark}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:16px/1.45 system-ui,-apple-system,Roboto,sans-serif;background:#EDF2F4;color:#0E2230}
+@media (prefers-color-scheme:dark){body{background:#0B171F;color:#E5EEF2}.c{background:#12222C}}
+.c{background:#fff;border-radius:14px;padding:24px;margin:16px;max-width:380px;box-shadow:0 1px 2px rgba(14,34,48,.08),0 10px 28px rgba(14,34,48,.12)}
+h1{font-size:20px;margin:0 0 8px}p{margin:0 0 16px;opacity:.8}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 18px;background:#0A7C77;color:#fff;width:100%}
+small{display:block;margin-top:12px;opacity:.65}
+</style></head><body><div class="c">
+<h1>Sin conexión con el servidor</h1>
+<p>No se pudo abrir el sistema. Revisá que el celular tenga señal o Wi‑Fi. Se vuelve a intentar solo.</p>
+<button id="r" type="button">Reintentar ahora</button>
+<small id="s"></small>
+</div>
+<script>
+(function(){
+  var b=window.YapurApp,s=document.getElementById('s');
+  function go(){try{b.reload();}catch(e){}}
+  document.getElementById('r').addEventListener('click',go);
+  function probe(){
+    if(!b)return;
+    var u='';try{u=b.serverUrl();}catch(e){}
+    if(!u)return;
+    var c=new AbortController(),t=setTimeout(function(){c.abort();},6000);
+    fetch(u+'/healthz',{cache:'no-store',signal:c.signal}).then(function(r){clearTimeout(t);if(r.ok)go();else s.textContent='El servidor todavía no responde.';}).catch(function(){clearTimeout(t);s.textContent='Sin respuesta. Probando de nuevo…';});
+  }
+  setInterval(probe,7000);
+})();
+</script></body></html>

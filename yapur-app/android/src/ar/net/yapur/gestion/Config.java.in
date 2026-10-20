@@ -1,0 +1,8 @@
+package ar.net.yapur.gestion;
+
+/* Lo completa build_apk.sh al armar el APK (dirección del servidor y versión). */
+final class Config {
+    static final String SERVER_URL = "@SERVER_URL@";
+    static final String VERSION = "@VERSION@";
+    private Config() {}
+}

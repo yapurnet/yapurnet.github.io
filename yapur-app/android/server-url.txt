@@ -1,0 +1,3 @@
+# Dirección donde corre el sistema en Cloudflare (la que muestra Cloudflare al publicar el proyecto «yapur»).
+# El APK abre esta dirección. Si cambiás este archivo, GitHub compila solo una versión nueva del APK.
+https://yapur.mauroyapur.workers.dev

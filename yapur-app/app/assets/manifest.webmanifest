@@ -1,0 +1,26 @@
+{
+  "name": "Gestión YAPUR.NET",
+  "short_name": "YAPUR.NET",
+  "description": "Clientes, órdenes y cobranzas",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EDF2F4",
+  "theme_color": "#0A7C77",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
