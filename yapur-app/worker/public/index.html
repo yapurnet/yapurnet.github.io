@@ -844,7 +844,40 @@ function geoFieldHTML(c){
   const v=hasGeo(c)?parseFloat(c.lat).toFixed(6)+', '+parseFloat(c.lng).toFixed(6):'';
   return `<div class="geo"><div class="field"><label for="cf-geo">Ubicación (coordenadas o link de Google Maps)</label>
     <input id="cf-geo" type="text" autocomplete="off" inputmode="text" placeholder="-27.7345, -62.4678" value="${esc(v)}">
-    <div class="hint" id="cf-geo-hint"></div></div></div>`;
+    <div class="hint" id="cf-geo-hint"></div></div>
+    <div class="actions start"><button class="btn small" type="button" id="cf-gps">Usar mi ubicación actual (GPS)</button></div>
+    <div class="hint" id="cf-gps-st">Si estás en el domicilio del cliente, tocá el botón y se completa solo.</div></div>`;
+}
+/* ----- GPS del celular: toma lecturas unos segundos y se queda con la más precisa ----- */
+function gpsStart(onProgress){
+  let best=null,done=false,lastErr=null,timer=null,id=null,res,rej;
+  const promise=new Promise((a,b)=>{res=a;rej=b;});
+  const finish=err=>{
+    if(done)return;done=true;
+    try{if(id!==null)navigator.geolocation.clearWatch(id);}catch(e){}
+    clearTimeout(timer);
+    if(best)res(best);else rej(err||lastErr||{code:3});
+  };
+  if(!navigator.geolocation){done=true;rej({code:0});return {promise,stop(){}};}
+  try{
+    id=navigator.geolocation.watchPosition(p=>{
+      const c=p.coords,r={lat:c.latitude,lng:c.longitude,acc:Number(c.accuracy)||0};
+      if(!isFinite(r.lat)||!isFinite(r.lng))return;
+      if(!best||r.acc<=best.acc)best=r;
+      if(onProgress)onProgress(best);
+      if(best.acc<=10)finish();
+    },e=>{lastErr=e;if(e&&e.code===1)finish(e);},{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  }catch(e){done=true;rej({code:0});return {promise,stop(){}};}
+  timer=setTimeout(()=>finish(),25000);
+  return {promise,stop:()=>finish()};
+}
+function gpsErrorText(e){
+  const c=e&&e.code;
+  if(c===0)return 'Este navegador no permite usar el GPS.';
+  if(c===1)return NET.native
+    ?'No hay permiso de ubicación. En el celular: Ajustes → Aplicaciones → Gestión YAPUR → Permisos → Ubicación → Permitir (con ubicación precisa). Si ya está permitido, falta instalar la versión nueva del APK.'
+    :'El navegador no tiene permiso de ubicación. Tocá el candado junto a la dirección y permitila.';
+  return 'No se pudo obtener la ubicación'+(c===3?' (tardó demasiado)':'')+'. Activá el GPS del celular (Ubicación) y probá de nuevo, mejor al aire libre.';
 }
 function bindGeoField(root){
   const inp=$('#cf-geo',root),hint=$('#cf-geo-hint',root);
@@ -861,6 +894,24 @@ function bindGeoField(root){
     else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
   };
   inp.addEventListener('input',draw);draw();
+  const btn=$('#cf-gps',root),st=$('#cf-gps-st',root);
+  if(btn&&st){
+    let run=null;const label=btn.textContent;
+    const say=(cls,txt)=>{st.className='hint '+cls;st.textContent=txt;};
+    btn.addEventListener('click',async()=>{
+      if(run){run.stop();return;}   /* segundo toque: usar lo mejor que haya hasta ahora */
+      btn.textContent='Buscando señal… (tocá para usar lo mejor hasta ahora)';
+      say('','Esperando al GPS. Mejor al aire libre y frente a la casa.');
+      run=gpsStart(b=>say('','Buscando… precisión actual ±'+Math.round(b.acc)+' m'));
+      try{
+        const r=await run.promise,m=Math.round(r.acc);
+        inp.value=r.lat.toFixed(6)+', '+r.lng.toFixed(6);
+        inp.dispatchEvent(new Event('input',{bubbles:true}));
+        say(r.acc<=25?'ok':'bad',r.acc<=25?'Ubicación tomada con el GPS (±'+m+' m). Revisala y guardá.':'Ubicación tomada, pero poco precisa (±'+m+' m). Salí a un lugar abierto y repetí.');
+      }catch(e){say('bad',gpsErrorText(e));}
+      finally{run=null;btn.textContent=label;}
+    });
+  }
   return read;
 }
 
@@ -1656,7 +1707,8 @@ function openOrderForm({id,clientId}){
 }
 function openFinishOrder(o){
   const c=S.clientes.get(o.clientId);
-  const sug=c&&((o.tipo==='instalacion'&&c.estado==='pendiente')?['activo','Dejar al cliente como activo y empezar a cobrarle este mes']:(o.tipo==='reconexion'&&c.estado==='suspendido')?['activo','Reactivar al cliente (levantar la suspensión)']:(o.tipo==='retiro'&&c.estado!=='baja')?['baja','Dar de baja al cliente']:null);
+  /* activar / reactivar / dar de baja cambia la facturación: solo se ofrece a quien puede editar clientes (al técnico le fallaba y se perdía hasta la ubicación) */
+  const sug=c&&can('editarClientes')&&((o.tipo==='instalacion'&&c.estado==='pendiente')?['activo','Dejar al cliente como activo y empezar a cobrarle este mes']:(o.tipo==='reconexion'&&c.estado==='suspendido')?['activo','Reactivar al cliente (levantar la suspensión)']:(o.tipo==='retiro'&&c.estado!=='baja')?['baja','Dar de baja al cliente']:null);
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}

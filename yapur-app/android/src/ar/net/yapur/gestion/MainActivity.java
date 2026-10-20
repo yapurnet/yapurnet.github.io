@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -42,6 +43,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int REQ_FILE = 1;
     private static final int REQ_STORAGE = 2;
+    private static final int REQ_LOC = 3;
     private static final String OFFLINE = "file:///android_asset/offline.html";
     private static final String[] OPENABLE = {"http", "https", "tel", "mailto", "geo", "whatsapp", "waze", "sms", "smsto"};
 
@@ -51,6 +53,8 @@ public class MainActivity extends Activity {
     private String pendName;
     private String pendMime;
     private byte[] pendData;
+    private GeolocationPermissions.Callback geoCb;
+    private String geoOrigin;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -71,6 +75,7 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
         s.setMediaPlaybackRequiresUserGesture(true);
+        s.setGeolocationEnabled(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setUserAgentString(s.getUserAgentString() + " YapurApp/" + Config.VERSION);
         CookieManager.getInstance().setAcceptCookie(true);
@@ -211,6 +216,30 @@ public class MainActivity extends Activity {
             }
             return true;
         }
+
+        /* GPS: solo para nuestro servidor y solo cuando la página lo pide (botón «Usar mi ubicación actual») */
+        @Override
+        public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback cb) {
+            boolean mine = false;
+            try { mine = isOurs(Uri.parse(origin)); } catch (Exception e) { mine = false; }
+            if (!mine) { cb.invoke(origin, false, false); return; }
+            if (hasLocationPermission()) { cb.invoke(origin, true, false); return; }
+            if (geoCb != null) { geoCb.invoke(geoOrigin, false, false); }
+            geoCb = cb;
+            geoOrigin = origin;
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOC);
+        }
+
+        @Override
+        public void onGeolocationPermissionsHidePrompt() {
+            geoCb = null;
+            geoOrigin = null;
+        }
+    }
+
+    private boolean hasLocationPermission() {
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     @Override
@@ -296,6 +325,17 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] grants) {
+        if (req == REQ_LOC) {
+            boolean ok = false;
+            for (int i = 0; i < grants.length; i++) if (grants[i] == PackageManager.PERMISSION_GRANTED) ok = true;
+            if (geoCb != null) {
+                geoCb.invoke(geoOrigin, ok, false);
+                geoCb = null;
+                geoOrigin = null;
+            }
+            if (!ok) toast("Sin el permiso de ubicación no se puede usar el GPS.");
+            return;
+        }
         if (req == REQ_STORAGE) {
             byte[] d = pendData;
             String n = pendName, m = pendMime;

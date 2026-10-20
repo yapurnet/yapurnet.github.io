@@ -29,6 +29,15 @@ El APK es solo una ventana que abre el sistema; **cuando se cambia el sistema no
 3. Los clientes existentes quedan con Ciclo 1 y sin servicios extra; ajustalos desde la ficha o con la importación.
 4. El plan `Plan_15` quedó guardado a `$17` en la versión anterior: editarlo y poner `17.000`.
 
+## Ubicación de las casas con el GPS del celular
+
+En la ficha del cliente, en «Cargar ubicación» y al terminar una orden de instalación hay un botón **«Usar mi ubicación actual (GPS)»**. Estando en el domicilio, el técnico lo toca, el celular toma lecturas unos segundos, se queda con la más precisa y completa las coordenadas (se ve la precisión, por ejemplo ±6 m); después toca Guardar. Si la lectura es floja (más de ±25 m) avisa que conviene repetir al aire libre.
+
+- El GPS se lee **solo cuando se toca el botón**: no hay seguimiento ni ubicación en segundo plano.
+- Hace falta la versión del APK que trae el permiso de ubicación (2.2 o posterior). La primera vez Android pide el permiso: elegir **«Mientras se usa la app»** y dejar activada la ubicación precisa. Si el APK es anterior, el botón avisa que falta actualizar.
+- En Chrome (sin APK) también funciona, con el permiso de ubicación del sitio.
+- Al terminar una instalación, el técnico ya no ve la opción de «activar al cliente»: eso cambia la facturación y solo lo puede hacer quien edita clientes (antes la opción aparecía igual y fallaba, y con ella se perdía la ubicación).
+
 ## Copias de seguridad
 
 - El sistema guarda **solas 2 copias por día** (la primera escritura del día y otra 8 horas después) y conserva las últimas 28 (14 días). **Ajustes → «Copias automáticas…»** las lista y permite volver a una (antes de restaurar guarda una copia del estado actual, por si te arrepentís).
@@ -48,9 +57,9 @@ La misma app funciona como página: abrir la dirección en Chrome del celular �
 
 ## Cómo se probó
 
-Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, y la app en modo celular con navegador Chromium (sin conexión incluida).
+Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación).
 
-**No se pudo probar** en este entorno: el programa de Android en un celular real (se verificó que el APK se arma, firma y alinea bien, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
+**No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso y la lectura real del GPS) (se verificó que el APK se arma, firma y alinea bien, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
 
 Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test` (GitHub también las corre en cada pedido de cambios, con `probar-yapur.yml`).
 
