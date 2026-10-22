@@ -46,14 +46,31 @@ por la versión final (la del cuestionario lleva incluido el narrador de voz de 
 
 La primera vez que se abre el cuestionario en un celular da la bienvenida con un mensaje de ánimo y pregunta
 «¿Quién es tu instructor?», con los instructores y sus logos como en el examen. Lo que se elige queda guardado en ese
-celular, y desde el botón **Cambiar** del encabezado se puede elegir a otro o cargar nombre, licencia y logo a mano
-(«Volver al instructor original» borra esa elección). Es solo el encabezado del cuestionario: **no cambia nada del examen**.
+celular, y desde el botón **Cambiar** del encabezado se puede elegir a otro («Volver al instructor original» borra esa
+elección). Es solo el encabezado del cuestionario: **no cambia nada del examen**.
+
+**Agregar un instructor que no está en la lista (nombre, licencia y logo a mano) exige la clave de instructor**, la misma
+del Modo instructor del examen (la fija o la del día). Sin la clave, un alumno solo puede elegir de la lista; si toca
+«Mi instructor no está en la lista» o «Soy instructor» se le pide la clave y se le explica que le pida a su instructor que
+lo agregue. La clave vale solo mientras está abierta esa ventana (al cerrarla vuelve a bloquearse) y no se guarda en el
+celular. Lo que se cargó a mano con la versión 12.19 (que todavía no pedía clave) se ignora y se vuelve a preguntar.
 
 - La lista de instructores del cuestionario es la misma del examen (con los cambios publicados desde las apps, sin los
-  correos): la arma sola cada compilación (`tools/inyectar_instructores_cuestionario.js`), así que al agregar o quitar un
-  instructor no hay que tocar el cuestionario.
-- Si reemplazás `www/cuestionario.html`, conservá las marcas `/*CUEST_INSTR_INI*/` y `/*CUEST_INSTR_FIN*/`: la compilación
-  se corta con un error si faltan, para no publicar una lista vieja sin darte cuenta.
+  correos) y la clave es la del examen (`CLAVE_INSTRUCTOR_HASH`): las copia solas cada compilación
+  (`tools/inyectar_instructores_cuestionario.js`), así que al agregar o quitar un instructor, o cambiar la clave en el
+  examen, no hay que tocar el cuestionario.
+- Si reemplazás `www/cuestionario.html`, conservá las marcas `/*CUEST_INSTR_INI*/`…`/*CUEST_INSTR_FIN*/` y
+  `/*CUEST_CLAVE_INI*/`…`/*CUEST_CLAVE_FIN*/`: la compilación se corta con un error si faltan, para no publicar una lista
+  o una clave vieja sin darte cuenta.
+- Es la misma protección que el Modo instructor del examen: frena a un alumno común, no a alguien que sepa leer el código.
+
+### Cuestionarios sueltos de la raíz del sitio
+
+`Cuestionario_FAVL.html` y `Cuestionario_FAVL_Moderno.vozz.html` (con las mismas direcciones de siempre) tienen la misma
+bienvenida, elección de instructor y clave que la app, con el mismo fondo de foto. Los archivos como estaban antes de
+este cambio quedaron intactos en `Cuestionario_FAVL_original.html` y `Cuestionario_FAVL_Moderno_original.vozz.html`.
+Estos dos archivos sueltos llevan la lista de instructores y el hash de la clave **copiados al momento de generarlos**:
+si cambia la lista del examen o la clave, hay que regenerarlos (la app, en cambio, se actualiza sola en cada compilación).
 
 ## Aviso de «hay una versión nueva» en la app
 
