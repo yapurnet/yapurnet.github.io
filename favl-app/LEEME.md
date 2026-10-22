@@ -42,6 +42,19 @@ Se hace en el repositorio que publica `yapurnet.github.io` (normalmente se llama
 **Cambiar el cuestionario o el menú:** reemplazar `favl-app/www/cuestionario.html` o `favl-app/www/index.html`
 por la versión final (la del cuestionario lleva incluido el narrador de voz de la app).
 
+## Instructor en el cuestionario
+
+La primera vez que se abre el cuestionario en un celular da la bienvenida con un mensaje de ánimo y pregunta
+«¿Quién es tu instructor?», con los instructores y sus logos como en el examen. Lo que se elige queda guardado en ese
+celular, y desde el botón **Cambiar** del encabezado se puede elegir a otro o cargar nombre, licencia y logo a mano
+(«Volver al instructor original» borra esa elección). Es solo el encabezado del cuestionario: **no cambia nada del examen**.
+
+- La lista de instructores del cuestionario es la misma del examen (con los cambios publicados desde las apps, sin los
+  correos): la arma sola cada compilación (`tools/inyectar_instructores_cuestionario.js`), así que al agregar o quitar un
+  instructor no hay que tocar el cuestionario.
+- Si reemplazás `www/cuestionario.html`, conservá las marcas `/*CUEST_INSTR_INI*/` y `/*CUEST_INSTR_FIN*/`: la compilación
+  se corta con un error si faltan, para no publicar una lista vieja sin darte cuenta.
+
 ## Aviso de «hay una versión nueva» en la app
 
 Cada compilación publica `favl-version.json` (en la raíz del sitio) con la última versión del APK. Las apps instaladas

@@ -57,6 +57,8 @@ python3 "$ROOT/tools/patch_examen.py" "$WORK/examen_fusionado.html" "$WORK/asset
 
 echo "==> 2/6 Páginas de la app"
 cp "$ROOT/www/cuestionario.html" "$WORK/assets/www/"
+# El cuestionario muestra al instructor con su logo: lleva la misma lista que el examen (ya fusionada con los cambios publicados)
+node "$ROOT/tools/inyectar_instructores_cuestionario.js" "$WORK/examen_fusionado.html" "$WORK/assets/www/cuestionario.html"
 # El menú lleva el aviso de «hay una versión nueva» (usa VERSION_CODE y VERSION_NAME)
 python3 "$ROOT/tools/aviso_lib.py" inyectar "$ROOT/www/index.html" "$WORK/assets/www/index.html"
 cp "$ROOT/www/js/jspdf.umd.min.js" "$WORK/assets/www/js/"
