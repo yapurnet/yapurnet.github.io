@@ -1,0 +1,7 @@
+{
+  "_ayuda": "Escuela de cada instructor, tal como figura en su logo. El cuestionario muestra «ESCUELA DE VUELO» + este nombre cuando se elige a ese instructor. La clave es el id del instructor (ver favl-instructores.json). Si un instructor no figura acá, el encabezado dice solo «ESCUELA DE VUELO».",
+  "rodrigo": "Bandera Vuela",
+  "ignacio": "Misty SIV",
+  "mario": "Waku",
+  "andres": "Zenón Pereyra"
+}

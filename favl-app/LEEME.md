@@ -59,6 +59,12 @@ celular. Lo que se cargó a mano con la versión 12.19 (que todavía no pedía c
   correos) y la clave es la del examen (`CLAVE_INSTRUCTOR_HASH`): las copia solas cada compilación
   (`tools/inyectar_instructores_cuestionario.js`), así que al agregar o quitar un instructor, o cambiar la clave en el
   examen, no hay que tocar el cuestionario.
+- **Nombre de la escuela en el encabezado:** con Rodrigo (el de origen) dice «ESCUELA DE VUELO BANDERA VUELA»; con otro
+  instructor dice «ESCUELA DE VUELO» + el nombre de su escuela, tal como figura en su logo. Esos nombres están en
+  `favl-app/www/escuelas.json` (`"id del instructor": "Escuela"`; hoy: Bandera Vuela, Misty SIV, Waku y Zenón Pereyra).
+  Cuando se agrega un instructor nuevo a la lista del examen, sumá su escuela a ese archivo; si no está, el encabezado dice
+  solo «ESCUELA DE VUELO». Quien carga un instructor a mano (con la clave) puede escribir su escuela en un campo opcional.
+  No hace falta tocar el examen.
 - Si reemplazás `www/cuestionario.html`, conservá las marcas `/*CUEST_INSTR_INI*/`…`/*CUEST_INSTR_FIN*/` y
   `/*CUEST_CLAVE_INI*/`…`/*CUEST_CLAVE_FIN*/`: la compilación se corta con un error si faltan, para no publicar una lista
   o una clave vieja sin darte cuenta.
@@ -69,8 +75,8 @@ celular. Lo que se cargó a mano con la versión 12.19 (que todavía no pedía c
 `Cuestionario_FAVL.html` y `Cuestionario_FAVL_Moderno.vozz.html` (con las mismas direcciones de siempre) tienen la misma
 bienvenida, elección de instructor y clave que la app, con el mismo fondo de foto. Los archivos como estaban antes de
 este cambio quedaron intactos en `Cuestionario_FAVL_original.html` y `Cuestionario_FAVL_Moderno_original.vozz.html`.
-Estos dos archivos sueltos llevan la lista de instructores y el hash de la clave **copiados al momento de generarlos**:
-si cambia la lista del examen o la clave, hay que regenerarlos (la app, en cambio, se actualiza sola en cada compilación).
+Estos dos archivos sueltos llevan la lista de instructores, sus escuelas y el hash de la clave **copiados al momento de
+generarlos**: si cambia la lista del examen, `escuelas.json` o la clave, hay que regenerarlos (la app, en cambio, se actualiza sola en cada compilación).
 
 ## Aviso de «hay una versión nueva» en la app
 

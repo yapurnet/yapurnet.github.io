@@ -31,9 +31,24 @@ function leerHashClave(textoExamen) {
   return m[0].match(/"([0-9a-f]{64})"/)[1];
 }
 
-function inyectar(textoExamen, textoCuestionario) {
+// Escuela de cada instructor (www/escuelas.json: {"<id del instructor>": "Nombre de la escuela"}). Las claves que empiezan con «_»
+// son comentarios. Si el archivo está mal armado falla a propósito, para no publicar un encabezado con la escuela equivocada.
+function leerEscuelas(textoJson) {
+  let j;
+  try { j = JSON.parse(textoJson); } catch (e) { throw new Error('escuelas.json no es un JSON válido: ' + e.message); }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('escuelas.json debe ser un objeto {"id": "escuela"}.');
+  const out = {};
+  Object.keys(j).filter(k => k[0] !== '_').forEach(k => {
+    if (typeof j[k] !== 'string') throw new Error('escuelas.json: la escuela de «' + k + '» debe ser un texto.');
+    out[k] = j[k].replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  });
+  return out;
+}
+
+function inyectar(textoExamen, textoCuestionario, textoEscuelas) {
+  const escuelas = leerEscuelas(textoEscuelas == null ? '{}' : textoEscuelas);
   const lista = L.validarLista(L.leerBase(textoExamen), 'instructor del examen')
-    .map(i => ({ id: i.id, nombre: i.nombre, licencia: i.licencia, logo: i.logo }));
+    .map(i => ({ id: i.id, nombre: i.nombre, licencia: i.licencia, escuela: escuelas[i.id] || '', logo: i.logo }));
   // «<» escapado para que ningún dato pueda cerrar el <script>
   const js = JSON.stringify(lista).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   let texto = entreMarcas(textoCuestionario, INI, FIN, js);
@@ -43,19 +58,20 @@ function inyectar(textoExamen, textoCuestionario) {
 }
 
 if (require.main === module) {
-  const [, , rutaExamen, rutaCuestionario] = process.argv;
+  const [, , rutaExamen, rutaCuestionario, rutaEscuelas] = process.argv;
   if (!rutaExamen || !rutaCuestionario) {
-    console.error('Uso: node inyectar_instructores_cuestionario.js <examen_fusionado.html> <cuestionario.html>');
+    console.error('Uso: node inyectar_instructores_cuestionario.js <examen_fusionado.html> <cuestionario.html> [escuelas.json]');
     process.exit(2);
   }
   try {
-    const r = inyectar(fs.readFileSync(rutaExamen, 'utf8'), fs.readFileSync(rutaCuestionario, 'utf8'));
+    const rutaEsc = rutaEscuelas || require('path').join(__dirname, '..', 'www', 'escuelas.json');
+    const r = inyectar(fs.readFileSync(rutaExamen, 'utf8'), fs.readFileSync(rutaCuestionario, 'utf8'), fs.readFileSync(rutaEsc, 'utf8'));
     fs.writeFileSync(rutaCuestionario, r.texto);
-    console.log('    cuestionario: ' + r.cantidad + ' instructores (los mismos del examen) y la clave de instructor del examen');
+    console.log('    cuestionario: ' + r.cantidad + ' instructores (los mismos del examen), su escuela y la clave de instructor del examen');
   } catch (e) {
     console.error('ERROR: ' + e.message);
     process.exit(1);
   }
 }
 
-module.exports = { inyectar, leerHashClave, INI, FIN, CLAVE_INI, CLAVE_FIN };
+module.exports = { inyectar, leerHashClave, leerEscuelas, INI, FIN, CLAVE_INI, CLAVE_FIN };
