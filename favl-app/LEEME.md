@@ -44,9 +44,10 @@ por la versión final (la del cuestionario lleva incluido el narrador de voz de 
 
 ## Instructor en el cuestionario
 
-La primera vez que se abre el cuestionario en un celular da la bienvenida con un mensaje de ánimo y pregunta
-«¿Quién es tu instructor?», con los instructores y sus logos como en el examen. Lo que se elige queda guardado en ese
-celular, y desde el botón **Cambiar** del encabezado se puede elegir a otro («Volver al instructor original» borra esa
+Cada vez que se abre el cuestionario da la bienvenida con un mensaje de ánimo y pregunta «¿Quién es tu instructor?», con
+los instructores y sus logos como en el examen. Si ya se había elegido uno, aparece marcado como «Tu instructor» y un botón
+**Continuar con…** para seguir con un toque (o se elige a otro). Lo que se elige queda guardado en ese celular, y desde el
+botón **Cambiar** del encabezado se puede elegir a otro en cualquier momento («Volver al instructor original» borra esa
 elección). Es solo el encabezado del cuestionario: **no cambia nada del examen**.
 
 **Agregar un instructor que no está en la lista (nombre, licencia y logo a mano) exige la clave de instructor**, la misma

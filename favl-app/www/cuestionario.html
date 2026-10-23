@@ -904,6 +904,11 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
 .bienv-opcion .n{font-size:13.5px;font-weight:800;line-height:1.25}
 .bienv-opcion .l{font-size:12px;color:var(--muted);font-weight:650}
 .instr-card .bienv-otro{width:100%;margin-top:12px}
+.instr-card .bienv-seguir{width:100%;margin-top:14px;padding:13px 14px;font-size:15px}
+.bienv-opcion .tu{display:none;font-size:11px;font-weight:800;letter-spacing:.2px;text-transform:uppercase;color:#fff;background:var(--accent);border-radius:999px;padding:2px 9px}
+.bienv-opcion.actual .tu{display:inline-block}
+.instr-card .bienv-opcion.actual{border-color:var(--accent);border-width:2px;box-shadow:0 4px 14px rgba(11,92,171,.18)}
+#bienvSeguir[hidden],#bienvDespues[hidden]{display:none}
 .escuela{text-wrap:balance}
 @media(max-width:760px){.instr-logo{height:34px}}
 </style>
@@ -980,6 +985,7 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
       <p class="bienv-msg">Hoy es un gran momento para estudiar: cada pregunta que repasás te acerca a volar con más seguridad. ¡Vamos con todo!</p>
       <p class="bienv-pregunta">¿Quién es tu instructor?</p>
       <div id="bienvLista" class="bienv-lista"></div>
+      <button type="button" class="instr-prim bienv-seguir" id="bienvSeguir" hidden></button>
       <button type="button" class="instr-sec bienv-otro" id="bienvOtro">Mi instructor no está en la lista</button>
       <div id="bienvCandado" class="instr-candado" hidden>
         <p>Agregar un instructor nuevo es solo para instructores, con su clave. Si sos alumno, pedile a tu instructor que lo agregue y después lo vas a encontrar en la lista.</p>
@@ -1856,8 +1862,6 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
     } catch (e) { return null; }
   }
 
-  // ¿Esta persona ya eligió instructor en este celular? (si no, se le da la bienvenida y se le pregunta)
-  function hayEleccion() { return !!guardado(); }
 
   // ---- Clave de instructor: SHA-256 de la clave (sin espacios, en mayúsculas), igual que en el examen ----
   function sha256Hex(texto) {
@@ -2084,11 +2088,24 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
       if (i.logo) { var im = document.createElement('img'); im.src = i.logo; im.alt = ''; b.appendChild(im); }
       var n = document.createElement('span'); n.className = 'n'; n.textContent = i.nombre; b.appendChild(n);
       var l = document.createElement('span'); l.className = 'l'; l.textContent = 'Lic. ' + i.licencia; b.appendChild(l);
+      var tu = document.createElement('span'); tu.className = 'tu'; tu.textContent = 'Tu instructor'; b.appendChild(tu);
       b.addEventListener('click', function () { elegirDeLaBienvenida(i.id); });
       cont.appendChild(b);
     });
   }
+  // La bienvenida sale cada vez que se abre el cuestionario. Si la persona ya había elegido instructor, se lo marca y se le
+  // ofrece seguir con él con un toque (o elegir a otro); si no, se le pregunta quién es.
   function abrirBienvenida() {
+    var act = guardado() ? actual() : null;
+    var tarjetas = $('bienvLista').children;
+    for (var k = 0; k < tarjetas.length; k++) {
+      var es = !!(act && act.id && tarjetas[k].getAttribute('data-id') === act.id);
+      tarjetas[k].classList.toggle('actual', es);
+      if (es) tarjetas[k].setAttribute('aria-current', 'true'); else tarjetas[k].removeAttribute('aria-current');
+    }
+    $('bienvSeguir').hidden = !act;
+    $('bienvSeguir').textContent = act ? 'Continuar con ' + act.nombre : '';
+    $('bienvDespues').hidden = !!act;
     $('instrBienvenida').hidden = false;
     document.body.style.overflow = 'hidden';
     try { $('instrBienvenida').firstElementChild.focus(); } catch (e) {}
@@ -2123,6 +2140,7 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
       else if (!$('instrModal').hidden) cerrar();
     });
     $('bienvDespues').addEventListener('click', cerrarBienvenida);
+    $('bienvSeguir').addEventListener('click', cerrarBienvenida);
     // «Mi instructor no está en la lista»: sin la clave de instructor no se puede agregar a nadie.
     var claveBienv = armarClave('bienv', function () { cerrarBienvenida(); abrir(true); });
     $('bienvOtro').addEventListener('click', function () {
@@ -2162,7 +2180,7 @@ body.narr-open{padding-bottom:calc(var(--narr-h,0px) + 24px)}
   }
 
   iniciar();
-  if (LISTA.length && $('instrBienvenida') && !hayEleccion()) abrirBienvenida();
+  if (LISTA.length && $('instrBienvenida')) abrirBienvenida();
 })();
 </script>
 </body>
