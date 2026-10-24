@@ -142,6 +142,20 @@ async def main():
         check('Laura: 1 recibo de 20.000 en efectivo', por['Laura'][1] == '1' and '20.000' in por['Laura'][2] and '20.000' in por['Laura'][4], por['Laura'])
         check('el total de la caja del día suma todo (38.500)', '38.500' in caja, caja[:200])
         check('cada cobro dice quién lo hizo', 'cobró Pedro' in caja and 'cobró Laura' in caja)
+
+        # 6) reabrir la app con la copia guardada en el celular (los cobros llegan después, de la sincronización)
+        await pg3.wait_for_timeout(5000)   # la copia local se guarda a los 4 s
+        async def lento(route):
+            await asyncio.sleep(3); await route.continue_()
+        await ctx3.route('**/api/sync', lento)
+        await pg3.reload(wait_until='domcontentloaded')
+        await pg3.wait_for_selector('#tabs .tab', timeout=10000)
+        await pg3.click('#tabs [data-tab=cobranzas]')
+        await pg3.click('#cb-sub [data-s=caja]')
+        txt = await pg3.inner_text('#cb-body')
+        check('abierta con los datos del celular no dice «sin permiso»: avisa que está cargando los cobros', 'No tenés permiso' not in txt and 'Cargando los cobros' in txt, txt)
+        await pg3.wait_for_function("document.querySelector('#cb-caja') && document.querySelector('#cb-caja').textContent.includes('Por cobrador')", timeout=15000)
+        check('al llegar la sincronización muestra la caja completa y sin errores', await pg3.evaluate("!S.errors.pagos") and 'Pedro' in await pg3.inner_text('#cb-caja'))
         await ctx.close(); await br.close()
     print('\nERRORES:', 'ninguno' if not ERR else ERR)
     print(f'{sum(res)} ok, {len(res) - sum(res)} con fallas')

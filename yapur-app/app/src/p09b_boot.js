@@ -78,7 +78,7 @@ function startData(){
   if(!started.planes){started.planes=1;
     S.db.collection('planes').onSnapshot(snap=>{
       S.planes.clear();snap.docs.forEach(d=>S.planes.set(d.id,Object.assign({},d.data(),{id:d.id})));
-      S.loaded.planes=true;dataChanged('planes');
+      delete S.errors.planes;S.loaded.planes=true;dataChanged('planes');
     },err=>{S.errors.planes=err;S.loaded.planes=true;dataChanged('planes');});}
   if(!started.clientes){started.clientes=1;watchSharded('clientes',S.clientes,'clientes');}
   if(!started.red){started.red=1;watchSharded('red',S.red,'red');}
@@ -223,7 +223,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
       const d=snap.exists?snap.data():null;
       S.ajustes=Object.assign({empresa:'YAPUR.NET',diaVenc:10,perfiles:[],ciclos:null,feriados:null,servicios:null,promesaMax:10},d||{},{tecnicos:[]});
       if(!Array.isArray(S.ajustes.perfiles))S.ajustes.perfiles=[];
-      deriveTecnicos();S.loaded.ajustes=true;
+      deriveTecnicos();delete S.errors.ajustes;S.loaded.ajustes=true;
       if(first){first=false;res();}else{rebuildDerived();onAjustesChanged();}
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });

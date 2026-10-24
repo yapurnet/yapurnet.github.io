@@ -108,7 +108,7 @@ function watchSharded(coll,target,key){
   return S.db.collection(coll).onSnapshot(snap=>{
     target.clear();
     snap.docs.forEach(d=>{const it=(d.data()||{}).items||{};for(const k in it){const v=it[k];if(v&&typeof v==='object')target.set(k,Object.assign({},v,{id:k,_doc:d.id}));}});
-    S.loaded[key]=true;dataChanged(key);
+    delete S.errors[key];S.loaded[key]=true;dataChanged(key);
   },err=>{S.errors[key]=err;S.loaded[key]=true;dataChanged(key);});
 }
 

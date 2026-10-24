@@ -320,7 +320,7 @@ function watchSharded(coll,target,key){
   return S.db.collection(coll).onSnapshot(snap=>{
     target.clear();
     snap.docs.forEach(d=>{const it=(d.data()||{}).items||{};for(const k in it){const v=it[k];if(v&&typeof v==='object')target.set(k,Object.assign({},v,{id:k,_doc:d.id}));}});
-    S.loaded[key]=true;dataChanged(key);
+    delete S.errors[key];S.loaded[key]=true;dataChanged(key);
   },err=>{S.errors[key]=err;S.loaded[key]=true;dataChanged(key);});
 }
 
@@ -579,7 +579,7 @@ const NET=(function(){
   if(!token)me=null;
   const data={};                 // coll -> Map(id -> objeto) | null si no tiene acceso
   const docSeq=new Map();
-  let baseSeq=0,synced=false,syncing=null,buffer=[],started=false;
+  let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
   const handlers={status:[],me:[],kick:[]};
@@ -625,7 +625,7 @@ const NET=(function(){
   function setSession(t,m){token=t;me=m;lsSet('tok',t);lsSet('me',JSON.stringify(m));}
   function clearSession(){
     token='';me=null;lsSet('tok','');lsSet('me','');['viewAsP','tab','tecId','sess'].forEach(k=>lsSet(k,''));
-    closeStream();synced=false;started=false;for(const k of Object.keys(data))delete data[k];
+    closeStream();synced=false;fresh=false;started=false;for(const k of Object.keys(data))delete data[k];
     kvClear();
   }
   async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
@@ -672,7 +672,7 @@ const NET=(function(){
       for(const k of Object.keys(data))delete data[k];
       for(const c of ['clientes','pagos','ordenes','planes','ajustes','red'])data[c]=null;
       for(const c of Object.keys(j.cols))data[c]=new Map(j.cols[c].map(d=>[d.id,d.data]));
-      baseSeq=j.seq;docSeq.clear();synced=true;
+      baseSeq=j.seq;docSeq.clear();synced=true;fresh=true;
       const pend=buffer;buffer=[];
       pend.forEach(m=>applyDoc(m.coll,m.id,m.op,m.data,m.seq,true));
       markAll();
@@ -775,7 +775,8 @@ const NET=(function(){
   }
   function fire(w){
     if(!synced)return;
-    if(data[w.coll]==null){if(w.err)w.err({code:'permission_denied'});return;}
+    /* abierta con la copia del celular, los pagos todavía no están: se espera a la primera sincronización antes de decir «sin permiso» */
+    if(data[w.coll]==null){if(fresh&&w.err)w.err({code:'permission_denied'});return;}
     try{w.cb(snapOf(w));}catch(e){console.error(e);}
   }
   function watch(coll,id,cb,err){
@@ -2509,6 +2510,7 @@ VIEWS.cobranzas={
   update(){this.draw(false);},
   draw(full){
     const body=$('#cb-body');if(!body)return;
+    if(!S.loaded.pagos&&(can('cobrar')||can('caja'))){body.innerHTML='<div class="notice">Cargando los cobros del servidor… Sin conexión no se pueden ver ni cargar cobros.</div>';return;}
     if(S.errors.pagos&&(can('cobrar')||can('caja'))){body.innerHTML='<div class="notice bad">No tenés permiso para ver los pagos. Pedile al dueño permiso de edición sobre este archivo.</div>';return;}
     if(CB.sub==='cobrar'){
       if(full||!$('#cb-pick')){
@@ -2597,7 +2599,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='8fd1ac33c8';
+const BUILD='8e41629668';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -2729,7 +2731,7 @@ function startData(){
   if(!started.planes){started.planes=1;
     S.db.collection('planes').onSnapshot(snap=>{
       S.planes.clear();snap.docs.forEach(d=>S.planes.set(d.id,Object.assign({},d.data(),{id:d.id})));
-      S.loaded.planes=true;dataChanged('planes');
+      delete S.errors.planes;S.loaded.planes=true;dataChanged('planes');
     },err=>{S.errors.planes=err;S.loaded.planes=true;dataChanged('planes');});}
   if(!started.clientes){started.clientes=1;watchSharded('clientes',S.clientes,'clientes');}
   if(!started.red){started.red=1;watchSharded('red',S.red,'red');}
@@ -2874,7 +2876,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
       const d=snap.exists?snap.data():null;
       S.ajustes=Object.assign({empresa:'YAPUR.NET',diaVenc:10,perfiles:[],ciclos:null,feriados:null,servicios:null,promesaMax:10},d||{},{tecnicos:[]});
       if(!Array.isArray(S.ajustes.perfiles))S.ajustes.perfiles=[];
-      deriveTecnicos();S.loaded.ajustes=true;
+      deriveTecnicos();delete S.errors.ajustes;S.loaded.ajustes=true;
       if(first){first=false;res();}else{rebuildDerived();onAjustesChanged();}
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
