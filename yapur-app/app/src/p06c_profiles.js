@@ -7,6 +7,7 @@ function permsBoxHTML(base,cur){
   const defs=PERM_DEF[base];let g='',html='';
   PERMS.forEach(([k,l,d,grp])=>{
     if(base==='tecnico'&&MONEY_PERMS.includes(k))return;
+    if(k==='cobrarCampo'&&base!=='tecnico')return;
     if(grp!==g){if(g)html+='</div>';html+=`<div class="fgroup"><div class="legend">${grp}</div>`;g=grp;}
     const on=cur&&k in cur?!!cur[k]:!!defs[k];
     html+=`<label class="per"><input type="checkbox" data-perm="${k}"${on?' checked':''}><span class="grow">${l}${d?`<br><span class="small muted">${d}</span>`:''}</span></label>`;

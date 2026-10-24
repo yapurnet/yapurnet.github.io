@@ -155,6 +155,53 @@ async function openStream(token) {
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);
     t('vigencia: al técnico no le llega el historial de precios del cliente', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.hp === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
 
+    /* ---- cobros en la calle (técnicos con permiso) ---- */
+    const HOY = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10), AYER = new Date(Date.now() - 27 * 3600e3).toISOString().slice(0, 10), PG = HOY.slice(0, 4) + '-s07';
+    r = await call('POST', '/api/users', { usuario: 'tec2', nombre: 'Marcos', role: 'tecnico', clave: 'marcos1', permisos: { cobrarCampo: true } }, A);
+    t('cobros: el administrador crea un técnico que puede cobrar en la calle', r.s === 200 && r.j.user.perms.cobrarCampo === true && r.j.user.perms.cobrar === false, r);
+    const TEC2_ID = r.j.user.id;
+    r = await call('POST', '/api/login', { usuario: 'tec2', clave: 'marcos1' });
+    const T2 = r.j.token;
+    const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cr1', concepto: 'instalacion', monto: 30000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
+    r = await PAGO(T2, 'pt1');
+    t('cobros: cobra una instalación y queda a su nombre', r.s === 200 && r.j.data === null, r);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, A);
+    t('cobros: el pago quedó registrado con su usuario y la hora del servidor', r.s === 200 && r.j.data.items.pt1.por === TEC2_ID && r.j.data.items.pt1.porNombre === 'Marcos' && r.j.data.items.pt1.srvTs > 0, r.j);
+    r = await PAGO(T2, 'pt2', { concepto: 'reclamo', monto: 8000, por: 'otro-usuario', porNombre: 'Falso' });
+    t('cobros: también un reclamo o visita técnica', r.s === 200, r);
+    r = await PAGO(T2, 'pt3', { concepto: 'mensualidad', per: HOY.slice(0, 7) });
+    t('cobros: no puede cobrar mensualidades', r.s === 403 && /mensualidad/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pt4', { fecha: AYER });
+    t('cobros: no puede cargar cobros con otra fecha', r.s === 403 && /fecha de hoy/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pt5', { monto: -500 });
+    t('cobros: monto negativo rechazado', r.s === 403 && /monto/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pt6', { monto: '30000' });
+    t('cobros: monto como texto rechazado', r.s === 403, r);
+    r = await PAGO(T2, 'pt7', { c: undefined });
+    t('cobros: sin cliente rechazado', r.s === 403, r);
+    r = await PAGO(T, 'pt8');
+    t('cobros: el técnico sin el permiso no puede cobrar', r.s === 403 && /no puede registrar pagos/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { pt1: { anulado: true, anuladoMotivo: 'x' } } } }, T2);
+    t('cobros: tampoco puede anular', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { pt1: { monto: 1 } } } }, T2);
+    t('cobros: ni modificar un cobro ya registrado', r.s === 403, r);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, T2);
+    t('cobros: no puede leer la caja', r.s === 200 && r.j.exists === false, r);
+    r = await call('GET', '/api/sync', undefined, T2);
+    t('cobros: la sincronización del técnico no trae pagos', r.s === 200 && !('pagos' in r.j.cols));
+    r = await call('GET', '/api/mis-cobros', undefined, T2);
+    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pt1,pt2' && r.j.hoy === HOY, r);
+    r = await call('GET', '/api/mis-cobros', undefined, T);
+    t('cobros: otro técnico no ve los de Marcos', r.s === 200 && r.j.docs.length === 0, r);
+    r = await call('GET', '/api/mis-cobros', undefined);
+    t('cobros: sin sesión no se accede', r.s === 401, r);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, O);
+    t('cobros: la oficina ve los cobros del técnico con su nombre de usuario', r.s === 200 && r.j.data.items.pt2.por === TEC2_ID && r.j.data.items.pt2.porNombre === 'Marcos' && r.j.data.items.pt2.concepto === 'reclamo', r.j);
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { pt2: { anulado: true, anuladoMotivo: 'Error de monto' } } } }, A);
+    t('cobros: el administrador puede anular un cobro del técnico', r.s === 200 && r.j.data.items.pt2.anuladoPor, r);
+    r = await call('GET', '/api/mis-cobros', undefined, T2);
+    t('cobros: el técnico ve que quedó anulado', r.j.docs[0].data.items.pt2.anulado === true, r);
+
     /* ---- datos y permisos ---- */
     r = await call('PUT', '/api/doc/planes/p1', { data: { nombre: 'Hogar 100', bajada: 100, subida: 50, precio: 20000 } }, A);
     t('admin crea plan', r.s === 200 && r.j.data.precio === 20000, r);
@@ -180,7 +227,7 @@ async function openStream(token) {
     r = await call('GET', '/api/doc/planes/p1', undefined, T);
     t('técnico no recibe el precio del plan', r.j.data.nombre === 'Hogar 100' && !('precio' in r.j.data), r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, T);
-    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 2 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
+    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 3 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, A);
     t('administrador sí ve precios de servicios', r.j.data.servicios[0].precio === 15000);
 
@@ -274,7 +321,7 @@ async function openStream(token) {
 
     /* ---- copia y restauración (formato propio y formato anterior) ---- */
     r = await call('GET', '/api/backup', undefined, A);
-    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 3, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
+    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 4, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
     const backup = r.j;
     const legacy = { app: 'yapur-legacy', v: 1, docs: [
       { coll: 'clientes', id: 'c05', data: { items: { x1: { nombre: 'Legacy 1' }, x2: { nombre: 'Legacy 2' } } } },

@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -109,10 +109,11 @@ function canWrite(u, p, coll, op) {
   if (op === 'set') return 'Operación no permitida.';
   if (coll === 'clientes') return (p.editarClientes || p.ubicacion || p.promesas || p.operarOrdenes || p.cobrar) ? null : 'Tu usuario no puede modificar clientes.';
   if (coll === 'ordenes') return (p.crearOrdenes || p.operarOrdenes) ? null : 'Tu usuario no puede modificar órdenes.';
-  if (coll === 'pagos') return (p.cobrar || p.anular) ? null : 'Tu usuario no puede registrar pagos.';
+  if (coll === 'pagos') return (p.cobrar || p.anular || p.cobrarCampo) ? null : 'Tu usuario no puede registrar pagos.';
   if (coll === 'red') return p.red ? null : 'Tu usuario no puede modificar la red.';
   return 'No permitido.';
 }
+const CAMPO_CONCEPTOS = ['instalacion', 'reconexion', 'reclamo', 'otro'];
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
@@ -137,8 +138,15 @@ function guard(u, p, coll, existing, patch) {
       const nw = items[id], prev = old[id];
       if (!isPlain(nw)) return 'Formato inválido.';
       if (!prev) {
-        if (u.role !== 'admin' && !p.cobrar) return 'Tu usuario no puede registrar pagos.';
-        nw.por = u.id; nw.srvTs = Date.now();
+        if (u.role !== 'admin' && !p.cobrar) {
+          /* quien solo cobra en la calle: instalaciones, reclamos y reconexiones, del día y por un monto válido (nunca mensualidades) */
+          if (!p.cobrarCampo) return 'Tu usuario no puede registrar pagos.';
+          if (!CAMPO_CONCEPTOS.includes(nw.concepto) || nw.per) return 'Tu usuario solo puede cobrar instalaciones, reclamos, reconexiones y otros cobros, no mensualidades.';
+          if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
+          if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
+          if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
+        }
+        nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();
         continue;
       }
       /* un pago ya registrado no se edita: solo se puede anular (y nunca volver atrás) */
@@ -411,6 +419,19 @@ export class YapurDB extends DurableObject {
     return '{"seq":' + this.SEQ + ',"cols":{' + cols.join(',') + '}}';
   }
 
+  /* los cobros que registró esta persona en los últimos días (quien cobra en la calle no lee la caja entera) */
+  misCobros(u, dias) {
+    const hoy = ymd(), desde = ymd(Date.now() - (dias - 1) * 864e5), docs = [];
+    for (const y of new Set([desde.slice(0, 4), hoy.slice(0, 4)])) {
+      for (const r of this.q('SELECT id,data FROM docs WHERE coll=? AND id LIKE ? ORDER BY id', 'pagos', y + '-%')) {
+        const its = JSON.parse(r.data).items || {}, mine = {};
+        for (const k of Object.keys(its)) { const it = its[k]; if (isPlain(it) && it.por === u.id && it.fecha >= desde && it.fecha <= hoy) mine[k] = it; }
+        if (Object.keys(mine).length) docs.push({ id: r.id, data: { items: mine } });
+      }
+    }
+    return { docs, desde, hoy };
+  }
+
   /* ----- tiempo real (SSE) ----- */
   sse(s, event, data) {
     try {
@@ -660,6 +681,10 @@ export class YapurDB extends DurableObject {
       const u = this.USERS.get(tk.uid);
       if (!u || !u.activo) return send(401, { error: 'usuario', code: 'unauthenticated' });
       return this.openStream(u);
+    }
+    if (p === '/api/mis-cobros' && m === 'GET') {
+      const a = await this.needAuth(request);
+      return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));
     }
     if (p === '/api/sync' && m === 'GET') return send(200, this.syncJSON((await this.needAuth(request)).user), { 'Content-Type': 'application/json; charset=utf-8' });
 

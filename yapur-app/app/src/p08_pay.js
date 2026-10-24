@@ -41,21 +41,24 @@ function openAnular(recibo){
 }
 function openCobro(clientId){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
-  if(!can('cobrar'))return toast('Tu perfil no puede registrar cobros','bad');
-  const b=billing(c,true),cur=todayStr().slice(0,7),cl=cutLine(c);
+  if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
+  const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reclamos, reconexiones y otros */
+  const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
+  const mens=b.aplica&&!campo,con0=mens?'mensualidad':'instalacion';
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
-    <div class="small muted">${esc(servicioTxt(c))} · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}</div></div>
+    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k==='mensualidad'}">${v}</button>`).join('')}</div>
-    <div id="cb-mens" class="list">${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
-    <div id="cb-otro" hidden>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
-    <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}">`)}</div>
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>mens||k!=='mensualidad').map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
+    <div id="cb-mens" class="list"${mens?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-otro"${mens?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
+    <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
     <div class="hint" id="cb-sum"></div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="cb-go">Registrar cobro</button></div>`;
   openModal({title:'Cobrar',html,onMount(el){
-    let con='mensualidad',manual=false;
+    let con=con0,manual=false;
     const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
     const sum=()=>{
@@ -76,10 +79,11 @@ function openCobro(clientId){
     sum();
     $('#cb-go',el).addEventListener('click',async()=>{
       const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
-      const fecha=$('#cb-fecha',el).value||todayStr(),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
-      const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null};
+      const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
+      const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
       const items={};
       if(con==='mensualidad'){
+        if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
         allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base);});
       }else items[newId()]=Object.assign({concepto:con,per:null,monto,nota:$('#cb-nota-o',el).value.trim()},base);
@@ -89,14 +93,29 @@ function openCobro(clientId){
         // El recibo se muestra con los datos recién escritos aunque la suscripción tarde en llegar.
         ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:payShard(fecha,c.id)}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
-        const c2=S.clientes.get(c.id);if(c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+        const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
       }catch(err){dbError(err);go.disabled=false;}
     });
   }});
 }
+/* quién registró el cobro: el servidor guarda su nombre junto al pago (los cobros viejos no lo tienen) */
+function cobradorName(p){
+  if(p.porNombre)return p.porNombre;
+  if(p.por&&S.me&&p.por===S.me.id)return S.me.nombre;
+  const u=p.por&&ACC.users.find(x=>x.id===p.por);
+  return u?u.nombre:'';
+}
+/* cobro que no es mensualidad (instalación, reclamo, reconexión, otro): lo usan «Cobrar» y el cierre de una orden */
+async function cobrarOtro(c,o){
+  const fecha=o.fecha||todayStr(),recibo=newRecibo(fecha),id=newId(),doc=payShard(fecha,c.id);
+  const item={c:c.id,metodo:o.metodo||'efectivo',fecha,hora:nowTime(),recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||'',concepto:o.concepto,per:null,monto:o.monto,nota:o.nota||''};
+  await putMany('pagos',doc,{[id]:item});
+  S.pagos.set(id,Object.assign({},item,{id,_doc:doc}));rebuildDerived();dataChanged('pagos');
+  return recibo;
+}
 function paymentRow(p){
   const c=S.clientes.get(p.c);
-  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.hora||'')} · ${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)} · <span class="mono">${esc(p.recibo)}</span></div></div>
+  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.hora||'')} · ${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)} · <span class="mono">${esc(p.recibo)}</span>${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''}</div></div>
     <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
 }
 function morosoMsg(c,b){
@@ -255,6 +274,44 @@ function drawCortes(body){
     <div class="notice info">La app te dice a quién cortar y a quién reconectar, pero no toca el router. El script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo en MikroTik.</div>`;
 }
 
+/* cierre de caja: lo que cobró cada persona (para contar el efectivo que tiene que entregar cada una) */
+function cajaPorCobrador(ok){
+  const by={};
+  ok.forEach(p=>{const k=p.por||'';const o=by[k]||(by[k]={nom:'',rec:new Set(),efectivo:0,otros:0,total:0});if(!o.nom)o.nom=cobradorName(p);const m=Number(p.monto)||0;o.rec.add(p.recibo);o.total+=m;if(p.metodo==='efectivo')o.efectivo+=m;else o.otros+=m;});
+  const rows=Object.entries(by).sort((a,b)=>b[1].total-a[1].total);
+  if(!rows.length)return '';
+  return `<div class="card" style="margin-top:12px"><h3>Por cobrador</h3><div class="tbl-wrap"><table><thead><tr><th>Cobró</th><th class="right">Recibos</th><th class="right">Efectivo</th><th class="right">Otros medios</th><th class="right">Total</th></tr></thead><tbody>${rows.map(([k,o])=>`<tr><td>${esc(o.nom||'Sin dato')}</td><td class="right tnum">${o.rec.size}</td><td class="right tnum">${fmtMoney(o.efectivo)}</td><td class="right tnum">${fmtMoney(o.otros)}</td><td class="right tnum"><b>${fmtMoney(o.total)}</b></td></tr>`).join('')}</tbody></table></div><div class="hint">El efectivo de cada persona es lo que tiene que entregar en el día.</div></div>`;
+}
+
+/* ===== Mis cobros (quien cobra en la calle) ===== */
+const MC={err:''};
+async function loadMisCobros(){
+  try{
+    const j=await NET.api('GET','/api/mis-cobros?dias=7');
+    (j.docs||[]).forEach(d=>{const it=(d.data||{}).items||{};for(const k in it)S.pagos.set(k,Object.assign({},it[k],{id:k,_doc:d.id}));});
+    MC.err='';rebuildDerived();dataChanged('pagos');
+  }catch(e){MC.err=e&&e.network?'Sin conexión: se muestran los cobros que ya se cargaron.':'No se pudieron actualizar tus cobros.';dataChanged('pagos');}
+}
+VIEWS.miscobros={
+  mount(el){
+    el.innerHTML=`<div class="card"><h2>¿A quién le cobrás?</h2><div id="mc-pick"></div></div><div id="mc-body" class="wrap" style="padding:0"></div>`;
+    mountClientPicker($('#mc-pick',el),{filter:c=>c.estado!=='baja',onPick:c=>openCobro(c.id),placeholder:'Buscar tu cliente por nombre, calle o N° de cliente'});
+    $('#mc-body',el).addEventListener('click',e=>{const r=e.target.closest('[data-receipt]');if(r)openReceipt(r.dataset.receipt);});
+    loadMisCobros();this.update();
+  },
+  update(){
+    const body=$('#mc-body');if(!body)return;
+    const mine=[...S.pagos.values()].filter(p=>p.por===S.uid).sort((a,b)=>(b.fecha+(b.hora||'')).localeCompare(a.fecha+(a.hora||'')));
+    const today=todayStr(),days=[...new Set(mine.map(p=>p.fecha))].slice(0,7);
+    const sum=(l,f)=>l.filter(p=>!p.anulado&&(!f||f(p))).reduce((t,p)=>t+(Number(p.monto)||0),0);
+    const hoy=mine.filter(p=>p.fecha===today);
+    body.innerHTML=`${MC.err?`<div class="notice">${esc(MC.err)}</div>`:''}
+      <div class="kpis"><div class="kpi"><span class="n">${fmtMoney(sum(hoy))}</span><span class="l">Cobrado hoy</span></div><div class="kpi"><span class="n">${fmtMoney(sum(hoy,p=>p.metodo==='efectivo'))}</span><span class="l">Efectivo a entregar hoy</span></div></div>
+      ${days.length?days.map(d=>{const l=mine.filter(p=>p.fecha===d),seen=new Set(),rows=l.filter(p=>seen.has(p.recibo)?false:(seen.add(p.recibo),true));
+        return `<div class="card"><div class="head-row"><h3>${d===today?'Hoy':esc(dateLabel(d))}</h3><b class="tnum">${fmtMoney(sum(l))}</b></div><div class="list">${rows.map(paymentRow).join('')}</div></div>`;}).join(''):'<div class="empty"><b>Todavía no cobraste nada</b><span>Buscá al cliente arriba y tocá «Cobrar». También podés registrar el cobro al terminar una orden.</span></div>'}`;
+  }
+};
+
 VIEWS.cobranzas={
   mount(el){
     if(!CB.fecha)CB.fecha=todayStr();
@@ -280,7 +337,7 @@ VIEWS.cobranzas={
     if(CB.sub==='cobrar'){
       if(full||!$('#cb-pick')){
         body.innerHTML=`<div class="card"><h2>¿A quién le cobrás?</h2><div id="cb-pick"></div></div><div class="card"><div class="head-row"><h3>Cobrado hoy</h3><b id="cb-hoy" class="tnum"></b></div><div class="list" id="cb-hoylist"></div></div>`;
-        const pk=mountClientPicker($('#cb-pick',body),{filter:c=>c.estado==='activo'||c.estado==='suspendido',onPick:c=>openCobro(c.id)});pk.focus();
+        const pk=mountClientPicker($('#cb-pick',body),{filter:c=>c.estado!=='baja',onPick:c=>openCobro(c.id)});pk.focus();
       }
       const ps=paymentsOn(todayStr()),tot=ps.filter(p=>!p.anulado).reduce((s,p)=>s+(Number(p.monto)||0),0);
       $('#cb-hoy',body).textContent=fmtMoney(tot);
@@ -296,6 +353,7 @@ VIEWS.cobranzas={
       const recs=new Set(ok.map(p=>p.recibo)).size;
       $('#cb-caja',body).innerHTML=`<div class="kpis"><div class="kpi"><span class="n">${fmtMoney(tot)}</span><span class="l">Total cobrado · ${recs} ${recs===1?'recibo':'recibos'}</span></div>
         ${Object.entries(METODOS).filter(([k])=>byM[k]).map(([k,v])=>`<div class="kpi"><span class="n">${fmtMoney(byM[k])}</span><span class="l">${v}</span></div>`).join('')}</div>
+        ${cajaPorCobrador(ok)}
         <div class="list" style="margin-top:12px">${ps.length?ps.map(paymentRow).join(''):'<div class="empty"><b>Sin movimientos</b><span>No hay cobros registrados en esta fecha.</span></div>'}</div>`;
     }else if(CB.sub==='cortes'){
       drawCortes(body);

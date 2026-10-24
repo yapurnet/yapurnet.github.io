@@ -59,6 +59,16 @@ La pestaña **Red** (la ven los técnicos y la oficina; el administrador siempre
 - **Permisos:** el permiso nuevo **«Cargar y editar la red»** se activa por perfil en Ajustes → Usuarios (viene encendido para técnicos y oficina). Quien no lo tiene igual ve las cajas en la ficha del cliente, pero no puede cambiarlas. **Eliminar** un punto solo lo puede quien edita clientes, y el servidor no deja borrar una caja con clientes conectados (hay que pasarlos antes a otra) ni una botella de la que sale otra caja.
 - Los datos entran en las copias de seguridad como cualquier otro, y la lista queda guardada en el celular para consultarla sin señal. Se necesita el APK 2.2 o posterior para el GPS (el mismo que ya se usa para las casas); **no hace falta un APK nuevo**.
 
+## Cobros del técnico y cierre de caja por cobrador
+
+Si un técnico cobra la instalación, una reconexión o un reclamo, lo carga en la app y entra a la caja del día con su nombre:
+
+- **Darle el permiso:** Ajustes → Usuarios → editar al técnico → *Cobrar instalaciones y reclamos en la calle*. Viene apagado: lo prendés solo a quien cobra. Con ese permiso **no cobra mensualidades** (eso sigue siendo de la oficina) y **no ve la caja ni lo que cobran otros**.
+- **Cómo lo carga el técnico:** (1) pestaña **Mis cobros** → busca al cliente → *Cobrar* (instalación, reconexión, reclamo u otro, con el monto y el medio de pago); (2) desde la ficha del cliente → *Cobrar instalación o reclamo*; (3) **al terminar una orden**, tildando *Cobré este trabajo* (el concepto se completa según el tipo de orden). Siempre se registra con la fecha de hoy y a su nombre: no puede poner otra fecha ni borrarlo. Si se equivoca, la oficina anula el recibo y se carga de nuevo.
+- **Mis cobros:** muestra lo que cobró hoy y los últimos 7 días, y cuánto efectivo tiene que entregar hoy.
+- **Cierre de caja:** en Cobranzas → *Caja del día* hay una tabla **Por cobrador** (recibos, efectivo, otros medios y total de cada persona, incluida la oficina) y cada cobro dice quién lo hizo. El efectivo de cada persona es lo que tiene que entregar. Los cobros anulados no suman.
+- Los cobros anteriores a esta versión no tienen nombre de cobrador y figuran como «Sin dato». **No hace falta un APK nuevo.**
+
 ## Avisos de actualización
 
 - **App nueva (la mayoría de los cambios):** cuando se publica una versión nueva en Cloudflare, quien tenga la app abierta (o la abra) ve arriba **«Hay una versión nueva de la app»** con el botón **Actualizar**. Revisa al abrir, al volver a la app y cada 10 minutos. No hace falta reinstalar el APK.

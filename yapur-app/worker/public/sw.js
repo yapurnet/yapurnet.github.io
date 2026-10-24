@@ -1,7 +1,7 @@
 /* Hace que la app abra aunque no haya señal: guarda la pantalla principal en el equipo.
    Con señal siempre se baja la versión nueva (si la red tarda más de 3,5 segundos, se usa la guardada).
    Los datos (/api/*) nunca pasan por acá: los maneja la propia app. */
-const V = 'yapur-6ff7f8c36a';
+const V = 'yapur-8fd1ac33c8';
 const SHELL = ['./', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));

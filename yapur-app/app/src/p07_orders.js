@@ -74,6 +74,19 @@ function openOrderForm({id,clientId}){
     });
   }});
 }
+/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reconexión, reclamo) */
+const CONC_ORD={instalacion:'instalacion',reconexion:'reconexion',falla:'reclamo',visita:'reclamo'};
+const puedeCobrarOrden=c=>!!c&&(can('cobrar')||can('cobrarCampo'));
+function cobroOrdenHTML(o){
+  const con0=CONC_ORD[o.tipo]||'otro';
+  return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
+    <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
+    <div id="ff-cobro-box" hidden>
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
+      ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
+    </div></div>`;
+}
 function openFinishOrder(o){
   const c=S.clientes.get(o.clientId);
   /* activar / reactivar / dar de baja cambia la facturación: solo se ofrece a quien puede editar clientes (al técnico le fallaba y se perdía hasta la ubicación) */
@@ -81,15 +94,20 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
+    ${puedeCobrarOrden(c)?cobroOrdenHTML(o):''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
     const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
+    const ckc=$('#ff-cobro',el);
+    if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read?read():{empty:true};if(g.invalid)return toast('Revisá las coordenadas','bad');
       const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
+      const cobra=ckc&&ckc.checked,monto=cobra?num($('#ff-monto',el).value):0;
+      if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
       try{
         await saveOrder(o,{estado:'hecha',resultado:$('#ff-res',el).value.trim(),cierre:todayStr()+' '+nowTime()});
         const cp={};
@@ -98,7 +116,14 @@ function openFinishOrder(o){
         const ck=$('#ff-est',el);
         if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
-        toast('Orden cerrada');closeModal();
+        let rec=null;
+        if(cobra){
+          /* la orden ya quedó cerrada: si el cobro falla se avisa claro y se carga a mano, sin repetir nada */
+          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:$('#ff-met',el).value,nota:TIPOS_ORD[o.tipo]||''});}
+          catch(err2){toast('La orden se cerró, pero el cobro NO se registró. Cargalo con «Cobrar».','bad');}
+        }
+        toast(rec?'Orden cerrada y cobro registrado':'Orden cerrada');closeModal();
+        if(rec)openReceipt(rec);
       }catch(err){dbError(err);}
     });
   }});
