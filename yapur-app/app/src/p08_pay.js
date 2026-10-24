@@ -333,6 +333,7 @@ VIEWS.cobranzas={
   update(){this.draw(false);},
   draw(full){
     const body=$('#cb-body');if(!body)return;
+    if(!S.loaded.pagos&&(can('cobrar')||can('caja'))){body.innerHTML='<div class="notice">Cargando los cobros del servidor… Sin conexión no se pueden ver ni cargar cobros.</div>';return;}
     if(S.errors.pagos&&(can('cobrar')||can('caja'))){body.innerHTML='<div class="notice bad">No tenés permiso para ver los pagos. Pedile al dueño permiso de edición sobre este archivo.</div>';return;}
     if(CB.sub==='cobrar'){
       if(full||!$('#cb-pick')){

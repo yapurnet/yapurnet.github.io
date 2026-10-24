@@ -13,7 +13,7 @@ const NET=(function(){
   if(!token)me=null;
   const data={};                 // coll -> Map(id -> objeto) | null si no tiene acceso
   const docSeq=new Map();
-  let baseSeq=0,synced=false,syncing=null,buffer=[],started=false;
+  let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
   const handlers={status:[],me:[],kick:[]};
@@ -59,7 +59,7 @@ const NET=(function(){
   function setSession(t,m){token=t;me=m;lsSet('tok',t);lsSet('me',JSON.stringify(m));}
   function clearSession(){
     token='';me=null;lsSet('tok','');lsSet('me','');['viewAsP','tab','tecId','sess'].forEach(k=>lsSet(k,''));
-    closeStream();synced=false;started=false;for(const k of Object.keys(data))delete data[k];
+    closeStream();synced=false;fresh=false;started=false;for(const k of Object.keys(data))delete data[k];
     kvClear();
   }
   async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
@@ -106,7 +106,7 @@ const NET=(function(){
       for(const k of Object.keys(data))delete data[k];
       for(const c of ['clientes','pagos','ordenes','planes','ajustes','red'])data[c]=null;
       for(const c of Object.keys(j.cols))data[c]=new Map(j.cols[c].map(d=>[d.id,d.data]));
-      baseSeq=j.seq;docSeq.clear();synced=true;
+      baseSeq=j.seq;docSeq.clear();synced=true;fresh=true;
       const pend=buffer;buffer=[];
       pend.forEach(m=>applyDoc(m.coll,m.id,m.op,m.data,m.seq,true));
       markAll();
@@ -209,7 +209,8 @@ const NET=(function(){
   }
   function fire(w){
     if(!synced)return;
-    if(data[w.coll]==null){if(w.err)w.err({code:'permission_denied'});return;}
+    /* abierta con la copia del celular, los pagos todavía no están: se espera a la primera sincronización antes de decir «sin permiso» */
+    if(data[w.coll]==null){if(fresh&&w.err)w.err({code:'permission_denied'});return;}
     try{w.cb(snapOf(w));}catch(e){console.error(e);}
   }
   function watch(coll,id,cb,err){
