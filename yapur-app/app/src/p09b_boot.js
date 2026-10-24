@@ -33,6 +33,7 @@ function allowedTabs(){
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
   if(can('red'))t.push(['red','Red']);
+  if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
   if(isAdmin())t.push(['ajustes','Ajustes']);
   return t;
