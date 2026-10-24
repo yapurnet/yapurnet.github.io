@@ -113,7 +113,7 @@ function canWrite(u, p, coll, op) {
   if (coll === 'red') return p.red ? null : 'Tu usuario no puede modificar la red.';
   return 'No permitido.';
 }
-const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'ciclo', 'desde', 'dia'];
+const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch) {
@@ -327,14 +327,14 @@ export class YapurDB extends DurableObject {
     if (coll === 'ajustes') {
       if (id !== 'general') return u.role === 'admin' ? data : null;
       const d = Object.assign({}, data, { perfiles: this.perfilesView() });
-      if (!p.precios && Array.isArray(d.servicios)) d.servicios = d.servicios.map(s => { const c = Object.assign({}, s); delete c.precio; return c; });
+      if (!p.precios && Array.isArray(d.servicios)) d.servicios = d.servicios.map(s => { const c = Object.assign({}, s); delete c.precio; delete c.hist; return c; });
       return d;
     }
     if (u.role === 'admin') return data;
-    if (coll === 'planes') { if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; return c; }
+    if (coll === 'planes') { if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
     if (coll === 'clientes') {
       const drop = [];
-      if (!p.precios) drop.push('precio');
+      if (!p.precios) drop.push('precio', 'hp');
       if (!p.dni) drop.push('dni');
       if (!p.telefono) drop.push('tel', 'tel2');
       return drop.length ? strip(data, drop) : data;

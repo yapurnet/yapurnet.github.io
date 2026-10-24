@@ -141,6 +141,20 @@ async function openStream(token) {
     r = await call('GET', '/api/backup', undefined, A);
     t('red: la copia de seguridad incluye la red', r.s === 200 && r.j.docs.some(d => d.coll === 'red' && d.data.items.e1), r.j && Object.keys(r.j));
 
+    /* ---- precios con vigencia por mes ---- */
+    r = await call('PUT', '/api/doc/planes/pv1', { data: { nombre: 'Con historial', bajada: 50, subida: 20, precio: 25000, hist: [{ d: '0000-00', p: 20000 }, { d: '2099-01', p: 25000 }] } }, A);
+    t('vigencia: el administrador guarda un plan con historial de precios', r.s === 200, r);
+    r = await call('GET', '/api/doc/planes/pv1', undefined, T);
+    t('vigencia: el técnico no ve el precio ni el historial del plan', r.s === 200 && r.j.data.precio === undefined && r.j.data.hist === undefined && r.j.data.nombre === 'Con historial', r);
+    r = await call('GET', '/api/doc/planes/pv1', undefined, O);
+    t('vigencia: la oficina (con precios) sí ve el historial', r.s === 200 && Array.isArray(r.j.data.hist) && r.j.data.hist.length === 2, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { nombre: 'Vera Vigencia', estado: 'activo', planId: 'pv1', hp: [{ h: '2026-09', planId: 'pv1', precio: null, extras: [] }] } } } }, O);
+    t('vigencia: la oficina guarda un cliente con historial de cambios', r.s === 200 && r.j.data.items.cv1.hp.length === 1, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { hp: [] } } } }, T);
+    t('vigencia: el técnico no puede tocar el historial de facturación del cliente', r.s === 403 && /facturaci/i.test(r.j.error), r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T);
+    t('vigencia: al técnico no le llega el historial de precios del cliente', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.hp === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
+
     /* ---- datos y permisos ---- */
     r = await call('PUT', '/api/doc/planes/p1', { data: { nombre: 'Hogar 100', bajada: 100, subida: 50, precio: 20000 } }, A);
     t('admin crea plan', r.s === 200 && r.j.data.precio === 20000, r);
@@ -197,7 +211,7 @@ async function openStream(token) {
 
     /* ---- sincronización ---- */
     r = await call('GET', '/api/sync', undefined, T);
-    t('sync técnico: sin pagos', r.s === 200 && !('pagos' in r.j.cols) && r.j.cols.clientes.length === 1 && r.j.cols.planes.length === 1, Object.keys(r.j.cols || {}));
+    t('sync técnico: sin pagos', r.s === 200 && !('pagos' in r.j.cols) && r.j.cols.clientes.length === 1 && r.j.cols.planes.length === 2, Object.keys(r.j.cols || {}));
     r = await call('GET', '/api/sync', undefined, O);
     t('sync oficina: con pagos', r.j.cols.pagos && r.j.cols.pagos[0].data.items.pg1, r.j && Object.keys(r.j.cols || {}));
 

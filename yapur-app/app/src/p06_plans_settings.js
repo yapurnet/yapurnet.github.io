@@ -37,17 +37,44 @@ function clientQueueCmd(c){
   return '/queue simple add name="'+String(c.nombre||'').replace(/["\\$]/g,'')+'" target='+ip+' '+queueText(p);
 }
 function planClientCount(id){let n=0;for(const c of S.clientes.values())if(c.planId===id&&c.estado==='activo')n++;return n;}
+/* ----- precios con vigencia: aviso del cambio programado y bloque «rige desde» de los formularios ----- */
+function nextChangeHTML(item){
+  const cur=curMonth(),e=Array.isArray(item.hist)?item.hist.find(x=>x.d>cur):null;
+  return e?`<div class="small"><span class="chip info">Desde ${esc(monthLabel(e.d))}: ${esc(fmtMoney(e.p))}</span></div>`:'';
+}
+function vigHTML(pre,item){
+  const cur=curMonth(),noHist=!(Array.isArray(item&&item.hist)&&item.hist.length);
+  return `<div class="notice info" id="${pre}-vig" hidden>
+    <div class="field"><label for="${pre}-vig-mes">El precio nuevo rige desde</label><input id="${pre}-vig-mes" type="month" min="${cur}" value="${addMonths(cur,1)}"></div>
+    <div class="hint">Los meses anteriores conservan el precio que tenían: a quien ya pagó no le aparece deuda. Se puede dejar el mes siguiente o elegir otro.</div>
+    ${noHist?`<label class="per"><input id="${pre}-vig-fix" type="checkbox"><span class="grow">Es un error de carga (por ejemplo $17 en vez de $17.000): corregir el precio de todos los meses</span></label>`:''}</div>`;
+}
+/* arma {precio,hist} para guardar; null si falta o no es válido el mes. */
+function readVig(pre,el,item,precio){
+  if(!item)return {precio};
+  if(precio===planNow(item))return {precio:item.precio,hist:item.hist};
+  const fix=$('#'+pre+'-vig-fix',el);
+  if(fix&&fix.checked)return {precio};
+  const eff=$('#'+pre+'-vig-mes',el).value;
+  if(!/^\d{4}-\d{2}$/.test(eff)||eff<curMonth()){toast('Elegí desde qué mes rige el precio nuevo (este mes o uno futuro)','bad');return null;}
+  return {precio,hist:histWith(item,eff,precio)};
+}
+function bindVig(pre,el,item,get){
+  const box=$('#'+pre+'-vig',el);if(!box||!item)return;
+  const f=()=>{const n=get();box.hidden=!(n!==null&&n>=0&&n!==planNow(item));};
+  const inp=$('#'+pre+'-precio',el);inp.addEventListener('input',f);f();
+}
 function planCard(p){
   const n=planClientCount(p.id);
   return `<article class="plan${p.activo===false?' off':''}">
     <div class="head-row"><span class="chip accent">${esc(TEC_PLAN[p.tecnologia]||'Todas las tecnologías')}</span>${p.activo===false?'<span class="chip">Inactivo</span>':''}</div>
     <h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3>
     <div><div class="speed">${esc(p.bajada)}<small>Mbps de bajada</small></div><div class="speed-up">subida ${esc(p.subida)} Mbps</div></div>
-    ${can('precios')?`<div class="price">${fmtMoney(p.precio)}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>`:''}
+    ${can('precios')?`<div class="price">${fmtMoney(planNow(p))}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>${nextChangeHTML(p)}`:''}
     <div class="qbox">${esc(queueText(p))}</div>
     <div class="actions start"><button class="btn small ghost" type="button" data-copy="${esc(queueText(p))}" data-copy-label="Parámetros de la cola">Copiar parámetros de la cola</button></div>
     ${p.perfil?`<div class="small muted">Perfil: <span class="mono">${esc(p.perfil)}</span></div>`:''}
-    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*(Number(p.precio)||0))+' por mes':''}</div>
+    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div>
     ${isAdmin()?`<div class="actions start"><button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button></div>`:''}</article>`;
 }
 function qRowHTML([k,label,key,kind,ex],q){
@@ -60,7 +87,8 @@ function openPlanForm(id){
   const html=`<form class="form" id="pform" novalidate>
     ${F('Nombre del plan *','pf-nombre',`<input id="pf-nombre" value="${esc(p.nombre||'')}" placeholder="Hogar 100" autocomplete="off">`)}
     <div class="grid2">${F('Bajada (Mbps) *','pf-bajada','<input id="pf-bajada" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.bajada||'')+'">')}${F('Subida (Mbps) *','pf-subida','<input id="pf-subida" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.subida||'')+'">')}</div>
-    <div class="grid2">${F('Precio mensual (ARS) *','pf-precio',`<input id="pf-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="17000" value="${p.precio==null?'':esc(p.precio)}">`,'<span id="pf-precio-h"></span>')}${F('Tecnología','pf-tec',`<select id="pf-tec">${Object.entries(TEC_PLAN).map(([k,v])=>opt(k,v,k===p.tecnologia)).join('')}</select>`)}</div>
+    <div class="grid2">${F('Precio mensual (ARS) *','pf-precio',`<input id="pf-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="17000" value="${p.precio==null?'':esc(old?planNow(old):p.precio)}">`,'<span id="pf-precio-h"></span>')}${F('Tecnología','pf-tec',`<select id="pf-tec">${Object.entries(TEC_PLAN).map(([k,v])=>opt(k,v,k===p.tecnologia)).join('')}</select>`)}</div>
+    ${old?vigHTML('pf',old):''}
     <details class="qsec"${hasQ?' open':''}><summary>Ráfaga y parámetros de la cola (MikroTik)</summary>
       <div class="form" style="margin-top:10px">
       <div class="hint">Completá solo lo que usás, igual que en la Simple Queue. Escribí como en MikroTik: <span class="mono">25M</span>, <span class="mono">256k</span>. Un número solo se toma como M. Si cargás un solo lado, el otro copia el mismo valor.</div>
@@ -74,6 +102,7 @@ function openPlanForm(id){
   openModal({title:old?'Editar plan':'Nuevo plan',html,onMount(el){
     bindMoney($('#pf-precio',el),$('#pf-precio-h',el));
     const v=i=>$('#'+i,el).value.trim();
+    bindVig('pf',el,old,()=>num(v('pf-precio')));
     /* lee y valida los parámetros de la cola; devuelve {q} o {error} */
     const readQ=()=>{
       const q2={};
@@ -104,7 +133,9 @@ function openPlanForm(id){
       if(!bajada||!subida)return toast('Completá bajada y subida','bad');
       if(precio===null||precio<0)return toast('Completá el precio','bad');
       const r=readQ();if(r.error)return toast(r.error,'bad');
-      const obj={nombre:v('pf-nombre'),bajada,subida,precio,tecnologia:v('pf-tec'),perfil:v('pf-perfil'),q:Object.keys(r.q).length?r.q:null,activo:$('#pf-activo',el).checked,mod:Date.now()};
+      const vg=readVig('pf',el,old,precio);if(!vg)return;
+      const obj={nombre:v('pf-nombre'),bajada,subida,precio:vg.precio,tecnologia:v('pf-tec'),perfil:v('pf-perfil'),q:Object.keys(r.q).length?r.q:null,activo:$('#pf-activo',el).checked,mod:Date.now()};
+      if(vg.hist)obj.hist=vg.hist;
       try{await S.db.collection('planes').doc(old?old.id:newId()).set(obj);toast('Plan guardado');closeModal();}catch(err){dbError(err);}
     });
   }});
@@ -114,19 +145,21 @@ function openPlanForm(id){
 function servicioClientCount(id){let n=0;for(const c of S.clientes.values())if(c.estado==='activo'&&Array.isArray(c.extras)&&c.extras.includes(id))n++;return n;}
 function servicioRow(s){
   const n=servicioClientCount(s.id);
-  return `<div class="item" style="cursor:default"><div><div class="t">${esc(s.nombre)}${s.activo===false?' <span class="chip">Ya no se ofrece</span>':''}</div><div class="s">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*(Number(s.precio)||0))+' por mes':''}</div></div>
-    ${can('precios')?`<div class="side"><b class="tnum">${fmtMoney(s.precio)}</b><span class="muted small">por mes</span></div>`:''}
+  return `<div class="item" style="cursor:default"><div><div class="t">${esc(s.nombre)}${s.activo===false?' <span class="chip">Ya no se ofrece</span>':''}</div><div class="s">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(s))+' por mes':''}</div></div>
+    ${can('precios')?`<div class="side"><b class="tnum">${fmtMoney(planNow(s))}</b><span class="muted small">por mes</span>${nextChangeHTML(s)}</div>`:''}
     ${isAdmin()?`<div class="tags"><button class="btn small" type="button" data-edit-sv="${esc(s.id)}">Editar</button></div>`:''}</div>`;
 }
 function openServicioForm(id){
   const list=serviciosList(),old=id?list.find(s=>s.id===id):null,s=old||{activo:true};
   const html=`<form class="form" id="svform" novalidate>
     ${F('Nombre del servicio *','sv-nombre',`<input id="sv-nombre" autocomplete="off" placeholder="Multimedia" value="${esc(s.nombre||'')}">`)}
-    ${F('Precio mensual (ARS) *','sv-precio',`<input id="sv-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="15000" value="${s.precio==null?'':esc(s.precio)}">`,'<span id="sv-precio-h"></span> El precio nuevo se aplica a todos los clientes que lo tienen, también en los meses que todavía no pagaron.')}
+    ${F('Precio mensual (ARS) *','sv-precio',`<input id="sv-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="15000" value="${s.precio==null?'':esc(old?planNow(old):s.precio)}">`,'<span id="sv-precio-h"></span>')}
+    ${old?vigHTML('sv',old):''}
     <label class="per"><input id="sv-activo" type="checkbox"${s.activo!==false?' checked':''}><span class="grow"><b>Se ofrece a clientes</b><br><span class="small muted">Si lo apagás, los clientes que ya lo tienen lo siguen pagando, pero no se puede asignar a otros.</span></span></label>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar servicio</button></div></form>`;
   openModal({title:old?'Editar servicio':'Nuevo servicio',html,onMount(el){
     bindMoney($('#sv-precio',el),$('#sv-precio-h',el));
+    bindVig('sv',el,old,()=>num($('#sv-precio',el).value));
     $('#svform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const nombre=$('#sv-nombre',el).value.trim(),precio=num($('#sv-precio',el).value);
@@ -135,7 +168,10 @@ function openServicioForm(id){
       if(list.some(x=>x.id!==(old&&old.id)&&norm(x.nombre)===norm(nombre)))return toast('Ya hay un servicio con ese nombre','bad');
       const activo=$('#sv-activo',el).checked;
       let next;
-      if(old)next=list.map(x=>x.id===old.id?Object.assign({},x,{nombre,precio,activo}):x);
+      if(old){
+        const vg=readVig('sv',el,old,precio);if(!vg)return;
+        next=list.map(x=>{if(x.id!==old.id)return x;const y=Object.assign({},x,{nombre,precio:vg.precio,activo});if(vg.hist)y.hist=vg.hist;else delete y.hist;return y;});
+      }
       else{
         const base=norm(nombre).replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'servicio';let sid=base,i=2;
         while(list.some(x=>x.id===sid))sid=base+'_'+(i++);
@@ -160,7 +196,7 @@ VIEWS.planes={
   update(){
     const l=$('#pl-list');if(!l)return;
     const sl=$('#sv-list');if(sl)sl.innerHTML=serviciosList().length?serviciosList().map(servicioRow).join(''):'<div class="hint">Todavía no hay servicios adicionales.</div>';
-    const rows=[...S.planes.values()].sort((a,b)=>(a.bajada-b.bajada)||(a.precio-b.precio));
+    const rows=[...S.planes.values()].sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
     l.innerHTML=rows.length?rows.map(planCard).join(''):`<div class="empty" style="grid-column:1/-1"><b>Todavía no hay planes</b><span>${isAdmin()?'Creá el primero para poder asignarlo a los clientes.':'El administrador todavía no cargó planes.'}</span></div>`;
   }
 };

@@ -27,7 +27,17 @@ El APK es solo una ventana que abre el sistema; **cuando se cambia el sistema no
 1. En la versión vieja: **Ajustes → «Descargar copia para el servidor nuevo»** (se guarda un archivo `.json`).
 2. En la nueva (ya con tu usuario administrador): **Ajustes → «Restaurar desde un archivo…»** y elegís ese archivo.
 3. Los clientes existentes quedan con Ciclo 1 y sin servicios extra; ajustalos desde la ficha o con la importación.
-4. El plan `Plan_15` quedó guardado a `$17` en la versión anterior: editarlo y poner `17.000`.
+4. El plan `Plan_15` quedó guardado a `$17` en la versión anterior: editarlo, poner `17.000` y tildar **«Es un error de carga»** (así vale para todos los meses).
+
+## Cambios de precio, servicios nuevos y cambios de plan (vigencia por mes)
+
+Un precio cambia **desde un mes**; los meses anteriores conservan lo que valían, así a quien ya pagó no le aparece deuda.
+
+- **Aumento de un plan o de un servicio extra** (Planes → Editar): al cambiar el precio aparece *«El precio nuevo rige desde»* con el mes siguiente. Se puede elegir este mes o uno futuro. El plan muestra el aviso «Desde noviembre: $25.000» hasta que llega ese mes.
+- **Error de carga** (por ejemplo `$17` en vez de `$17.000`): tildar *«Es un error de carga»* corrige todos los meses. Solo se ofrece mientras el plan no tenga aumentos anteriores; si ya los tiene, el cambio se carga con «rige desde».
+- **Agregarle un servicio a un cliente, cambiarle el plan o ponerle precio especial** (ficha → Editar): aparece *«Los cambios rigen desde»* con este mes. Se puede elegir un mes anterior (por ejemplo si lo tenía desde antes), pero nunca antes de que empezara su situación actual. Lo anterior queda guardado como estaba.
+- Vale lo mismo para quitar un servicio o volver al plan anterior. Si un cliente se corrige dentro del mismo mes que el cambio anterior, se toma como corrección y no se agrega historial.
+- Los técnicos no reciben ni los precios ni este historial, y no pueden modificarlo.
 
 ## Ubicación de las casas con el GPS del celular
 
