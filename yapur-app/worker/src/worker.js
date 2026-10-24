@@ -35,14 +35,14 @@ async function gunzip(u8) {
 /* día en Argentina (UTC-3, sin horario de verano) */
 const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 10);
 
-const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes']);
+const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -110,15 +110,16 @@ function canWrite(u, p, coll, op) {
   if (coll === 'clientes') return (p.editarClientes || p.ubicacion || p.promesas || p.operarOrdenes || p.cobrar) ? null : 'Tu usuario no puede modificar clientes.';
   if (coll === 'ordenes') return (p.crearOrdenes || p.operarOrdenes) ? null : 'Tu usuario no puede modificar órdenes.';
   if (coll === 'pagos') return (p.cobrar || p.anular) ? null : 'Tu usuario no puede registrar pagos.';
+  if (coll === 'red') return p.red ? null : 'Tu usuario no puede modificar la red.';
   return 'No permitido.';
 }
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'ciclo', 'desde', 'dia'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch) {
-  if (u.role === 'admin' && coll !== 'pagos') return null;
+  if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red') return null;
   const items = isPlain(patch.items) ? patch.items : null;
-  if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' ? 'Formato inválido.' : null;
+  if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' ? 'Formato inválido.' : null;
   const old = existing && isPlain(existing.items) ? existing.items : {};
   if (coll === 'clientes') {
     for (const id of Object.keys(items)) {
@@ -129,6 +130,8 @@ function guard(u, p, coll, existing, patch) {
       for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
       if ('promesas' in nw && !same(nw.promesas, prev.promesas) && !p.promesas) return 'Tu usuario no puede dar promesas de pago.';
     }
+  } else if (coll === 'red') {
+    return guardRed(u, p, old, items);
   } else if (coll === 'pagos') {
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
@@ -149,6 +152,35 @@ function guard(u, p, coll, existing, patch) {
         nw.anuladoPor = u.id;
       }
     }
+  }
+  return null;
+}
+
+/* ----- red: cajas NAP y botellas de empalme (se guardan juntas en red/puntos, un registro por punto) ----- */
+const RED_TIPOS = ['nap', 'empalme'];
+const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod'];
+const isNum = v => typeof v === 'number' && isFinite(v);
+function guardRed(u, p, old, items) {
+  for (const id of Object.keys(items)) {
+    if (!ID_RE.test(id)) return 'Identificador inválido.';
+    const nw = items[id], prev = old[id];
+    if (nw === null) {   /* eliminar un punto */
+      if (u.role !== 'admin' && !p.editarClientes) return 'Tu usuario no puede eliminar puntos de la red.';
+      continue;
+    }
+    if (!isPlain(nw)) return 'Formato inválido.';
+    for (const k of Object.keys(nw)) if (!RED_KEYS.includes(k)) return 'Dato desconocido en la red: ' + k + '.';
+    const tipo = 'tipo' in nw ? nw.tipo : prev && prev.tipo, nombre = 'nombre' in nw ? nw.nombre : prev && prev.nombre;
+    if (!RED_TIPOS.includes(tipo)) return 'El tipo tiene que ser caja NAP o botella de empalme.';
+    if (typeof nombre !== 'string' || !nombre.trim() || nombre.length > 60) return 'Falta el nombre (hasta 60 letras).';
+    if ('lat' in nw || 'lng' in nw) {
+      const la = 'lat' in nw ? nw.lat : prev && prev.lat, ln = 'lng' in nw ? nw.lng : prev && prev.lng;
+      if ((la === null || la === undefined) !== (ln === null || ln === undefined)) return 'La ubicación necesita latitud y longitud.';
+      if (la !== null && la !== undefined && (!isNum(la) || !isNum(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180)) return 'La ubicación no es válida.';
+    }
+    if ('puertos' in nw && nw.puertos !== null && !(Number.isInteger(nw.puertos) && nw.puertos >= 1 && nw.puertos <= 288)) return 'Los puertos tienen que ser un número entre 1 y 288.';
+    if ('padre' in nw && nw.padre !== null && (typeof nw.padre !== 'string' || !ID_RE.test(nw.padre) || nw.padre === id)) return 'El punto del que sale no es válido.';
+    for (const k of ['ref', 'notas']) if (k in nw && nw[k] !== null && (typeof nw[k] !== 'string' || nw[k].length > 500)) return 'El texto es demasiado largo.';
   }
   return null;
 }
@@ -309,11 +341,31 @@ export class YapurDB extends DurableObject {
     }
     return data;
   }
+  /* no se puede borrar una caja o empalme que todavía tiene clientes conectados, ni un empalme del que sale otra caja */
+  redInUse(existing, items) {
+    const gone = Object.keys(items).filter(k => items[k] === null && existing && isPlain(existing.items) && isPlain(existing.items[k]));
+    if (!gone.length) return null;
+    const rows = this.q('SELECT data FROM docs WHERE coll=?', 'clientes');
+    for (const id of gone) {
+      const key = '"nap":' + JSON.stringify(id);
+      let n = 0;   /* los clientes dados de baja ya no ocupan la caja */
+      for (const r of rows) {
+        if (!r.data.includes(key)) continue;
+        const its = JSON.parse(r.data).items || {};
+        for (const k of Object.keys(its)) if (isPlain(its[k]) && its[k].nap === id && its[k].estado !== 'baja') n++;
+      }
+      const nombre = String(existing.items[id].nombre || id);
+      if (n) return 'No se puede eliminar «' + nombre + '»: tiene ' + n + (n === 1 ? ' cliente conectado' : ' clientes conectados') + '. Pasalos primero a otra caja.';
+      const hijos = Object.keys(existing.items).filter(k => k !== id && items[k] !== null && isPlain(existing.items[k]) && existing.items[k].padre === id && !(isPlain(items[k]) && 'padre' in items[k] && items[k].padre !== id));
+      if (hijos.length) return 'No se puede eliminar «' + nombre + '»: de ahí salen ' + hijos.length + (hijos.length === 1 ? ' punto de la red' : ' puntos de la red') + '. Cambiales primero de dónde salen.';
+    }
+    return null;
+  }
   writeDoc(u, coll, id, op, data) {
     if (!COLS.has(coll) || !ID_RE.test(id)) throw httpErr(400, 'Ruta inválida.');
     if (!isPlain(data)) throw httpErr(400, 'Datos inválidos.');
     const p = effPerms(u);
-    if (op === 'set' && (coll === 'clientes' || coll === 'pagos' || coll === 'ordenes')) throw httpErr(400, 'Los lotes de clientes, pagos y órdenes solo se modifican de a un registro.', 'invalid_argument');
+    if (op === 'set' && (coll === 'clientes' || coll === 'pagos' || coll === 'ordenes' || coll === 'red')) throw httpErr(400, 'Los lotes de clientes, pagos, órdenes y red solo se modifican de a un registro.', 'invalid_argument');
     const bad = canWrite(u, p, coll, op);
     if (bad) throw httpErr(403, bad, 'permission_denied');
     if (coll === 'ajustes' && id !== 'general') throw httpErr(400, 'Ruta inválida.');
@@ -323,6 +375,7 @@ export class YapurDB extends DurableObject {
       if (coll === 'ajustes') { data = Object.assign({}, data); delete data.perfiles; }
       const why = guard(u, p, coll, existing, data);
       if (why) throw httpErr(403, why, 'permission_denied');
+      if (coll === 'red') { const inUse = this.redInUse(existing, data.items); if (inUse) throw httpErr(409, inUse, 'failed_precondition'); }
       const next = op === 'set' || !existing ? data : deepMerge(existing, data);
       const s = JSON.stringify(next);
       /* la base de Cloudflare admite hasta 2 MB por fila: se mide en bytes, no en letras */

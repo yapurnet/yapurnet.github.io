@@ -77,7 +77,7 @@ const NET=(function(){
     persistT=setTimeout(()=>{
       persistT=null;if(!me||!synced)return;
       const cols={};
-      for(const c of ['clientes','ordenes','planes','ajustes'])if(data[c])cols[c]=[...data[c]];
+      for(const c of ['clientes','ordenes','planes','ajustes','red'])if(data[c])cols[c]=[...data[c]];
       kvSet(cacheKey(),{ts:Date.now(),cols});
     },4000);
   }
@@ -85,13 +85,13 @@ const NET=(function(){
     const c=await kvGet(cacheKey());
     if(!c||!c.cols||!c.cols.ajustes)return false;
     for(const k of Object.keys(c.cols))data[k]=new Map(c.cols[k]);
-    for(const k of ['clientes','ordenes','planes','ajustes'])if(!data[k])data[k]=new Map();
+    for(const k of ['clientes','ordenes','planes','ajustes','red'])if(!data[k])data[k]=new Map();
     synced=true;baseSeq=0;docSeq.clear();
     return true;
   }
 
   /* ----- sincronización ----- */
-  function markAll(){['clientes','pagos','ordenes','planes','ajustes'].forEach(c=>dirty.add(c));kick();}
+  function markAll(){['clientes','pagos','ordenes','planes','ajustes','red'].forEach(c=>dirty.add(c));kick();}
   function kick(){if(flushT)return;flushT=setTimeout(()=>{flushT=null;flush();},20);}
   function flush(){
     const d=dirty;dirty=new Set();
@@ -104,7 +104,7 @@ const NET=(function(){
       buffer=[];
       const j=await api('GET','/api/sync',undefined,{timeout:90000});
       for(const k of Object.keys(data))delete data[k];
-      for(const c of ['clientes','pagos','ordenes','planes','ajustes'])data[c]=null;
+      for(const c of ['clientes','pagos','ordenes','planes','ajustes','red'])data[c]=null;
       for(const c of Object.keys(j.cols))data[c]=new Map(j.cols[c].map(d=>[d.id,d.data]));
       baseSeq=j.seq;docSeq.clear();synced=true;
       const pend=buffer;buffer=[];

@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm');
 const dir=__dirname+'/../app/src/';
-const src=['p04_core.js','p05_clients.js','p06_plans_settings.js','p06b_import.js','p07_orders.js','p08_pay.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
+const src=['p04_core.js','p05_clients.js','p05b_red.js','p06_plans_settings.js','p06b_import.js','p07_orders.js','p08_pay.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
 const test=`
 const out=[];const t=(n,ok,x)=>out.push((ok?'ok   ':'FAIL ')+n+(ok?'':' -> '+JSON.stringify(x)));
 // coordenadas

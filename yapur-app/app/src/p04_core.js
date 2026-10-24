@@ -47,8 +47,8 @@ const S={
   db:null,me:null,ready:false,uid:null,
   realRole:'tecnico',role:'tecnico',tab:'',perfil:null,preview:false,gate:false,perms:{},pv:0,
   ajustes:{empresa:'YAPUR.NET',tecnicos:[],perfiles:[],diaVenc:10,ciclos:null,feriados:null,servicios:null,promesaMax:10},
-  planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),
-  loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false},
+  planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),red:new Map(),rv:0,
+  loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false,red:false},
   errors:{},paidIdx:new Map(),payByClient:new Map(),billCache:new Map(),cutCache:new Map(),
   tecId:''
 };
@@ -69,12 +69,13 @@ const PERMS=[
   ['caja','Ver la caja del día y los morosos','','Dinero'],
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
-  ['resumen','Ver el resumen del negocio','','Dinero']
+  ['resumen','Ver el resumen del negocio','','Dinero'],
+  ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true}
 };
 const can=k=>!!S.perms[k];
 const isAdmin=()=>S.role==='admin'&&!S.preview;
