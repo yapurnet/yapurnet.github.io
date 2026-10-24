@@ -127,13 +127,46 @@ function extrasOf(c){
   const ids=c&&Array.isArray(c.extras)?c.extras:[];const l=serviciosList();
   return ids.map(id=>l.find(s=>s.id===id)).filter(Boolean);
 }
-/* precio del plan de internet (el precio especial del cliente lo reemplaza) */
-function priceBase(c){
-  if(c.precio!==null&&c.precio!==undefined&&c.precio!==''&&isFinite(Number(c.precio)))return Number(c.precio);
-  const p=S.planes.get(c.planId);return p?Number(p.precio)||0:0;
+/* ===== precios con vigencia por mes =====
+   Un aumento (o un servicio nuevo en un cliente) rige desde el mes que se elige: los meses anteriores conservan lo que valían.
+   plan.hist y servicio.hist = [{d:'AAAA-MM',p:precio}] ordenado: desde el mes d el precio es p.
+   cliente.hp = [{h:'AAAA-MM',planId,precio,extras}] ordenado: así estaba el cliente HASTA el mes h (incluido); lo actual rige después. */
+const curMonth=()=>todayStr().slice(0,7);
+function histPrice(item,per){
+  const h=item&&Array.isArray(item.hist)?item.hist:null;
+  if(!h||!h.length)return Number(item&&item.precio)||0;
+  let v=null;for(const e of h)if(e&&e.d<=per)v=e.p;
+  return Number(v!==null?v:h[0].p)||0;
 }
-/* total mensual: plan de internet + servicios adicionales */
-const priceOf=c=>priceBase(c)+extrasOf(c).reduce((t,s)=>t+(Number(s.precio)||0),0);
+const planNow=p=>histPrice(p,curMonth());
+function stateAt(c,per){
+  const hp=c&&Array.isArray(c.hp)?c.hp:null;
+  if(hp)for(const e of hp)if(e&&per<=e.h)return e;
+  return c;
+}
+const hasNum=v=>v!==null&&v!==undefined&&v!==''&&isFinite(Number(v));
+/* precio del plan de internet en un mes (el precio especial del cliente lo reemplaza) */
+function priceBaseAt(c,per){
+  const st=stateAt(c,per);
+  if(hasNum(st.precio))return Number(st.precio);
+  const p=S.planes.get(st.planId);return p?histPrice(p,per):0;
+}
+function extrasAt(c,per){
+  const ids=stateAt(c,per).extras;const l=serviciosList();
+  return (Array.isArray(ids)?ids:[]).map(id=>l.find(s=>s.id===id)).filter(Boolean);
+}
+/* total de un mes: plan de internet + servicios adicionales */
+const priceAt=(c,per)=>priceBaseAt(c,per)+extrasAt(c,per).reduce((t,s)=>t+histPrice(s,per),0);
+/* lo que vale hoy */
+const priceBase=c=>priceBaseAt(c,curMonth());
+const priceOf=c=>priceAt(c,curMonth());
+/* nueva lista de vigencias al cambiar un precio desde el mes eff: lo anterior se conserva y lo posterior se reemplaza */
+function histWith(item,eff,price){
+  const h=Array.isArray(item.hist)&&item.hist.length?item.hist.filter(e=>e.d<eff):[{d:'0000-00',p:Number(item.precio)||0}];
+  if(!h.length)h.push({d:'0000-00',p:Number(item.precio)||0});
+  h.push({d:eff,p:price});
+  return h;
+}
 /* "Hogar 50 + Multimedia + Multimedia Net" */
 function servicioTxt(c){
   const p=S.planes.get(c.planId);
@@ -183,10 +216,10 @@ function billing(c,withNext){
     const last=withNext?addMonths(cur,1):cur;
     const cy=cicloOf(c),cfg=cicloCfg(cy);
     for(let p=from;p<=last;p=addMonths(p,1)){
-      const paid=paidMap.get(p)||0,rest=Math.max(0,out.price-paid);
+      const paid=paidMap.get(p)||0,price=priceAt(c,p),rest=Math.max(0,price-paid);
       const due=p+'-'+pad(Math.min(cfg.hasta,daysIn(p)));
       const venc=due<today;
-      out.periods.push({per:p,paid,rest,due,venc,desde:p+'-'+pad(Math.min(cfg.desde,daysIn(p))),cut:corteFecha(p,cy)});
+      out.periods.push({per:p,price,paid,rest,due,venc,desde:p+'-'+pad(Math.min(cfg.desde,daysIn(p))),cut:corteFecha(p,cy)});
       if(p<=cur&&rest>0&&venc){out.vencidos++;out.deuda+=rest;}
     }
   }

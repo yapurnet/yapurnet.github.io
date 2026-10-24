@@ -339,13 +339,46 @@ function extrasOf(c){
   const ids=c&&Array.isArray(c.extras)?c.extras:[];const l=serviciosList();
   return ids.map(id=>l.find(s=>s.id===id)).filter(Boolean);
 }
-/* precio del plan de internet (el precio especial del cliente lo reemplaza) */
-function priceBase(c){
-  if(c.precio!==null&&c.precio!==undefined&&c.precio!==''&&isFinite(Number(c.precio)))return Number(c.precio);
-  const p=S.planes.get(c.planId);return p?Number(p.precio)||0:0;
+/* ===== precios con vigencia por mes =====
+   Un aumento (o un servicio nuevo en un cliente) rige desde el mes que se elige: los meses anteriores conservan lo que valían.
+   plan.hist y servicio.hist = [{d:'AAAA-MM',p:precio}] ordenado: desde el mes d el precio es p.
+   cliente.hp = [{h:'AAAA-MM',planId,precio,extras}] ordenado: así estaba el cliente HASTA el mes h (incluido); lo actual rige después. */
+const curMonth=()=>todayStr().slice(0,7);
+function histPrice(item,per){
+  const h=item&&Array.isArray(item.hist)?item.hist:null;
+  if(!h||!h.length)return Number(item&&item.precio)||0;
+  let v=null;for(const e of h)if(e&&e.d<=per)v=e.p;
+  return Number(v!==null?v:h[0].p)||0;
 }
-/* total mensual: plan de internet + servicios adicionales */
-const priceOf=c=>priceBase(c)+extrasOf(c).reduce((t,s)=>t+(Number(s.precio)||0),0);
+const planNow=p=>histPrice(p,curMonth());
+function stateAt(c,per){
+  const hp=c&&Array.isArray(c.hp)?c.hp:null;
+  if(hp)for(const e of hp)if(e&&per<=e.h)return e;
+  return c;
+}
+const hasNum=v=>v!==null&&v!==undefined&&v!==''&&isFinite(Number(v));
+/* precio del plan de internet en un mes (el precio especial del cliente lo reemplaza) */
+function priceBaseAt(c,per){
+  const st=stateAt(c,per);
+  if(hasNum(st.precio))return Number(st.precio);
+  const p=S.planes.get(st.planId);return p?histPrice(p,per):0;
+}
+function extrasAt(c,per){
+  const ids=stateAt(c,per).extras;const l=serviciosList();
+  return (Array.isArray(ids)?ids:[]).map(id=>l.find(s=>s.id===id)).filter(Boolean);
+}
+/* total de un mes: plan de internet + servicios adicionales */
+const priceAt=(c,per)=>priceBaseAt(c,per)+extrasAt(c,per).reduce((t,s)=>t+histPrice(s,per),0);
+/* lo que vale hoy */
+const priceBase=c=>priceBaseAt(c,curMonth());
+const priceOf=c=>priceAt(c,curMonth());
+/* nueva lista de vigencias al cambiar un precio desde el mes eff: lo anterior se conserva y lo posterior se reemplaza */
+function histWith(item,eff,price){
+  const h=Array.isArray(item.hist)&&item.hist.length?item.hist.filter(e=>e.d<eff):[{d:'0000-00',p:Number(item.precio)||0}];
+  if(!h.length)h.push({d:'0000-00',p:Number(item.precio)||0});
+  h.push({d:eff,p:price});
+  return h;
+}
 /* "Hogar 50 + Multimedia + Multimedia Net" */
 function servicioTxt(c){
   const p=S.planes.get(c.planId);
@@ -395,10 +428,10 @@ function billing(c,withNext){
     const last=withNext?addMonths(cur,1):cur;
     const cy=cicloOf(c),cfg=cicloCfg(cy);
     for(let p=from;p<=last;p=addMonths(p,1)){
-      const paid=paidMap.get(p)||0,rest=Math.max(0,out.price-paid);
+      const paid=paidMap.get(p)||0,price=priceAt(c,p),rest=Math.max(0,price-paid);
       const due=p+'-'+pad(Math.min(cfg.hasta,daysIn(p)));
       const venc=due<today;
-      out.periods.push({per:p,paid,rest,due,venc,desde:p+'-'+pad(Math.min(cfg.desde,daysIn(p))),cut:corteFecha(p,cy)});
+      out.periods.push({per:p,price,paid,rest,due,venc,desde:p+'-'+pad(Math.min(cfg.desde,daysIn(p))),cut:corteFecha(p,cy)});
       if(p<=cur&&rest>0&&venc){out.vencidos++;out.deuda+=rest;}
     }
   }
@@ -948,7 +981,7 @@ function openClient(id){
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
-      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(s.precio)+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
+      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
@@ -994,6 +1027,9 @@ function openGeoQuick(id){
 function nextCodigo(){let m=0;for(const c of S.clientes.values()){const n=parseInt(c.codigo,10);if(isFinite(n)&&n>m)m=n;}return String(m+1);}
 const F=(label,id,inner,hint)=>`<div class="field"><label for="${id}">${label}</label>${inner}${hint?`<div class="hint">${hint}</div>`:''}</div>`;
 const opt=(v,l,sel)=>`<option value="${esc(v)}"${sel?' selected':''}>${esc(l)}</option>`;
+/* los cambios de un cliente solo pueden regir después de que empezó su situación actual (si no, se reescribiría el pasado) */
+const cfVigMin=c=>{const hp=c&&Array.isArray(c.hp)?c.hp:[];return hp.length?addMonths(hp[hp.length-1].h,1):'';};
+const sameExtras=(a,b)=>JSON.stringify([...(a||[])].sort())===JSON.stringify([...(b||[])].sort());
 function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
@@ -1001,7 +1037,7 @@ function openClientForm(id){
   if(!old&&!full)return toast('Tu perfil no puede dar de alta clientes','bad');
   const c=old||{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()};
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
-  const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(a.precio-b.precio));
+  const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
@@ -1012,9 +1048,12 @@ function openClientForm(id){
       ${F('Referencia para llegar','cf-ref',`<input id="cf-ref" value="${esc(c.ref||'')}" placeholder="Portón verde, frente a la plaza…">`)}
       ${geoFieldHTML(c)}</fieldset>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Servicio</legend>
-      ${full?`<div class="grid2">${F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(p.precio)}`,p.id===c.planId)).join('')}</select>`)}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
-      ${full&&svcs.length?`<div class="field"><label>Servicios adicionales</label><div class="list" id="cf-extras">${svcs.map(s=>`<label class="per"><input type="checkbox" data-extra="${esc(s.id)}"${(c.extras||[]).includes(s.id)?' checked':''}><span class="grow"><b>${esc(s.nombre)}</b>${s.activo===false?' <span class="small muted">(ya no se ofrece)</span>':''}</span>${can('precios')?`<b class="tnum">${fmtMoney(s.precio)}</b>`:''}</label>`).join('')}</div></div>`:''}
+      ${full?`<div class="grid2">${F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(planNow(p))}`,p.id===c.planId)).join('')}</select>`)}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
+      ${full&&svcs.length?`<div class="field"><label>Servicios adicionales</label><div class="list" id="cf-extras">${svcs.map(s=>`<label class="per"><input type="checkbox" data-extra="${esc(s.id)}"${(c.extras||[]).includes(s.id)?' checked':''}><span class="grow"><b>${esc(s.nombre)}</b>${s.activo===false?' <span class="small muted">(ya no se ofrece)</span>':''}</span>${can('precios')?`<b class="tnum">${fmtMoney(planNow(s))}</b>`:''}</label>`).join('')}</div></div>`:''}
       ${full&&can('precios')?'<div class="hint" id="cf-total"></div>':''}
+      ${full&&old?`<div class="notice info" id="cf-vig" hidden><div class="field"><label for="cf-vig-mes">Los cambios de plan, precio o servicios rigen desde</label><input id="cf-vig-mes" type="month" max="${curMonth()}" value="${curMonth()}"${cfVigMin(old)?` min="${cfVigMin(old)}"`:''}></div>
+        <div class="hint">Los meses anteriores quedan como estaban: lo que ya pagó no se vuelve deuda.</div>
+        <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses</span></label></div>`:''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
       <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${F('Nodo o torre','cf-nodo',`<input id="cf-nodo" value="${esc(c.nodo||'')}">`)}</div>
       ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
@@ -1028,8 +1067,14 @@ function openClientForm(id){
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const upd=()=>{const t=$('#cf-total',el);if(!t)return;const pv=v('cf-precio');t.textContent='Total por mes: '+fmtMoney(priceOf({planId:v('cf-plan')||null,precio:pv?num(pv):null,extras:$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra)}));};
-    ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);}});
-    $$('[data-extra]',el).forEach(i=>i.addEventListener('change',upd));upd();
+    const billChanged=()=>{
+      if(!old||!full)return false;
+      const pv=v('cf-precio'),ex=$$('[data-extra]',el);
+      return (v('cf-plan')||null)!==(old.planId||null)||String(pv===''?'':num(pv))!==String(hasNum(old.precio)?Number(old.precio):'')||(ex.length&&!sameExtras(ex.filter(i=>i.checked).map(i=>i.dataset.extra),old.extras));
+    };
+    const vig=()=>{const b=$('#cf-vig',el);if(b)b.hidden=!billChanged();};
+    ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);n.addEventListener('input',vig);n.addEventListener('change',vig);}});
+    $$('[data-extra]',el).forEach(i=>{i.addEventListener('change',upd);i.addEventListener('change',vig);});upd();vig();
     $('#cform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
@@ -1048,6 +1093,18 @@ function openClientForm(id){
       }
       if(patch.estado&&patch.estado!=='suspendido')patch.corteMora=null;
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
+      if(old&&full&&billChanged()){
+        const fix=$('#cf-vig-fix',el).checked,eff=$('#cf-vig-mes',el).value,min=cfVigMin(old);
+        if(!fix){
+          if(!/^\d{4}-\d{2}$/.test(eff)||eff>curMonth())return toast('Elegí desde qué mes rigen los cambios (este mes o uno anterior)','bad');
+          if(min&&eff<min)return toast('Desde '+monthLabel(min)+' como mínimo: antes de eso ya figuran cambios anteriores','bad');
+          if(!min||eff>min){   /* lo anterior queda como estaba hasta el mes previo */
+            const h=addMonths(eff,-1),hp=(Array.isArray(old.hp)?old.hp:[]).filter(e=>e.h<h);
+            hp.push({h,planId:old.planId||null,precio:hasNum(old.precio)?Number(old.precio):null,extras:Array.isArray(old.extras)?old.extras:[]});
+            patch.hp=hp;
+          }
+        }
+      }
       try{
         if(old)await saveClient(old,patch);
         else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},patch));}
@@ -1383,17 +1440,44 @@ function clientQueueCmd(c){
   return '/queue simple add name="'+String(c.nombre||'').replace(/["\\$]/g,'')+'" target='+ip+' '+queueText(p);
 }
 function planClientCount(id){let n=0;for(const c of S.clientes.values())if(c.planId===id&&c.estado==='activo')n++;return n;}
+/* ----- precios con vigencia: aviso del cambio programado y bloque «rige desde» de los formularios ----- */
+function nextChangeHTML(item){
+  const cur=curMonth(),e=Array.isArray(item.hist)?item.hist.find(x=>x.d>cur):null;
+  return e?`<div class="small"><span class="chip info">Desde ${esc(monthLabel(e.d))}: ${esc(fmtMoney(e.p))}</span></div>`:'';
+}
+function vigHTML(pre,item){
+  const cur=curMonth(),noHist=!(Array.isArray(item&&item.hist)&&item.hist.length);
+  return `<div class="notice info" id="${pre}-vig" hidden>
+    <div class="field"><label for="${pre}-vig-mes">El precio nuevo rige desde</label><input id="${pre}-vig-mes" type="month" min="${cur}" value="${addMonths(cur,1)}"></div>
+    <div class="hint">Los meses anteriores conservan el precio que tenían: a quien ya pagó no le aparece deuda. Se puede dejar el mes siguiente o elegir otro.</div>
+    ${noHist?`<label class="per"><input id="${pre}-vig-fix" type="checkbox"><span class="grow">Es un error de carga (por ejemplo $17 en vez de $17.000): corregir el precio de todos los meses</span></label>`:''}</div>`;
+}
+/* arma {precio,hist} para guardar; null si falta o no es válido el mes. */
+function readVig(pre,el,item,precio){
+  if(!item)return {precio};
+  if(precio===planNow(item))return {precio:item.precio,hist:item.hist};
+  const fix=$('#'+pre+'-vig-fix',el);
+  if(fix&&fix.checked)return {precio};
+  const eff=$('#'+pre+'-vig-mes',el).value;
+  if(!/^\d{4}-\d{2}$/.test(eff)||eff<curMonth()){toast('Elegí desde qué mes rige el precio nuevo (este mes o uno futuro)','bad');return null;}
+  return {precio,hist:histWith(item,eff,precio)};
+}
+function bindVig(pre,el,item,get){
+  const box=$('#'+pre+'-vig',el);if(!box||!item)return;
+  const f=()=>{const n=get();box.hidden=!(n!==null&&n>=0&&n!==planNow(item));};
+  const inp=$('#'+pre+'-precio',el);inp.addEventListener('input',f);f();
+}
 function planCard(p){
   const n=planClientCount(p.id);
   return `<article class="plan${p.activo===false?' off':''}">
     <div class="head-row"><span class="chip accent">${esc(TEC_PLAN[p.tecnologia]||'Todas las tecnologías')}</span>${p.activo===false?'<span class="chip">Inactivo</span>':''}</div>
     <h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3>
     <div><div class="speed">${esc(p.bajada)}<small>Mbps de bajada</small></div><div class="speed-up">subida ${esc(p.subida)} Mbps</div></div>
-    ${can('precios')?`<div class="price">${fmtMoney(p.precio)}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>`:''}
+    ${can('precios')?`<div class="price">${fmtMoney(planNow(p))}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>${nextChangeHTML(p)}`:''}
     <div class="qbox">${esc(queueText(p))}</div>
     <div class="actions start"><button class="btn small ghost" type="button" data-copy="${esc(queueText(p))}" data-copy-label="Parámetros de la cola">Copiar parámetros de la cola</button></div>
     ${p.perfil?`<div class="small muted">Perfil: <span class="mono">${esc(p.perfil)}</span></div>`:''}
-    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*(Number(p.precio)||0))+' por mes':''}</div>
+    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div>
     ${isAdmin()?`<div class="actions start"><button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button></div>`:''}</article>`;
 }
 function qRowHTML([k,label,key,kind,ex],q){
@@ -1406,7 +1490,8 @@ function openPlanForm(id){
   const html=`<form class="form" id="pform" novalidate>
     ${F('Nombre del plan *','pf-nombre',`<input id="pf-nombre" value="${esc(p.nombre||'')}" placeholder="Hogar 100" autocomplete="off">`)}
     <div class="grid2">${F('Bajada (Mbps) *','pf-bajada','<input id="pf-bajada" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.bajada||'')+'">')}${F('Subida (Mbps) *','pf-subida','<input id="pf-subida" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.subida||'')+'">')}</div>
-    <div class="grid2">${F('Precio mensual (ARS) *','pf-precio',`<input id="pf-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="17000" value="${p.precio==null?'':esc(p.precio)}">`,'<span id="pf-precio-h"></span>')}${F('Tecnología','pf-tec',`<select id="pf-tec">${Object.entries(TEC_PLAN).map(([k,v])=>opt(k,v,k===p.tecnologia)).join('')}</select>`)}</div>
+    <div class="grid2">${F('Precio mensual (ARS) *','pf-precio',`<input id="pf-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="17000" value="${p.precio==null?'':esc(old?planNow(old):p.precio)}">`,'<span id="pf-precio-h"></span>')}${F('Tecnología','pf-tec',`<select id="pf-tec">${Object.entries(TEC_PLAN).map(([k,v])=>opt(k,v,k===p.tecnologia)).join('')}</select>`)}</div>
+    ${old?vigHTML('pf',old):''}
     <details class="qsec"${hasQ?' open':''}><summary>Ráfaga y parámetros de la cola (MikroTik)</summary>
       <div class="form" style="margin-top:10px">
       <div class="hint">Completá solo lo que usás, igual que en la Simple Queue. Escribí como en MikroTik: <span class="mono">25M</span>, <span class="mono">256k</span>. Un número solo se toma como M. Si cargás un solo lado, el otro copia el mismo valor.</div>
@@ -1420,6 +1505,7 @@ function openPlanForm(id){
   openModal({title:old?'Editar plan':'Nuevo plan',html,onMount(el){
     bindMoney($('#pf-precio',el),$('#pf-precio-h',el));
     const v=i=>$('#'+i,el).value.trim();
+    bindVig('pf',el,old,()=>num(v('pf-precio')));
     /* lee y valida los parámetros de la cola; devuelve {q} o {error} */
     const readQ=()=>{
       const q2={};
@@ -1450,7 +1536,9 @@ function openPlanForm(id){
       if(!bajada||!subida)return toast('Completá bajada y subida','bad');
       if(precio===null||precio<0)return toast('Completá el precio','bad');
       const r=readQ();if(r.error)return toast(r.error,'bad');
-      const obj={nombre:v('pf-nombre'),bajada,subida,precio,tecnologia:v('pf-tec'),perfil:v('pf-perfil'),q:Object.keys(r.q).length?r.q:null,activo:$('#pf-activo',el).checked,mod:Date.now()};
+      const vg=readVig('pf',el,old,precio);if(!vg)return;
+      const obj={nombre:v('pf-nombre'),bajada,subida,precio:vg.precio,tecnologia:v('pf-tec'),perfil:v('pf-perfil'),q:Object.keys(r.q).length?r.q:null,activo:$('#pf-activo',el).checked,mod:Date.now()};
+      if(vg.hist)obj.hist=vg.hist;
       try{await S.db.collection('planes').doc(old?old.id:newId()).set(obj);toast('Plan guardado');closeModal();}catch(err){dbError(err);}
     });
   }});
@@ -1460,19 +1548,21 @@ function openPlanForm(id){
 function servicioClientCount(id){let n=0;for(const c of S.clientes.values())if(c.estado==='activo'&&Array.isArray(c.extras)&&c.extras.includes(id))n++;return n;}
 function servicioRow(s){
   const n=servicioClientCount(s.id);
-  return `<div class="item" style="cursor:default"><div><div class="t">${esc(s.nombre)}${s.activo===false?' <span class="chip">Ya no se ofrece</span>':''}</div><div class="s">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*(Number(s.precio)||0))+' por mes':''}</div></div>
-    ${can('precios')?`<div class="side"><b class="tnum">${fmtMoney(s.precio)}</b><span class="muted small">por mes</span></div>`:''}
+  return `<div class="item" style="cursor:default"><div><div class="t">${esc(s.nombre)}${s.activo===false?' <span class="chip">Ya no se ofrece</span>':''}</div><div class="s">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(s))+' por mes':''}</div></div>
+    ${can('precios')?`<div class="side"><b class="tnum">${fmtMoney(planNow(s))}</b><span class="muted small">por mes</span>${nextChangeHTML(s)}</div>`:''}
     ${isAdmin()?`<div class="tags"><button class="btn small" type="button" data-edit-sv="${esc(s.id)}">Editar</button></div>`:''}</div>`;
 }
 function openServicioForm(id){
   const list=serviciosList(),old=id?list.find(s=>s.id===id):null,s=old||{activo:true};
   const html=`<form class="form" id="svform" novalidate>
     ${F('Nombre del servicio *','sv-nombre',`<input id="sv-nombre" autocomplete="off" placeholder="Multimedia" value="${esc(s.nombre||'')}">`)}
-    ${F('Precio mensual (ARS) *','sv-precio',`<input id="sv-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="15000" value="${s.precio==null?'':esc(s.precio)}">`,'<span id="sv-precio-h"></span> El precio nuevo se aplica a todos los clientes que lo tienen, también en los meses que todavía no pagaron.')}
+    ${F('Precio mensual (ARS) *','sv-precio',`<input id="sv-precio" type="text" inputmode="decimal" autocomplete="off" placeholder="15000" value="${s.precio==null?'':esc(old?planNow(old):s.precio)}">`,'<span id="sv-precio-h"></span>')}
+    ${old?vigHTML('sv',old):''}
     <label class="per"><input id="sv-activo" type="checkbox"${s.activo!==false?' checked':''}><span class="grow"><b>Se ofrece a clientes</b><br><span class="small muted">Si lo apagás, los clientes que ya lo tienen lo siguen pagando, pero no se puede asignar a otros.</span></span></label>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar servicio</button></div></form>`;
   openModal({title:old?'Editar servicio':'Nuevo servicio',html,onMount(el){
     bindMoney($('#sv-precio',el),$('#sv-precio-h',el));
+    bindVig('sv',el,old,()=>num($('#sv-precio',el).value));
     $('#svform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const nombre=$('#sv-nombre',el).value.trim(),precio=num($('#sv-precio',el).value);
@@ -1481,7 +1571,10 @@ function openServicioForm(id){
       if(list.some(x=>x.id!==(old&&old.id)&&norm(x.nombre)===norm(nombre)))return toast('Ya hay un servicio con ese nombre','bad');
       const activo=$('#sv-activo',el).checked;
       let next;
-      if(old)next=list.map(x=>x.id===old.id?Object.assign({},x,{nombre,precio,activo}):x);
+      if(old){
+        const vg=readVig('sv',el,old,precio);if(!vg)return;
+        next=list.map(x=>{if(x.id!==old.id)return x;const y=Object.assign({},x,{nombre,precio:vg.precio,activo});if(vg.hist)y.hist=vg.hist;else delete y.hist;return y;});
+      }
       else{
         const base=norm(nombre).replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'servicio';let sid=base,i=2;
         while(list.some(x=>x.id===sid))sid=base+'_'+(i++);
@@ -1506,7 +1599,7 @@ VIEWS.planes={
   update(){
     const l=$('#pl-list');if(!l)return;
     const sl=$('#sv-list');if(sl)sl.innerHTML=serviciosList().length?serviciosList().map(servicioRow).join(''):'<div class="hint">Todavía no hay servicios adicionales.</div>';
-    const rows=[...S.planes.values()].sort((a,b)=>(a.bajada-b.bajada)||(a.precio-b.precio));
+    const rows=[...S.planes.values()].sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
     l.innerHTML=rows.length?rows.map(planCard).join(''):`<div class="empty" style="grid-column:1/-1"><b>Todavía no hay planes</b><span>${isAdmin()?'Creá el primero para poder asignarlo a los clientes.':'El administrador todavía no cargó planes.'}</span></div>`;
   }
 };
@@ -2406,8 +2499,8 @@ VIEWS.resumen={
     <div class="card"><h3>Cobrado por mes</h3><div class="bars">${meses.map(m=>{const v=porMes[m]||0;return `<div class="bar${m===cur?' now':''}"><b>${v?esc(fmtMoney(v).replace(/\s/g,'')):''}</b><i style="height:${Math.max(2,Math.round(96*v/max))}px"></i><span>${esc(monthShort(m))}</span></div>`;}).join('')}</div></div>
     <div class="card"><div class="head-row"><h3>Mayores deudas</h3><button class="btn small" type="button" data-go="cobranzas" data-sub="morosos">Ver todos</button></div>
       ${debtors.length?`<div class="list">${debtors.slice(0,5).map(({c,b})=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${can('telefono')?esc(c.tel||''):''}</div></div><div class="side"><b class="tnum">${fmtMoney(b.deuda)}</b><span class="chip bad">${b.vencidos} ${b.vencidos===1?'mes':'meses'}</span></div></button>`).join('')}</div>`:'<div class="hint">No hay clientes con deuda vencida.</div>'}</div>
-    ${S.planes.size?`<div class="card"><h3>Clientes por plan</h3><div class="tbl-wrap"><table><thead><tr><th>Plan</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${[...S.planes.values()].sort((a,b)=>a.bajada-b.bajada).map(p=>{const n=planCount.get(p.id)||0;return `<tr><td>${esc(p.nombre)} <span class="muted small mono">${esc(p.bajada)}/${esc(p.subida)}</span></td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(p.precio)}</td><td class="right tnum">${fmtMoney(n*(Number(p.precio)||0))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}
-    ${serviciosList().length?`<div class="card"><h3>Servicios adicionales</h3><div class="tbl-wrap"><table><thead><tr><th>Servicio</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${serviciosList().map(s=>{const n=svCount.get(s.id)||0;return `<tr><td>${esc(s.nombre)}${s.activo===false?' <span class="muted small">(ya no se ofrece)</span>':''}</td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(s.precio)}</td><td class="right tnum">${fmtMoney(n*(Number(s.precio)||0))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}`;
+    ${S.planes.size?`<div class="card"><h3>Clientes por plan</h3><div class="tbl-wrap"><table><thead><tr><th>Plan</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${[...S.planes.values()].sort((a,b)=>a.bajada-b.bajada).map(p=>{const n=planCount.get(p.id)||0;return `<tr><td>${esc(p.nombre)} <span class="muted small mono">${esc(p.bajada)}/${esc(p.subida)}</span></td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(planNow(p))}</td><td class="right tnum">${fmtMoney(n*planNow(p))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}
+    ${serviciosList().length?`<div class="card"><h3>Servicios adicionales</h3><div class="tbl-wrap"><table><thead><tr><th>Servicio</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${serviciosList().map(s=>{const n=svCount.get(s.id)||0;return `<tr><td>${esc(s.nombre)}${s.activo===false?' <span class="muted small">(ya no se ofrece)</span>':''}</td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(planNow(s))}</td><td class="right tnum">${fmtMoney(n*planNow(s))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}`;
   }
 };
 
@@ -2417,7 +2510,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='2c74fdc08e';
+const BUILD='6ff7f8c36a';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

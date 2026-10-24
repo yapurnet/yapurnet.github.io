@@ -149,7 +149,7 @@ function openClient(id){
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
-      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(s.precio)+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
+      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
@@ -195,6 +195,9 @@ function openGeoQuick(id){
 function nextCodigo(){let m=0;for(const c of S.clientes.values()){const n=parseInt(c.codigo,10);if(isFinite(n)&&n>m)m=n;}return String(m+1);}
 const F=(label,id,inner,hint)=>`<div class="field"><label for="${id}">${label}</label>${inner}${hint?`<div class="hint">${hint}</div>`:''}</div>`;
 const opt=(v,l,sel)=>`<option value="${esc(v)}"${sel?' selected':''}>${esc(l)}</option>`;
+/* los cambios de un cliente solo pueden regir después de que empezó su situación actual (si no, se reescribiría el pasado) */
+const cfVigMin=c=>{const hp=c&&Array.isArray(c.hp)?c.hp:[];return hp.length?addMonths(hp[hp.length-1].h,1):'';};
+const sameExtras=(a,b)=>JSON.stringify([...(a||[])].sort())===JSON.stringify([...(b||[])].sort());
 function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
@@ -202,7 +205,7 @@ function openClientForm(id){
   if(!old&&!full)return toast('Tu perfil no puede dar de alta clientes','bad');
   const c=old||{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()};
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
-  const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(a.precio-b.precio));
+  const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
@@ -213,9 +216,12 @@ function openClientForm(id){
       ${F('Referencia para llegar','cf-ref',`<input id="cf-ref" value="${esc(c.ref||'')}" placeholder="Portón verde, frente a la plaza…">`)}
       ${geoFieldHTML(c)}</fieldset>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Servicio</legend>
-      ${full?`<div class="grid2">${F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(p.precio)}`,p.id===c.planId)).join('')}</select>`)}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
-      ${full&&svcs.length?`<div class="field"><label>Servicios adicionales</label><div class="list" id="cf-extras">${svcs.map(s=>`<label class="per"><input type="checkbox" data-extra="${esc(s.id)}"${(c.extras||[]).includes(s.id)?' checked':''}><span class="grow"><b>${esc(s.nombre)}</b>${s.activo===false?' <span class="small muted">(ya no se ofrece)</span>':''}</span>${can('precios')?`<b class="tnum">${fmtMoney(s.precio)}</b>`:''}</label>`).join('')}</div></div>`:''}
+      ${full?`<div class="grid2">${F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(planNow(p))}`,p.id===c.planId)).join('')}</select>`)}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
+      ${full&&svcs.length?`<div class="field"><label>Servicios adicionales</label><div class="list" id="cf-extras">${svcs.map(s=>`<label class="per"><input type="checkbox" data-extra="${esc(s.id)}"${(c.extras||[]).includes(s.id)?' checked':''}><span class="grow"><b>${esc(s.nombre)}</b>${s.activo===false?' <span class="small muted">(ya no se ofrece)</span>':''}</span>${can('precios')?`<b class="tnum">${fmtMoney(planNow(s))}</b>`:''}</label>`).join('')}</div></div>`:''}
       ${full&&can('precios')?'<div class="hint" id="cf-total"></div>':''}
+      ${full&&old?`<div class="notice info" id="cf-vig" hidden><div class="field"><label for="cf-vig-mes">Los cambios de plan, precio o servicios rigen desde</label><input id="cf-vig-mes" type="month" max="${curMonth()}" value="${curMonth()}"${cfVigMin(old)?` min="${cfVigMin(old)}"`:''}></div>
+        <div class="hint">Los meses anteriores quedan como estaban: lo que ya pagó no se vuelve deuda.</div>
+        <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses</span></label></div>`:''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
       <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${F('Nodo o torre','cf-nodo',`<input id="cf-nodo" value="${esc(c.nodo||'')}">`)}</div>
       ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
@@ -229,8 +235,14 @@ function openClientForm(id){
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const upd=()=>{const t=$('#cf-total',el);if(!t)return;const pv=v('cf-precio');t.textContent='Total por mes: '+fmtMoney(priceOf({planId:v('cf-plan')||null,precio:pv?num(pv):null,extras:$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra)}));};
-    ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);}});
-    $$('[data-extra]',el).forEach(i=>i.addEventListener('change',upd));upd();
+    const billChanged=()=>{
+      if(!old||!full)return false;
+      const pv=v('cf-precio'),ex=$$('[data-extra]',el);
+      return (v('cf-plan')||null)!==(old.planId||null)||String(pv===''?'':num(pv))!==String(hasNum(old.precio)?Number(old.precio):'')||(ex.length&&!sameExtras(ex.filter(i=>i.checked).map(i=>i.dataset.extra),old.extras));
+    };
+    const vig=()=>{const b=$('#cf-vig',el);if(b)b.hidden=!billChanged();};
+    ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);n.addEventListener('input',vig);n.addEventListener('change',vig);}});
+    $$('[data-extra]',el).forEach(i=>{i.addEventListener('change',upd);i.addEventListener('change',vig);});upd();vig();
     $('#cform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
@@ -249,6 +261,18 @@ function openClientForm(id){
       }
       if(patch.estado&&patch.estado!=='suspendido')patch.corteMora=null;
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
+      if(old&&full&&billChanged()){
+        const fix=$('#cf-vig-fix',el).checked,eff=$('#cf-vig-mes',el).value,min=cfVigMin(old);
+        if(!fix){
+          if(!/^\d{4}-\d{2}$/.test(eff)||eff>curMonth())return toast('Elegí desde qué mes rigen los cambios (este mes o uno anterior)','bad');
+          if(min&&eff<min)return toast('Desde '+monthLabel(min)+' como mínimo: antes de eso ya figuran cambios anteriores','bad');
+          if(!min||eff>min){   /* lo anterior queda como estaba hasta el mes previo */
+            const h=addMonths(eff,-1),hp=(Array.isArray(old.hp)?old.hp:[]).filter(e=>e.h<h);
+            hp.push({h,planId:old.planId||null,precio:hasNum(old.precio)?Number(old.precio):null,extras:Array.isArray(old.extras)?old.extras:[]});
+            patch.hp=hp;
+          }
+        }
+      }
       try{
         if(old)await saveClient(old,patch);
         else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},patch));}

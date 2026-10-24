@@ -153,6 +153,54 @@ const cx=mk('sx',{extras:['multimedia']});S.clientes.set('sx',cx);pay('sx','2026
 const bx=billing(cx);
 t('facturacion: el mes pagado solo con el plan deja el servicio pendiente',bx.price===35000&&bx.periods.find(p=>p.per==='2026-09').rest===15000&&bx.periods.find(p=>p.per==='2026-08').rest===0,bx.periods.map(p=>[p.per,p.rest]));
 t('recibo lleva el servicio del cliente',(()=>{S.pagos.set('rx',{id:'rx',c:'sx',concepto:'mensualidad',per:'2026-10',monto:35000,fecha:'2026-10-05',hora:'10:00',recibo:'Rrx',metodo:'efectivo'});S.clientes.set('sx',cx);S.ajustes.empresa='Y';const tx=receiptText('Rrx');return tx.includes('Abono')&&tx.includes('Servicio: Hogar + Multimedia');})());
+// --- precios con vigencia por mes: un aumento no cambia los meses ya cobrados ---
+reset();setToday('2026-10-05');S.ajustes.servicios=null;
+S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:20000});
+const cv=mk('cv',{desde:'2026-07'});S.clientes.set('cv',cv);pay('cv','2026-07',20000);pay('cv','2026-08',20000);pay('cv','2026-09',20000);rebuildDerived();
+let bv=billing(cv);
+t('sin aumentos: todo al día',bv.periods.every(p=>p.rest===0||p.per==='2026-10'),bv.periods.map(p=>[p.per,p.rest]));
+// aumento del plan a 25.000 desde noviembre
+S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:25000,hist:histWith({precio:20000},'2026-11',25000)});
+S.billCache.clear();S.cutCache.clear();
+bv=billing(cv,true);
+t('el aumento de noviembre no deja deuda en los meses cobrados',bv.periods.filter(p=>p.per<='2026-09').every(p=>p.rest===0),bv.periods.map(p=>[p.per,p.rest]));
+t('octubre sigue a 20.000 y noviembre pasa a 25.000',bv.periods.find(p=>p.per==='2026-10').price===20000&&bv.periods.find(p=>p.per==='2026-11').price===25000,bv.periods.map(p=>[p.per,p.price]));
+t('el precio de hoy es el vigente (20.000) hasta que llegue noviembre',priceOf(cv)===20000&&planNow(S.planes.get('p1'))===20000);
+setToday('2026-11-03');S.billCache.clear();S.cutCache.clear();
+t('en noviembre el precio de hoy pasa a 25.000',priceOf(cv)===25000&&planNow(S.planes.get('p1'))===25000);
+t('histWith conserva lo anterior y reemplaza lo posterior',JSON.stringify(histWith({precio:25000,hist:[{d:'0000-00',p:20000},{d:'2026-11',p:25000},{d:'2027-01',p:30000}]},'2026-12',27000))==='[{"d":"0000-00","p":20000},{"d":"2026-11","p":25000},{"d":"2026-12","p":27000}]');
+// servicio con aumento programado
+setToday('2026-10-05');
+S.ajustes.servicios=[{id:'multimedia',nombre:'Multimedia',precio:18000,hist:[{d:'0000-00',p:15000},{d:'2026-11',p:18000}],activo:true},{id:'multimedia_net',nombre:'Multimedia Net',precio:5000,activo:true}];
+S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:20000});
+reset();
+const cs=mk('cs',{desde:'2026-08',extras:['multimedia']});S.clientes.set('cs',cs);pay('cs','2026-08',35000);pay('cs','2026-09',35000);rebuildDerived();
+const bs=billing(cs,true);
+t('servicio: el aumento de Multimedia desde noviembre no toca septiembre',bs.periods.find(p=>p.per==='2026-09').rest===0&&bs.periods.find(p=>p.per==='2026-10').price===35000&&bs.periods.find(p=>p.per==='2026-11').price===38000,bs.periods.map(p=>[p.per,p.price,p.rest]));
+// el cliente se agrega un servicio: rige desde el mes que se elige, no hacia atrás
+S.ajustes.servicios=null;
+reset();
+const cn=mk('cn',{desde:'2026-07',extras:['multimedia'],hp:[{h:'2026-09',planId:'p1',precio:null,extras:[]}]});S.clientes.set('cn',cn);
+pay('cn','2026-07',20000);pay('cn','2026-08',20000);pay('cn','2026-09',20000);rebuildDerived();
+const bn2=billing(cn);
+t('cliente que agregó Multimedia en octubre: julio a septiembre siguen pagos',bn2.periods.filter(p=>p.per<='2026-09').every(p=>p.rest===0&&p.price===20000),bn2.periods.map(p=>[p.per,p.price,p.rest]));
+t('y octubre ya incluye el servicio',bn2.periods.find(p=>p.per==='2026-10').price===35000&&bn2.price===35000);
+t('estado del cliente por mes',stateAt(cn,'2026-09').extras.length===0&&stateAt(cn,'2026-10').extras.length===1);
+// cambio de plan del cliente con historial
+reset();S.planes.set('p2',{id:'p2',nombre:'Hogar 100',bajada:100,subida:50,precio:30000});
+const cp=mk('cp',{desde:'2026-08',planId:'p2',hp:[{h:'2026-09',planId:'p1',precio:null,extras:[]}]});S.clientes.set('cp',cp);pay('cp','2026-08',20000);pay('cp','2026-09',20000);rebuildDerived();
+const bp=billing(cp);
+t('cambio de plan en octubre: agosto y septiembre conservan el plan anterior',bp.periods.find(p=>p.per==='2026-09').rest===0&&bp.periods.find(p=>p.per==='2026-10').price===30000,bp.periods.map(p=>[p.per,p.price,p.rest]));
+// precio especial del cliente reemplaza el plan en el mes que corresponde
+const cq=mk('cq',{desde:'2026-08',precio:15000,hp:[{h:'2026-08',planId:'p1',precio:null,extras:[]}]});
+t('precio especial desde septiembre, agosto a precio de lista',priceBaseAt(cq,'2026-08')===20000&&priceBaseAt(cq,'2026-09')===15000);
+// corrección: Plan_15 guardado en 17 por error
+S.planes.set('p15',{id:'p15',nombre:'Plan_15',bajada:15,subida:5,precio:17});
+reset();const cr=mk('cr',{planId:'p15',desde:'2026-09'});S.clientes.set('cr',cr);rebuildDerived();
+t('con el precio mal cargado ($17) la deuda es $17',billing(cr).periods[0].price===17);
+S.planes.set('p15',{id:'p15',nombre:'Plan_15',bajada:15,subida:5,precio:17000});S.billCache.clear();
+t('al corregirlo (sin historial) rige en todos los meses',billing(cr).periods.every(p=>p.price===17000));
+
 // importacion de servicios
 const rows2=parseCsv('nombre;plan;servicios\\nAna;Hogar;Multimedia + Multimedia Net\\nLuis;Hogar;multimedia_net\\nPedro;Hogar;\\nSofi;Hogar;Multimedia y Netflix');
 S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:20000});
