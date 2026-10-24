@@ -5,7 +5,8 @@ const ESTADO_CLS={activo:'ok',suspendido:'bad',pendiente:'info',baja:''};
 const planName=id=>{const p=S.planes.get(id);return p?p.nombre:'Sin plan';};
 const planSpeed=p=>p?`${p.bajada}/${p.subida} Mbps`:'';
 function clientHay(c){
-  if(!c._hay||c._hayV!==S.pv){c._hay=norm([c.codigo,c.nombre,can('dni')?c.dni:'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo].join(' '));c._hayV=S.pv;}
+  const hv=S.pv+'.'+S.rv;
+  if(!c._hay||c._hayV!==hv){c._hay=norm([c.codigo,c.nombre,can('dni')?c.dni:'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;}
   return c._hay;
 }
 function visibleSet(){
@@ -33,7 +34,7 @@ function clientRow(c){
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
     <div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasOf(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasOf(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
-    ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}
+    ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
     ${hasGeo(c)?'':'<span class="chip warn">Sin ubicación</span>'}${billChip(c)}</div></button>`;
 }
 function mountClientPicker(host,opts){
@@ -51,13 +52,13 @@ function mountClientPicker(host,opts){
 }
 
 /* ----- campo de ubicación ----- */
-function geoFieldHTML(c){
+function geoFieldHTML(c,msg){
   const v=hasGeo(c)?parseFloat(c.lat).toFixed(6)+', '+parseFloat(c.lng).toFixed(6):'';
   return `<div class="geo"><div class="field"><label for="cf-geo">Ubicación (coordenadas o link de Google Maps)</label>
     <input id="cf-geo" type="text" autocomplete="off" inputmode="text" placeholder="-27.7345, -62.4678" value="${esc(v)}">
     <div class="hint" id="cf-geo-hint"></div></div>
     <div class="actions start"><button class="btn small" type="button" id="cf-gps">Usar mi ubicación actual (GPS)</button></div>
-    <div class="hint" id="cf-gps-st">Si estás en el domicilio del cliente, tocá el botón y se completa solo.</div></div>`;
+    <div class="hint" id="cf-gps-st">${esc(msg||'Si estás en el domicilio del cliente, tocá el botón y se completa solo.')}</div></div>`;
 }
 /* ----- GPS del celular: toma lecturas unos segundos y se queda con la más precisa ----- */
 function gpsStart(onProgress){
@@ -100,7 +101,7 @@ function bindGeoField(root){
   };
   const draw=()=>{
     const g=read();
-    if(g.empty){hint.className='hint';hint.textContent='En Google Maps mantené apretado el punto del domicilio y copiá los números que aparecen arriba. También sirve pegar el link que manda el cliente por WhatsApp.';}
+    if(g.empty){hint.className='hint';hint.textContent='En Google Maps mantené apretado el punto y copiá los números que aparecen arriba. También sirve pegar el link que manda el cliente por WhatsApp.';}
     else if(g.invalid){hint.className='hint bad';hint.textContent=g.short?'Los links cortos (maps.app.goo.gl) no traen coordenadas. Abrilo en Maps y copiá los números.':'No se reconoce. Pegá dos números separados por coma, por ejemplo -27.7345, -62.4678.';}
     else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
   };
@@ -148,7 +149,7 @@ function openClient(id){
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
-      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(s.precio)+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
+      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(s.precio)+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
@@ -160,6 +161,7 @@ function openClient(id){
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openClientForm(c.id);
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
+      else if(a.dataset.act==='nap')openRed(c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
@@ -216,14 +218,15 @@ function openClientForm(id){
       ${full&&can('precios')?'<div class="hint" id="cf-total"></div>':''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
       <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${F('Nodo o torre','cf-nodo',`<input id="cf-nodo" value="${esc(c.nodo||'')}">`)}</div>
-      ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}</fieldset>
+      ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
+      ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
       <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`)}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
-    const read=bindGeoField(el);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
+    const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const upd=()=>{const t=$('#cf-total',el);if(!t)return;const pv=v('cf-precio');t.textContent='Total por mes: '+fmtMoney(priceOf({planId:v('cf-plan')||null,precio:pv?num(pv):null,extras:$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra)}));};
     ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);}});
@@ -232,6 +235,7 @@ function openClientForm(id){
       e.preventDefault();
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
       const patch={ref:v('cf-ref'),lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,tec:v('cf-tec')||null,usuario:v('cf-usuario'),ip:v('cf-ip'),nodo:v('cf-nodo'),equipo:v('cf-equipo')};
+      const nf=readNap();if(nf){if(nf.bad)return toast(nf.bad,'bad');patch.nap=nf.nap;patch.napPuerto=nf.puerto;}
       if(full){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
         if(!v('cf-dir'))return toast('Falta el domicilio','bad');
@@ -272,12 +276,14 @@ VIEWS.clientes={
   update(){
     const seg=$('#cl-seg');if(!seg)return;
     const fs=[['todos','Todos'],['activo','Activos'],['suspendido','Suspendidos'],['pendiente','Por instalar'],['nogeo','Sin ubicación']];
+    if(can('red'))fs.push(['nonap','Sin caja NAP']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
       if(CL.estado==='todos')return c.estado!=='baja';
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
+      if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
       if(CL.estado.startsWith('sv:'))return c.estado!=='baja'&&Array.isArray(c.extras)&&c.extras.includes(CL.estado.slice(3));
       if(CL.estado==='c1'||CL.estado==='c2')return c.estado!=='baja'&&cicloOf(c)===Number(CL.estado[1]);

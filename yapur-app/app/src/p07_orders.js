@@ -80,17 +80,21 @@ function openFinishOrder(o){
   const sug=c&&can('editarClientes')&&((o.tipo==='instalacion'&&c.estado==='pendiente')?['activo','Dejar al cliente como activo y empezar a cobrarle este mes']:(o.tipo==='reconexion'&&c.estado==='suspendido')?['activo','Reactivar al cliente (levantar la suspensión)']:(o.tipo==='retiro'&&c.estado!=='baja')?['baja','Dar de baja al cliente']:null);
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
+    ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
+    const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read?read():{empty:true};if(g.invalid)return toast('Revisá las coordenadas','bad');
+      const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
       try{
         await saveOrder(o,{estado:'hecha',resultado:$('#ff-res',el).value.trim(),cierre:todayStr()+' '+nowTime()});
         const cp={};
         if(!g.empty&&c)Object.assign(cp,{lat:g.lat,lng:g.lng});
+        if(nf&&c&&(nf.nap!==(c.nap||null)||nf.puerto!==(c.napPuerto||null)))Object.assign(cp,{nap:nf.nap,napPuerto:nf.puerto});
         const ck=$('#ff-est',el);
         if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);

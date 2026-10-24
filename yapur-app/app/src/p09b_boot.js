@@ -32,6 +32,7 @@ function allowedTabs(){
   if(can('cobrar')||can('caja'))t.push(['cobranzas','Cobranzas']);
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
+  if(can('red'))t.push(['red','Red']);
   if(can('precios'))t.push(['planes','Planes']);
   if(isAdmin())t.push(['ajustes','Ajustes']);
   return t;
@@ -58,6 +59,7 @@ function updateHeader(){
 }
 function dataChanged(key){
   if(key==='pagos'||key==='clientes'||key==='planes'||key==='ajustes')rebuildDerived();
+  if(key==='red')S.rv++;
   if(renderTimer)return;
   renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
 }
@@ -78,6 +80,7 @@ function startData(){
       S.loaded.planes=true;dataChanged('planes');
     },err=>{S.errors.planes=err;S.loaded.planes=true;dataChanged('planes');});}
   if(!started.clientes){started.clientes=1;watchSharded('clientes',S.clientes,'clientes');}
+  if(!started.red){started.red=1;watchSharded('red',S.red,'red');}
   if(!started.ordenes){started.ordenes=1;watchSharded('ordenes',S.ordenes,'ordenes');}
   if(!started.pagos){
     if(S.realRole==='admin'||can('cobrar')||can('caja')||can('promesas')||can('resumen')){started.pagos=1;watchSharded('pagos',S.pagos,'pagos');}

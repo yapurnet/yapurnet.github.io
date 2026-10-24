@@ -38,6 +38,17 @@ En la ficha del cliente, en «Cargar ubicación» y al terminar una orden de ins
 - En Chrome (sin APK) también funciona, con el permiso de ubicación del sitio.
 - Al terminar una instalación, el técnico ya no ve la opción de «activar al cliente»: eso cambia la facturación y solo lo puede hacer quien edita clientes (antes la opción aparecía igual y fallaba, y con ella se perdía la ubicación).
 
+## Red: cajas NAP y botellas de empalme
+
+La pestaña **Red** (la ven los técnicos y la oficina; el administrador siempre) guarda cada **caja NAP** y cada **botella de empalme** con su ubicación:
+
+- **Cargar una:** estando al lado, *Nueva caja NAP* o *Nueva botella de empalme* → nombre (por ejemplo NAP-12) → **«Usar mi ubicación actual (GPS)»** → Guardar. Es el mismo botón que usan las casas de los clientes. Una caja lleva cantidad de puertos (8, 16…) y, si se quiere, de qué botella de empalme sale; las dos llevan una referencia para encontrarlas (por ejemplo «poste frente a la plaza»).
+- **Encontrarlas:** cada una tiene **Cómo llegar** (Google Maps / Waze). **«Ordenar por cercanía (GPS)»** pone arriba las más próximas a donde estás parado, con los metros. **«Descargar lista»** baja un CSV con las coordenadas (se puede importar en Google My Maps para verlas todas juntas).
+- **Conectar a cada cliente con su caja:** en la ficha del cliente → Editar → *Caja NAP* y *Puerto*; o, **al terminar una orden de instalación**, el técnico elige la caja y anota el puerto. Las cajas se ofrecen de la más cercana a la más lejana. La app avisa si el puerto no existe o ya figura usado por otro cliente.
+- **Qué se ve:** cada caja muestra cuántos puertos están usados, cuáles quedan libres y la lista de clientes conectados con su puerto (cada persona ve solo los clientes que su perfil puede ver). En *Clientes* se puede buscar por el nombre de la caja y filtrar *Sin caja NAP* para completar los que faltan. El CSV de clientes trae las columnas *caja nap* y *puerto nap*.
+- **Permisos:** el permiso nuevo **«Cargar y editar la red»** se activa por perfil en Ajustes → Usuarios (viene encendido para técnicos y oficina). Quien no lo tiene igual ve las cajas en la ficha del cliente, pero no puede cambiarlas. **Eliminar** un punto solo lo puede quien edita clientes, y el servidor no deja borrar una caja con clientes conectados (hay que pasarlos antes a otra) ni una botella de la que sale otra caja.
+- Los datos entran en las copias de seguridad como cualquier otro, y la lista queda guardada en el celular para consultarla sin señal. Se necesita el APK 2.2 o posterior para el GPS (el mismo que ya se usa para las casas); **no hace falta un APK nuevo**.
+
 ## Avisos de actualización
 
 - **App nueva (la mayoría de los cambios):** cuando se publica una versión nueva en Cloudflare, quien tenga la app abierta (o la abra) ve arriba **«Hay una versión nueva de la app»** con el botón **Actualizar**. Revisa al abrir, al volver a la app y cada 10 minutos. No hace falta reinstalar el APK.
@@ -63,7 +74,7 @@ La misma app funciona como página: abrir la dirección en Chrome del celular �
 
 ## Cómo se probó
 
-Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y los avisos de actualización y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación).
+Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y los avisos de actualización y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación) y la red (alta de cajas y empalmes con el GPS, orden por cercanía, conexión del cliente a su caja y puerto, permisos y borrados bloqueados).
 
 **No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso y la lectura real del GPS) (se verificó que el APK se arma, firma y alinea bien, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
 

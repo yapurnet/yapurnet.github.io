@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm');
 const dir=__dirname+'/../app/src/';
-const src="const NET={on(){},init:()=>new Promise(()=>{}),native:false,base:'',plugin(){return null},me:null,online:false};\n"+['p04_core.js','p05_clients.js','p06_plans_settings.js','p06c_profiles.js','p06b_import.js','p07_orders.js','p08_pay.js','p09_boot.js','p09c_update.js','p09b_boot.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
+const src="const NET={on(){},init:()=>new Promise(()=>{}),native:false,base:'',plugin(){return null},me:null,online:false};\n"+['p04_core.js','p05_clients.js','p05b_red.js','p06_plans_settings.js','p06c_profiles.js','p06b_import.js','p07_orders.js','p08_pay.js','p09_boot.js','p09c_update.js','p09b_boot.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
 const test=`
 const out=[];const t=(n,ok,x)=>out.push((ok?'ok   ':'FAIL ')+n+(ok?'':' -> '+JSON.stringify(x)));
 S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:20000});

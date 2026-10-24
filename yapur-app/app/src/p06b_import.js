@@ -130,10 +130,10 @@ function openImport(){
   }});
 }
 function exportClientes(){
-  const rows=[['codigo','nombre','dni','telefono','telefono 2','direccion','localidad','referencia','plan','velocidad','servicios','tecnologia','usuario','ip','nodo','equipo','latitud','longitud','estado','fecha de alta','cobrar desde','ciclo','precio especial','notas']];
+  const rows=[['codigo','nombre','dni','telefono','telefono 2','direccion','localidad','referencia','plan','velocidad','servicios','tecnologia','usuario','ip','nodo','equipo','caja nap','puerto nap','latitud','longitud','estado','fecha de alta','cobrar desde','ciclo','precio especial','notas']];
   [...S.clientes.values()].sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre))).forEach(c=>{
     const p=S.planes.get(c.planId);
-    rows.push([c.codigo,c.nombre,c.dni,c.tel,c.tel2,c.dir,c.loc,c.ref,p?p.nombre:'',p?planSpeed(p):'',extrasOf(c).map(s=>s.nombre).join(' + '),TECNOS[c.tec]||'',c.usuario,c.ip,c.nodo,c.equipo,hasGeo(c)?c.lat:'',hasGeo(c)?c.lng:'',ESTADOS[c.estado]||c.estado,c.alta,c.desde,cicloOf(c),c.precio==null?'':c.precio,c.notas]);
+    rows.push([c.codigo,c.nombre,c.dni,c.tel,c.tel2,c.dir,c.loc,c.ref,p?p.nombre:'',p?planSpeed(p):'',extrasOf(c).map(s=>s.nombre).join(' + '),TECNOS[c.tec]||'',c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):'',c.nap&&c.napPuerto?c.napPuerto:'',hasGeo(c)?c.lat:'',hasGeo(c)?c.lng:'',ESTADOS[c.estado]||c.estado,c.alta,c.desde,cicloOf(c),c.precio==null?'':c.precio,c.notas]);
   });
   saveFile('clientes-'+todayStr()+'.csv',toCsv(rows));
 }
