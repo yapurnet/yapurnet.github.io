@@ -157,6 +157,9 @@ VIEWS.ajustes={
       <div class="list" id="aj-users"></div></div>
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
+    <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
+      <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
+      <div class="list" id="aj-routers"></div></div>
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" accept=".json,application/json" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
@@ -210,7 +213,7 @@ VIEWS.ajustes={
     $('#aj-bks',el).addEventListener('click',openAutoBackups);
     $('#aj-rs',el).addEventListener('click',()=>$('#aj-rs-file',el).click());
     $('#aj-rs-file',el).addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)restoreFromFile(f);});
-    loadUsers();
+    loadUsers();bindRouters(el);
     $('#aj-imp',el).addEventListener('click',()=>openImport());
     $('#aj-exc',el).addEventListener('click',exportClientes);
     $('#aj-exp',el).addEventListener('click',exportPagos);

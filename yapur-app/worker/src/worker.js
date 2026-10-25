@@ -113,6 +113,8 @@ function canWrite(u, p, coll, op) {
   if (coll === 'red') return p.red ? null : 'Tu usuario no puede modificar la red.';
   return 'No permitido.';
 }
+const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
+const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
 const CAMPO_CONCEPTOS = ['instalacion', 'reconexion', 'reclamo', 'otro'];
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
@@ -241,6 +243,8 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS sessions(th TEXT PRIMARY KEY, uid TEXT NOT NULL, created INTEGER, last INTEGER);
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
+      CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
     `);
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
@@ -591,6 +595,84 @@ export class YapurDB extends DurableObject {
     return { docs: rows.length, usuarios: report };
   }
 
+  /* ================= routers MikroTik (solo lectura) =================
+     El sistema NO se conecta a los routers ni guarda usuario ni clave de ninguno: cada router manda por su cuenta,
+     con un script de solo lectura, la lista de sus colas, secretos PPPoE y leases DHCP estáticos. Con este token
+     lo único que se puede hacer es dejar esa lista acá: no hay ningún camino para cortar o cambiar algo en un router. */
+  routerPublic(r) {
+    return { id: r.id, nombre: r.nombre, kinds: String(r.kinds || 'q').split(',').filter(Boolean), creado: r.creado, visto: r.visto || null, total: r.total || 0, ident: r.ident || '', ros: r.ros || '', hayDatos: !!r.run };
+  }
+  routerList() { return this.q('SELECT * FROM routers ORDER BY nombre COLLATE NOCASE').map(r => this.routerPublic(r)); }
+  routerKinds(v) {
+    const k = (Array.isArray(v) ? v : String(v || 'q').split(',')).map(x => String(x).trim()).filter(x => RT_KINDS.includes(x));
+    return [...new Set(k)].sort().join(',') || 'q';
+  }
+  async routerNewToken(id) {
+    const secret = b64u(rnd(24));
+    this.sql.exec('UPDATE routers SET th=? WHERE id=?', await sha(secret), id);
+    return id + '.' + secret;
+  }
+  async routerCreate(b) {
+    const nombre = String(b.nombre || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!nombre) throw httpErr(400, 'Falta el nombre del router (por ejemplo ADMIN02).');
+    if (this.q1('SELECT id FROM routers WHERE nombre=? COLLATE NOCASE', nombre)) throw httpErr(409, 'Ya hay un router con ese nombre.');
+    if (this.q1('SELECT COUNT(*) c FROM routers').c >= 30) throw httpErr(400, 'Son demasiados routers (máximo 30).');
+    const id = 'r' + hex(rnd(5));
+    this.sql.exec('INSERT INTO routers(id,nombre,th,kinds,creado,total) VALUES(?,?,?,?,?,0)', id, nombre, '-', this.routerKinds(b.kinds), Date.now());
+    const token = await this.routerNewToken(id);
+    return { router: this.routerPublic(this.q1('SELECT * FROM routers WHERE id=?', id)), token };
+  }
+  routerItems(id) {
+    const r = this.q1('SELECT * FROM routers WHERE id=?', id);
+    if (!r) throw httpErr(404, 'No existe ese router.');
+    const lines = [];
+    if (r.run) for (const c of this.q('SELECT data FROM rsnap WHERE router=? AND run=? ORDER BY part', id, r.run))
+      for (const ln of c.data.split('\n')) { if (!ln || ln[0] === '#') continue; lines.push(ln.split('\t')); }
+    return { router: this.routerPublic(r), lines };
+  }
+  /* limpia y valida lo que manda el router; devuelve el texto aceptado y cuántos registros trae */
+  routerClean(raw) {
+    const out = []; let n = 0, bad = 0;
+    for (let ln of String(raw).replace(/\r/g, '').split('\n')) {
+      ln = ln.replace(/[^\t\x20-\x7e -￿]/g, '');
+      if (!ln) continue;
+      const f = ln.split('\t'), t = f[0], want = RT_FIELDS[t];
+      if (t === '#') { out.push(f.slice(0, 3).map(x => x.slice(0, 80)).join('\t')); continue; }
+      if (!want || f.length < want.min) { bad++; continue; }
+      while (f.length < want.n) f.push('');
+      out.push(f.slice(0, want.n).map(x => x.trim().slice(0, 120)).join('\t')); n++;
+    }
+    return { text: out.join('\n'), n, bad };
+  }
+  async routerIngest(request, url, raw) {
+    const ip = this.clientIp(request), key = 'rtr|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), i = tk.indexOf('.');
+    const r = i > 0 ? this.q1('SELECT * FROM routers WHERE id=?', tk.slice(0, i)) : null;
+    if (!r || !safeEq(await sha(tk.slice(i + 1)), r.th)) { this.addFail(key, 8); throw httpErr(401, 'Token de router inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    if (raw.length > 12000) throw httpErr(413, 'La tanda es demasiado grande.', 'quota_exceeded');
+    const run = String(url.searchParams.get('run') || ''), part = parseInt(url.searchParams.get('part') || '', 10), fin = url.searchParams.get('fin') === '1';
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(run) || !(part >= 1 && part <= 1000)) throw httpErr(400, 'Faltan datos de la tanda (run, part).');
+    const c = this.routerClean(raw);
+    this.tx(() => {
+      if (part === 1) this.sql.exec('DELETE FROM rsnap WHERE router=? AND run<>? AND run<>?', r.id, run, r.run || '');   // descarta corridas que quedaron a medias
+      this.sql.exec('INSERT OR REPLACE INTO rsnap(router,run,part,data,ts) VALUES(?,?,?,?,?)', r.id, run, part, c.text, Date.now());
+    });
+    if (!fin) return { ok: true, part, registros: c.n, ignorados: c.bad };
+    this.sql.exec('DELETE FROM rsnap WHERE router=? AND run=? AND part>?', r.id, run, part);   // la última tanda es la que cierra: nada más allá de ella
+    const have = this.q1('SELECT COUNT(*) c FROM rsnap WHERE router=? AND run=?', r.id, run).c;
+    if (have !== part) throw httpErr(409, 'Faltan tandas (llegaron ' + have + ' de ' + part + '). Se conserva la lista anterior.');
+    let total = 0, ident = '', ros = '';
+    for (const row of this.q('SELECT data FROM rsnap WHERE router=? AND run=? ORDER BY part', r.id, run))
+      for (const ln of row.data.split('\n')) { if (!ln) continue; if (ln[0] === '#') { const f = ln.split('\t'); if (f[1] && f[1] !== 'fin' && !ident) { ident = f[1]; ros = f[2] || ''; } } else total++; }
+    this.tx(() => {
+      this.sql.exec('UPDATE routers SET run=?, visto=?, total=?, ident=?, ros=?, ip=? WHERE id=?', run, Date.now(), total, ident, ros, ip, r.id);
+      this.sql.exec('DELETE FROM rsnap WHERE router=? AND run<>?', r.id, run);
+    });
+    return { ok: true, part, registros: c.n, total, ignorados: c.bad };
+  }
+
   /* ================= HTTP ================= */
   async fetch(request) {
     try {
@@ -686,9 +768,28 @@ export class YapurDB extends DurableObject {
       const a = await this.needAuth(request);
       return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));
     }
+    let mm;
+    if (p === '/api/router/ingest' && m === 'POST') return send(200, await this.routerIngest(request, url, raw));
+    if (p === '/api/routers' && m === 'GET') { await this.needAdmin(request); return send(200, { routers: this.routerList() }); }
+    if (p === '/api/routers' && m === 'POST') { await this.needAdmin(request); return send(200, await this.routerCreate(readBody(raw, 1e4))); }
+    if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/items)?$/.exec(p))) {
+      await this.needAdmin(request);
+      const id = mm[1], r = this.q1('SELECT * FROM routers WHERE id=?', id);
+      if (!r) throw httpErr(404, 'No existe ese router.');
+      if (mm[2] === '/items' && m === 'GET') return send(200, this.routerItems(id), { 'Content-Type': 'application/json; charset=utf-8' });
+      if (mm[2] === '/token' && m === 'POST') return send(200, { token: await this.routerNewToken(id) });
+      if (!mm[2] && m === 'PATCH') {
+        const b = readBody(raw, 1e4), nombre = b.nombre === undefined ? r.nombre : String(b.nombre).trim().replace(/\s+/g, ' ').slice(0, 40);
+        if (!nombre) throw httpErr(400, 'Falta el nombre del router.');
+        const dup = this.q1('SELECT id FROM routers WHERE nombre=? COLLATE NOCASE AND id<>?', nombre, id);
+        if (dup) throw httpErr(409, 'Ya hay un router con ese nombre.');
+        this.sql.exec('UPDATE routers SET nombre=?, kinds=? WHERE id=?', nombre, b.kinds === undefined ? r.kinds : this.routerKinds(b.kinds), id);
+        return send(200, { router: this.routerPublic(this.q1('SELECT * FROM routers WHERE id=?', id)) });
+      }
+      if (!mm[2] && m === 'DELETE') { this.tx(() => { this.sql.exec('DELETE FROM rsnap WHERE router=?', id); this.sql.exec('DELETE FROM routers WHERE id=?', id); }); return send(200, { ok: true }); }
+    }
     if (p === '/api/sync' && m === 'GET') return send(200, this.syncJSON((await this.needAuth(request)).user), { 'Content-Type': 'application/json; charset=utf-8' });
 
-    let mm;
     if ((mm = /^\/api\/doc\/([a-z]+)\/([^/]+)$/.exec(p))) {
       const a = await this.needAuth(request), coll = mm[1];
       let id; try { id = decodeURIComponent(mm[2]); } catch (e) { throw httpErr(400, 'Ruta inválida.'); }
