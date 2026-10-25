@@ -202,6 +202,72 @@ async function openStream(token) {
     r = await call('GET', '/api/mis-cobros', undefined, T2);
     t('cobros: el técnico ve que quedó anulado', r.j.docs[0].data.items.pt2.anulado === true, r);
 
+    /* ---- routers MikroTik: el router manda su lista, el sistema nunca se conecta ni corta ---- */
+    const ING = (tok, q, body) => fetch(BASE + '/api/router/ingest?' + q, { method: 'POST', headers: Object.assign({ 'content-type': 'text/plain' }, tok ? { authorization: 'Bearer ' + tok } : {}), body }).then(async x => ({ s: x.status, j: await x.json().catch(() => null) }));
+    r = await call('POST', '/api/routers', { nombre: 'ADMIN02', kinds: ['q', 'p', 'd', 'x'] }, O);
+    t('routers: la oficina no puede dar de alta routers', r.s === 403, r);
+    r = await call('POST', '/api/routers', { nombre: 'ADMIN02', kinds: ['q', 'p', 'd', 'x'] }, A);
+    t('routers: el administrador da de alta un router y recibe el token una sola vez', r.s === 200 && /^r[0-9a-f]{10}\.[A-Za-z0-9_-]{30,}$/.test(r.j.token) && r.j.router.kinds.join() === 'd,p,q', r);
+    const RT = r.j.router.id, RTOK = r.j.token;
+    r = await call('POST', '/api/routers', { nombre: 'admin02' }, A);
+    t('routers: no deja repetir el nombre (aunque cambien las mayúsculas)', r.s === 409, r);
+    r = await call('GET', '/api/routers', undefined, A);
+    t('routers: la lista no trae el token ni su huella', r.s === 200 && r.j.routers.length === 1 && !JSON.stringify(r.j).includes(RTOK.split('.')[1]) && !('th' in r.j.routers[0]) && r.j.routers[0].hayDatos === false, r);
+    r = await call('GET', '/api/routers', undefined, O);
+    t('routers: la oficina no ve la lista', r.s === 403, r);
+    r = await ING(null, 'run=a1&part=1&fin=1', 'Q\tx\t10.0.0.1\t');
+    t('routers: sin token no se puede mandar nada', r.s === 401, r);
+    r = await ING(RT + '.malaclave', 'run=a1&part=1&fin=1', 'Q\tx\t10.0.0.1\t');
+    t('routers: con un token equivocado tampoco', r.s === 401, r);
+    r = await ING(RTOK, 'run=run1&part=1', '#\tADMIN02\t7.15.1\nQ\tJuan Perez\t10.10.0.5/32\t20000000/20000000\tfalse\tnone\tcalle 1\nQ\tRango\t10.20.0.0/24,10.30.0.0/24\t5M/5M\tfalse\tnone\t\nP\tmaria\tpppoe\tplan20\t10.50.0.7\tfalse\tMaría Gómez\nF\tplan20\t20M/20M\nbasura sin formato\nD\t10.40.0.9\tAA:BB:CC:DD:EE:FF\tdhcp1\tfalse\tPedro Díaz\n');
+    t('routers: acepta una tanda y cuenta los registros (ignora la basura)', r.s === 200 && r.j.registros === 5 && r.j.ignorados === 1, r);
+    r = await call('GET', '/api/routers/' + RT + '/items', undefined, A);
+    t('routers: mientras la corrida no termina no hay lista', r.s === 200 && r.j.lines.length === 0 && r.j.router.hayDatos === false, r);
+    r = await ING(RTOK, 'run=run1&part=3&fin=1', '#\tfin\n');
+    t('routers: si faltan tandas no da por terminada la corrida', r.s === 409, r);
+    r = await ING(RTOK, 'run=run1&part=2&fin=1', 'Q\tOtro\t10.10.0.6\t10M/10M\ttrue\tnone\t' + '\n#\tfin\n');
+    t('routers: al cerrar la corrida queda la lista completa', r.s === 200 && r.j.total === 6, r);
+    r = await call('GET', '/api/routers/' + RT + '/items', undefined, A);
+    t('routers: el administrador lee los registros tal cual', r.s === 200 && r.j.lines.length === 6 && r.j.lines.some(l => l[0] === 'P' && l[1] === 'maria' && l[4] === '10.50.0.7') && r.j.lines.some(l => l[0] === 'D' && l[2] === 'AA:BB:CC:DD:EE:FF'), r.j.lines);
+    t('routers: guarda el nombre y la versión del router', r.j.router.ident === 'ADMIN02' && r.j.router.ros === '7.15.1' && r.j.router.hayDatos === true && r.j.router.visto > 0, r.j.router);
+    r = await ING(RTOK, 'run=run2&part=1', 'Q\tNuevo\t10.0.0.9\t1M/1M\tfalse\tnone\t\n');
+    r = await call('GET', '/api/routers/' + RT + '/items', undefined, A);
+    t('routers: una corrida a medio hacer no pisa la lista anterior', r.j.lines.length === 6, r.j.lines.length);
+    r = await ING(RTOK, 'run=run2&part=2&fin=1', 'Q\tNuevo2\t10.0.0.10\t1M/1M\tfalse\tnone\t\n#\tfin\n');
+    r = await call('GET', '/api/routers/' + RT + '/items', undefined, A);
+    t('routers: al terminar la nueva corrida reemplaza la anterior', r.j.lines.length === 2 && r.j.lines[0][1] === 'Nuevo', r.j.lines);
+    r = await ING(RTOK, 'run=bad run&part=1', 'Q\tx\t1\t');
+    t('routers: rechaza una corrida con datos inválidos', r.s === 400, r);
+    r = await ING(RTOK, 'run=r9&part=1', 'Q\t' + 'x'.repeat(50000));
+    t('routers: rechaza una tanda enorme', r.s === 413, r.s);
+    r = await call('GET', '/api/doc/routers/' + RT, undefined, A);
+    t('routers: los datos del router no son un documento más (no salen por la sincronización)', r.s === 400, r);
+    r = await call('GET', '/api/sync', undefined, A);
+    t('routers: ni aparecen en la sincronización', r.s === 200 && !('routers' in r.j.cols));
+    r = await call('POST', '/api/routers/' + RT + '/token', {}, A);
+    const RTOK2 = r.j.token;
+    t('routers: se puede generar un token nuevo', r.s === 200 && RTOK2 !== RTOK && RTOK2.startsWith(RT + '.'), r);
+    {
+      const filas = []; for (let i = 0; i < 6000; i++) filas.push('Q\tCliente ' + i + '\t10.' + (i >> 8) + '.' + (i & 255) + '.1/32\t20M/20M\tfalse\tnone\tcomentario ' + i);
+      const t0 = Date.now(); let ok = true, n = 0;
+      for (let i = 0; i < filas.length; i += 40) { n++; const x = await ING(RTOK2, 'run=grande&part=' + n + (i + 40 >= filas.length ? '&fin=1' : ''), filas.slice(i, i + 40).join('\n') + '\n'); if (x.s !== 200) { ok = false; break; } }
+      r = await call('GET', '/api/routers/' + RT + '/items', undefined, A);
+      t('routers: una lista grande (6.000 registros en 150 tandas) entra completa y se lee entera', ok && n === 150 && r.s === 200 && r.j.lines.length === 6000 && r.j.router.total === 6000 && r.j.lines[5999][1] === 'Cliente 5999', [ok, n, r.s, r.j && r.j.lines && r.j.lines.length]);
+      t('routers: y no tarda una eternidad', Date.now() - t0 < 60000, Date.now() - t0);
+    }
+    r = await ING(RTOK, 'run=r5&part=1&fin=1', '#\tfin\n');
+    t('routers: el token anterior deja de valer', r.s === 401, r);
+    r = await ING(RTOK2, 'run=r5&part=1&fin=1', '#\tfin\n');
+    t('routers: el nuevo token sí', r.s === 200, r);
+    r = await call('PATCH', '/api/routers/' + RT, { nombre: 'ADMIN02 principal', kinds: ['q'] }, A);
+    t('routers: se puede renombrar y cambiar qué lee', r.s === 200 && r.j.router.nombre === 'ADMIN02 principal' && r.j.router.kinds.join() === 'q', r);
+    r = await call('DELETE', '/api/routers/' + RT, undefined, O);
+    t('routers: la oficina no puede borrarlo', r.s === 403, r);
+    r = await call('DELETE', '/api/routers/' + RT, undefined, A);
+    t('routers: el administrador lo borra', r.s === 200, r);
+    r = await ING(RTOK2, 'run=r6&part=1&fin=1', '#\tfin\n');
+    t('routers: borrado el router su token ya no sirve', r.s === 401, r);
+
     /* ---- datos y permisos ---- */
     r = await call('PUT', '/api/doc/planes/p1', { data: { nombre: 'Hogar 100', bajada: 100, subida: 50, precio: 20000 } }, A);
     t('admin crea plan', r.s === 200 && r.j.data.precio === 20000, r);

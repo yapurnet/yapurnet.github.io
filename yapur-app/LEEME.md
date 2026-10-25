@@ -69,6 +69,19 @@ Si un técnico cobra la instalación, una reconexión o un reclamo, lo carga en 
 - **Cierre de caja:** en Cobranzas → *Caja del día* hay una tabla **Por cobrador** (recibos, efectivo, otros medios y total de cada persona, incluida la oficina) y cada cobro dice quién lo hizo. El efectivo de cada persona es lo que tiene que entregar. Los cobros anulados no suman.
 - Los cobros anteriores a esta versión no tienen nombre de cobrador y figuran como «Sin dato». **No hace falta un APK nuevo.**
 
+## Routers MikroTik: traer los clientes (solo lectura)
+
+El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**. Es al revés: cada router corre un script de **solo lectura** que le manda al sistema la lista de lo que tiene cargado. Por eso el sistema no puede cortar ni cambiar nada en un router, aunque alguien robe una cuenta de la app. No hay que abrir puertos ni exponer el router a internet (solo necesita salir por HTTPS).
+
+- **Alta:** Ajustes → *Routers MikroTik* → *Agregar router*. Poné el nombre (ADMIN02, FM04…) y marcá qué clientes tiene: **IP fija** (lee las colas simples), **DHCP** (leases estáticos) y/o **PPPoE** (secretos y perfiles; *nunca* lee ni envía contraseñas). Te muestra el script con el acceso de ese router.
+- **En el router:** WinBox → Nuevo terminal. (1) pegá la prueba de conexión, (2) pegá el script, (3) ejecutalo una vez con `/system script run yapur-clientes` (con miles de clientes tarda unos minutos), (4) si funcionó, pegá la programación para que lo mande solo todos los días a las 03:30. El script es de permisos `read,test`: no puede escribir en el router.
+- **Clientes detectados:** en el router → *Clientes detectados*. Junta colas, PPPoE y DHCP en una fila por cliente (por IP), reconoce a los que ya cargaste (por IP, usuario PPPoE o nombre) y asigna el plan por velocidad. *Importar* crea los nuevos con IP, usuario PPPoE, MAC y el nombre del router; lo deshabilitado entra como suspendido. Teléfono, dirección y DNI se completan después. No pisa clientes que ya están.
+- **Qué no toma como cliente:** colas con rangos o varias IP, colas repetidas con la misma IP y usuarios PPP que no son PPPoE (VPN).
+- **Seguridad:** el acceso de cada router solo sirve para *dejar* la lista (no para leer nada del sistema). Si lo perdés o lo querés cambiar, *Script* genera uno nuevo y el anterior deja de valer (hay que volver a pegar el script en ese router). Un router borrado deja de poder enviar.
+- **Para saber:** la lista de cada router no entra en las copias de seguridad (se vuelve a armar sola con el próximo envío).
+- **Sin probar en un router real:** el script se armó con la sintaxis de RouterOS 6.4x/7.x pero **no se pudo correr en un MikroTik desde acá**. Probalo primero en uno chico (por ejemplo un nodo con IP fija). Si el router responde «not enough permissions», agregá el permiso `write` al script y a la programación (el script igual no escribe). El paso «Si algo falla» del mismo cuadro explica los demás casos.
+- Más adelante, cortar y reconectar desde el sistema se podría agregar como un script aparte que el router *consulta* (siempre del lado del router, sin dar acceso al sistema); hoy no existe.
+
 ## Avisos de actualización
 
 - **App nueva (la mayoría de los cambios):** cuando se publica una versión nueva en Cloudflare, quien tenga la app abierta (o la abra) ve arriba **«Hay una versión nueva de la app»** con el botón **Actualizar**. Revisa al abrir, al volver a la app y cada 10 minutos. No hace falta reinstalar el APK.

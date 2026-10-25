@@ -87,6 +87,13 @@ function analyzeImport(rows,opts){
   }
   return out;
 }
+/* guarda los clientes ya analizados, repartidos en sus bloques; avisa el avance */
+async function saveImported(recs,prog){
+  const groups={};
+  recs.forEach((c,i)=>{const id=newId()+i.toString(36);const sh=clientShard(id);(groups[sh]=groups[sh]||{})[id]=c;});
+  let done=0;const total=recs.length;
+  for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;if(prog)prog(done,total);}
+}
 function openImport(){
   const cur=todayStr().slice(0,7);
   const html=`<p class="muted small">Elegí un archivo .csv (en Excel: Guardar como, CSV). La primera fila lleva los nombres de las columnas. Se reconocen: ${IMP_COLS.join(', ')}.</p>
@@ -109,13 +116,11 @@ function openImport(){
         <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length?'':' disabled'}>Importar ${a.recs.length}</button></div><div class="hint" id="imp-prog"></div></div>`;
       const go=$('#imp-go',el);
       if(go)go.addEventListener('click',async()=>{
-        go.disabled=true;const groups={};
-        a.recs.forEach((c,i)=>{const id=newId()+i.toString(36);const sh=clientShard(id);(groups[sh]=groups[sh]||{})[id]=c;});
-        let done=0;const total=a.recs.length;
+        go.disabled=true;const total=a.recs.length;
         try{
-          for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;$('#imp-prog',el).textContent=`Importando… ${done} de ${total}`;}
+          await saveImported(a.recs,(done,t)=>{$('#imp-prog',el).textContent=`Importando… ${done} de ${t}`;});
           toast(total+' clientes importados');closeModal();
-        }catch(err){dbError(err);go.disabled=false;$('#imp-prog',el).textContent=`Se importaron ${done} de ${total}. Revisá y volvé a intentar con el resto.`;}
+        }catch(err){dbError(err);go.disabled=false;$('#imp-prog',el).textContent='No se pudo terminar la importación. Revisá cuántos clientes se cargaron antes de volver a intentar.';}
       });
     };
     $('#imp-file',el).addEventListener('change',e=>{
