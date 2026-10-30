@@ -189,6 +189,28 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   t('completar: al asignarle el plan, el precio especial igual al del plan se saca; uno distinto se respeta',uz&&uz.patch.planId==='p5'&&uz.patch.precio===null&&uy&&uy.patch.planId==='p5'&&!('precio' in uy.patch),[uz,uy]);
   S.clientes.clear();S.planes.clear();
 }
+// deuda anterior: aparte de las mensualidades y se cobra con su propio concepto
+{
+  S.clientes.clear();S.pagos.clear();S.planes.clear();
+  S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:20,precio:20000});
+  const cu=todayStr().slice(0,7),nx=addMonths(cu,1),m3=addMonths(cu,-2);
+  const cc={id:'dc',_doc:'s1',estado:'activo',planId:'p1',desde:m3,ciclo:1,deudaAnt:{m:30000,det:'Septiembre 2026',f:cu+'-01'}};
+  S.clientes.set('dc',cc);
+  S.pagos.set('d1',{id:'d1',c:'dc',concepto:'deuda_anterior',per:null,monto:12000.5,fecha:cu+'-02',recibo:'RD1'});
+  S.pagos.set('d2',{id:'d2',c:'dc',concepto:'deuda_anterior',per:null,monto:5000,fecha:cu+'-03',recibo:'RD2',anulado:true});
+  S.pagos.set('m1',{id:'m1',c:'dc',concepto:'mensualidad',per:addMonths(cu,-1),monto:20000,fecha:cu+'-01',recibo:'RM1'});
+  rebuildDerived();
+  t('deuda anterior: lo que falta es lo original menos lo cobrado, sin contar anulados',deudaAntRest(cc)===17999.5,deudaAntRest(cc));
+  t('deuda anterior: un cobro de deuda anterior no paga mensualidades',billing(cc).periods.find(p=>p.per===m3).paid===0&&billing(cc).periods.find(p=>p.per===addMonths(cu,-1)).paid===20000);
+  const dp=deudaPrevia(cc,nx);
+  t('deudaPrevia: suma los meses sin pagar antes del mes elegido (mes pagado no cuenta)',dp.monto===40000&&dp.meses.length===2&&dp.meses.includes(m3)&&dp.meses.includes(cu),dp);
+  const rb=bulkCero(nx);
+  t('bulkCero: pasa a cobrar desde el mes elegido y suma lo nuevo a la deuda anterior que ya tenía',rb.cambian.length===1&&rb.cambian[0].patch.desde===nx&&rb.cambian[0].patch.deudaAnt.m===70000&&/Septiembre 2026 \\+ /.test(rb.cambian[0].patch.deudaAnt.det)&&rb.conDeuda===1&&rb.monto===40000,rb);
+  S.clientes.set('dc',Object.assign({},cc,{desde:nx}));rebuildDerived();
+  t('bulkCero: no mueve dos veces a quien ya empieza ese mes',bulkCero(nx).cambian.length===0&&bulkCero(nx).yaDesde===1);
+  t('con «cobrar desde» el mes que viene, hoy no debe mensualidades',billing(S.clientes.get('dc')).deuda===0&&billing(S.clientes.get('dc')).vencidos===0);
+  S.clientes.clear();S.pagos.clear();S.planes.clear();rebuildDerived();
+}
 console.log(out.join('\\n'));
 `;
 const ctx={console,document:{addEventListener(){},querySelector(){return null},querySelectorAll(){return []},createElement(){return {style:{}}}},window:{},localStorage:{getItem(){return null},setItem(){}},navigator:{},setTimeout,Intl,Date,Math,FileReader:function(){}};

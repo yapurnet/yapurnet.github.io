@@ -116,7 +116,7 @@ function canWrite(u, p, coll, op) {
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
 const CAMPO_CONCEPTOS = ['instalacion', 'reconexion', 'reclamo', 'otro'];
-const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia'];
+const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch) {
@@ -347,6 +347,7 @@ export class YapurDB extends DurableObject {
     if (coll === 'clientes') {
       const drop = [];
       if (!p.precios) drop.push('precio', 'hp');
+      if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
       if (!p.telefono) drop.push('tel', 'tel2');
       return drop.length ? strip(data, drop) : data;

@@ -91,6 +91,19 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Clientes sin plan:** si al importar avisa «Velocidades sin plan», creá esos planes en *Planes* (la velocidad de bajada tiene que coincidir) y volvé a importar el mismo CSV con **Completar** tildado: les asigna el plan, y si su precio especial es igual al del plan, lo saca.
 - **Datos del recibo:** *Ajustes → Datos del recibo* (nombre comercial, razón social, CUIT, Ingresos Brutos, domicilio, teléfonos, web, punto de venta y alias de pago). Se cargan una vez y salen en todos los recibos, como en el recibo de papel: ORIGINAL · NO VÁLIDO COMO FACTURA, punto de venta y número, cliente, condición de venta, período facturado y vencimiento, tabla con el servicio, importe total y alias. Se puede copiar, mandar por WhatsApp (mismo contenido en texto) o **imprimir** (desde la computadora). El número del recibo sigue siendo el código de la app (fecha + letras).
 
+## Empezar a cobrar de cero y «Deuda anterior»
+
+**Ajustes → Clientes y cobranzas → Empezar a cobrar de cero.** Elegís el mes desde el que se cobra (por defecto el siguiente) y la pantalla te cuenta cuántos clientes se mueven y cuánto suman las deudas. Al confirmar, todos los clientes activos y suspendidos pasan a «cobrar desde» ese mes: ninguno figura como moroso ni «A cortar» por meses anteriores.
+
+Lo que cada uno debía hasta ese momento **no se pierde**: queda anotado como **Deuda anterior** (los meses sin pagar, al precio que tenían). Es un saldo aparte:
+- No genera cortes ni aparece en «Morosos». Se cobra cuando el cliente pueda.
+- Se ve como chip «Deuda anterior · $…» en la lista y en la ficha, con el detalle de los meses.
+- **Cobranzas → Deuda anterior** lista a todos (los que más deben primero), con el total por cobrar, botón **Cobrar** y **Recordar por WhatsApp**. El Resumen muestra el total y lleva a esa lista.
+- **Cobrar deuda anterior** acepta pagos parciales y emite recibo («Deuda anterior: Octubre de 2026»). Si se anula el cobro, la deuda vuelve.
+- En la ficha, **Editar → Facturación** permite cargar o corregir la deuda a mano (por ejemplo una que estaba anotada en las notas), y **Dar por saldada** la perdona.
+
+Correrlo dos veces no mueve a nadie dos veces. Los clientes que ya empiezan ese mes o después, los «por instalar» y los de baja no se tocan.
+
 ## Avisos de actualización
 
 - **App nueva (la mayoría de los cambios):** cuando se publica una versión nueva en Cloudflare, quien tenga la app abierta (o la abra) ve arriba **«Hay una versión nueva de la app»** con el botón **Actualizar**. Revisa al abrir, al volver a la app y cada 10 minutos. No hace falta reinstalar el APK.

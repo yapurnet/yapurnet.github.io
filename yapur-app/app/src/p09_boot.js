@@ -4,11 +4,12 @@ VIEWS.resumen={
   update(){
     const root=$('#rs');if(!root)return;
     const today=todayStr(),cur=today.slice(0,7);
-    let act=0,susp=0,ingreso=0,deuda=0,morosos=0;const planCount=new Map(),svCount=new Map(),debtors=[];
+    let act=0,susp=0,ingreso=0,deuda=0,morosos=0,dant=0,dantN=0;const planCount=new Map(),svCount=new Map(),debtors=[];
     for(const c of S.clientes.values()){
       if(c.estado==='activo'){act++;ingreso+=priceOf(c);if(c.planId)planCount.set(c.planId,(planCount.get(c.planId)||0)+1);extrasOf(c).forEach(s=>svCount.set(s.id,(svCount.get(s.id)||0)+1));}
       else if(c.estado==='suspendido')susp++;
       const b=billing(c);if(b.vencidos>0){morosos++;deuda+=b.deuda;debtors.push({c,b});}
+      const dr=deudaAntRest(c);if(dr>0){dant+=dr;dantN++;}
     }
     let hoy=0,mes=0;const porMes={};
     for(const p of S.pagos.values()){if(p.anulado)continue;const m=Number(p.monto)||0;if(p.fecha===today)hoy+=m;const ym=p.fecha.slice(0,7);porMes[ym]=(porMes[ym]||0)+m;}
@@ -26,6 +27,7 @@ VIEWS.resumen={
       <div class="kpi"><span class="n">${fmtMoney(hoy)}</span><span class="l">Cobrado hoy</span></div>
       <div class="kpi"><span class="n">${fmtMoney(mes)}</span><span class="l">Cobrado en ${esc(monthLabel(cur))}</span></div>
       <div class="kpi bad"><span class="n">${fmtMoney(deuda)}</span><span class="l">Deuda vencida · ${morosos} ${morosos===1?'cliente':'clientes'}</span></div>
+      ${dantN&&can('caja')?`<div class="kpi tap" data-go="cobranzas" data-sub="dant" role="button" tabindex="0"><span class="n">${fmtMoney(dant)}</span><span class="l">Deuda anterior · ${dantN} ${dantN===1?'cliente':'clientes'}</span></div>`:''}
       <div class="kpi"><span class="n">${fmtMoney(ingreso)}</span><span class="l">Facturación mensual de activos</span></div>
       <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div></div>
     <div class="card"><div class="head-row"><h3>Cortes y promesas</h3>${can('caja')?'<button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Ver lista</button>':''}</div>

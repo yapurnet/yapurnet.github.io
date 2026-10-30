@@ -82,7 +82,7 @@ function cobroOrdenHTML(o){
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
     <div id="ff-cobro-box" hidden>
-      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad'&&k!=='deuda_anterior').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
     </div></div>`;

@@ -176,3 +176,5 @@ button.chip[hidden],.netbar[hidden]{display:none}
 @media (max-width:359px){.kpi .n{font-size:22px}}
 /* tablas en el celular: menos aire para que entren las cuatro columnas sin deslizar */
 @media (max-width:480px){th,td{padding:8px 8px}th{letter-spacing:.02em;font-size:11px}th.right,td.right{white-space:nowrap}}
+.kpi.tap{cursor:pointer}
+.kpi.tap:hover{border-color:var(--accent-line)}
