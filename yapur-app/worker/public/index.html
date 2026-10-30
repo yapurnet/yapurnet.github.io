@@ -66,7 +66,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .tab:hover{color:var(--ink)}
 .tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
 .tab .count{margin-left:6px;font-size:12px;background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:99px}
-.wrap{max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
+.wrap{width:100%;max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
 
 /* ---------- botones y chips ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
@@ -85,6 +85,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .chip.info{background:var(--info-soft);color:var(--info);border-color:transparent}
 .chip.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.chip.quiet{background:transparent;border:1px dashed var(--line);color:var(--muted);font-weight:500}
 
 /* ---------- tarjetas, listas, filtros ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -92,13 +93,16 @@ button,input,select,textarea{font:inherit;color:inherit}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .toolbar{display:flex;flex-direction:column;gap:10px}
 .toolbar .line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.search{flex:1 1 220px;min-width:0}
+.search{flex:1 1 150px;min-width:0}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
-.seg button{border:1px solid var(--line);background:var(--surface);padding:6px 12px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted)}
+.seg button{border:1px solid var(--line);background:var(--surface);padding:6px 12px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);white-space:nowrap}
+.seg button:hover{border-color:var(--accent-line);color:var(--ink)}
 .seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .list{display:flex;flex-direction:column;gap:8px}
 .item{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;cursor:pointer;text-align:left;width:100%}
 .item:hover{border-color:var(--accent-line)}
+.item:active{background:var(--surface-2)}
+.item .s+.s{margin-top:-4px}
 .item .t{font-weight:700;overflow-wrap:anywhere}
 .item .s{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .item .tags{display:flex;gap:6px;flex-wrap:wrap;grid-column:1/-1}
@@ -144,7 +148,7 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .kv dt{color:var(--muted)} .kv dd{margin:0;overflow-wrap:anywhere}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
-.kpi .n{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.kpi .n{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kpi .l{font-size:13px;color:var(--muted)}
 .kpi.bad .n{color:var(--bad)}
 .plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
@@ -193,6 +197,39 @@ button.chip[hidden],.netbar[hidden]{display:none}
 .upd-act{display:flex;gap:6px}
 .upd .btn.primary{background:var(--accent-ink);border-color:var(--accent-ink);color:var(--accent)}
 .upd .btn.ghost{color:var(--accent-ink);border-color:transparent}
+
+/* ---------- retoques de lectura ---------- */
+/* los filtros del celular van en una sola fila que se desliza, no en cinco renglones */
+@media (max-width:699px){
+  .brand-sub{display:none}
+  .toolbar .seg{flex-wrap:nowrap;overflow-x:auto;margin-inline:-16px;padding:2px 16px 6px;scrollbar-width:none}
+  .toolbar .seg::-webkit-scrollbar{display:none}
+  .toolbar .seg button{flex:none}
+}
+.wrap>.card,.wrap>.kpis,.wrap>.plans{scroll-margin-top:72px}
+.aj-index{position:sticky;top:calc(var(--sat) + 56px);z-index:10;background:var(--bg);margin-block:-8px 0;padding-block:8px}
+/* tres contadores chicos en una fila */
+.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.kpis.three .kpi{padding:10px 12px}
+.kpis.three .kpi .n{font-size:22px}
+@media (max-width:420px){.kpis.three .kpi .l{font-size:12px}}
+/* calendario de cortes: el aviso de feriado va en su propio renglón */
+.cal{flex-wrap:wrap;align-items:flex-start}
+.cal-next{text-align:right;flex:none}
+.cal-note{flex:1 0 100%;padding-top:6px;border-top:1px dashed var(--line)}
+/* tarjeta de plan: nombre y «Editar» arriba, la velocidad manda */
+.plan .head-row{align-items:flex-start;flex-wrap:nowrap}
+.plan .tags-inline{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.plan .speed{font-size:40px}
+/* entrar */
+.card.auth{max-width:400px;width:100%;margin:6vh auto 24px;padding:24px;box-shadow:var(--shadow);gap:14px}
+.card.auth h2{font-size:24px}
+.item .s .mono{white-space:nowrap}
+/* en la compu los contadores van de a 4 y las cifras nunca se cortan en dos renglones */
+@media (min-width:760px){.kpis{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:359px){.kpi .n{font-size:22px}}
+/* tablas en el celular: menos aire para que entren las cuatro columnas sin deslizar */
+@media (max-width:480px){th,td{padding:8px 8px}th{letter-spacing:.02em;font-size:11px}th.right,td.right{white-space:nowrap}}
 
 </style>
 </head>
@@ -868,10 +905,10 @@ function clientRow(c){
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
-    <div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
+    <div class="side">${c.estado==='activo'?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasOf(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasOf(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip warn">Sin ubicación</span>'}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
 }
 function mountClientPicker(host,opts){
   host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;
@@ -1474,15 +1511,13 @@ function bindVig(pre,el,item,get){
 function planCard(p){
   const n=planClientCount(p.id);
   return `<article class="plan${p.activo===false?' off':''}">
-    <div class="head-row"><span class="chip accent">${esc(TEC_PLAN[p.tecnologia]||'Todas las tecnologías')}</span>${p.activo===false?'<span class="chip">Inactivo</span>':''}</div>
-    <h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3>
+    <div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3><div class="tags-inline">${TEC_PLAN[p.tecnologia]?`<span class="chip accent">${esc(TEC_PLAN[p.tecnologia])}</span>`:''}${p.activo===false?'<span class="chip">Inactivo</span>':''}${isAdmin()?`<button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button>`:''}</div></div>
     <div><div class="speed">${esc(p.bajada)}<small>Mbps de bajada</small></div><div class="speed-up">subida ${esc(p.subida)} Mbps</div></div>
     ${can('precios')?`<div class="price">${fmtMoney(planNow(p))}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>${nextChangeHTML(p)}`:''}
     <div class="qbox">${esc(queueText(p))}</div>
     <div class="actions start"><button class="btn small ghost" type="button" data-copy="${esc(queueText(p))}" data-copy-label="Parámetros de la cola">Copiar parámetros de la cola</button></div>
     ${p.perfil?`<div class="small muted">Perfil: <span class="mono">${esc(p.perfil)}</span></div>`:''}
-    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div>
-    ${isAdmin()?`<div class="actions start"><button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button></div>`:''}</article>`;
+    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div></article>`;
 }
 function qRowHTML([k,label,key,kind,ex],q){
   const val=s=>esc(q[k+s]==null?'':q[k+s]);
@@ -1785,6 +1820,10 @@ VIEWS.ajustes={
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
       <dt>Permisos</dt><dd>Los controla el servidor, no solo la pantalla: un técnico no recibe los pagos ni puede cambiar precios aunque pruebe con otra herramienta.</dd>
       <dt>Pagos</dt><dd>Un pago registrado no se edita: solo se anula, y queda anotado quién lo hizo.</dd></dl></div>`;
+    /* índice: saltar a cada sección sin recorrer toda la pantalla */
+    const secs=$$('.card',el).filter(c=>c.parentElement===el&&$('h2',c));
+    el.insertAdjacentHTML('afterbegin',`<div class="toolbar aj-index"><div class="seg">${secs.map((c,i)=>{c.id='aj-sec'+i;return `<button type="button" data-sec="aj-sec${i}">${esc($('h2',c).textContent)}</button>`;}).join('')}</div></div>`);
+    $('.aj-index',el).addEventListener('click',e=>{const b=e.target.closest('[data-sec]');if(!b)return;const t=$('#'+b.dataset.sec,el);if(t)t.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});});
     $('#aj-emp',el).addEventListener('submit',async e=>{e.preventDefault();
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');
@@ -2767,7 +2806,7 @@ async function cobrarOtro(c,o){
 }
 function paymentRow(p){
   const c=S.clientes.get(p.c);
-  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.hora||'')} · ${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)} · <span class="mono">${esc(p.recibo)}</span>${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''}</div></div>
+  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
     <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
 }
 function morosoMsg(c,b){
@@ -2912,7 +2951,7 @@ function cutRow(c,s,kind){
 }
 function calendarHTML(){
   return [1,2].map(cy=>{const p=proximoCorte(cy);
-    return `<div class="per"><span class="grow"><b>Ciclo ${cy}</b><br><span class="small muted">${esc(cicloTxt(cy))}</span></span><span class="small" style="text-align:right">Próximo corte<br><b>${esc(dateLabel(p.fecha))}</b>${p.nota?`<br><span class="muted">el ${dm(p.nota.raw)} es ${esc(p.nota.why)}</span>`:''}</span></div>`;}).join('');
+    return `<div class="per cal"><span class="grow"><b>Ciclo ${cy}</b><br><span class="small muted">${esc(cicloTxt(cy))}</span></span><span class="small cal-next">Próximo corte<br><b>${esc(dateLabel(p.fecha))}</b></span>${p.nota?`<span class="small muted cal-note">El ${dm(p.nota.raw)} es ${esc(p.nota.why)}: el corte pasa al día siguiente hábil.</span>`:''}</div>`;}).join('');
 }
 function drawCortes(body){
   const cd=cortesData(),cap=100;
@@ -3058,7 +3097,7 @@ VIEWS.resumen={
       <div class="kpi"><span class="n">${fmtMoney(ingreso)}</span><span class="l">Facturación mensual de activos</span></div>
       <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div></div>
     <div class="card"><div class="head-row"><h3>Cortes y promesas</h3>${can('caja')?'<button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Ver lista</button>':''}</div>
-      <div class="kpis"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
+      <div class="kpis three"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
       <div class="list" style="margin-top:8px">${calendarHTML()}</div></div>
     <div class="card"><h3>Cobrado por mes</h3><div class="bars">${meses.map(m=>{const v=porMes[m]||0;return `<div class="bar${m===cur?' now':''}"><b>${v?esc(fmtMoney(v).replace(/\s/g,'')):''}</b><i style="height:${Math.max(2,Math.round(96*v/max))}px"></i><span>${esc(monthShort(m))}</span></div>`;}).join('')}</div></div>
     <div class="card"><div class="head-row"><h3>Mayores deudas</h3><button class="btn small" type="button" data-go="cobranzas" data-sub="morosos">Ver todos</button></div>
@@ -3074,7 +3113,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='78705db022';
+const BUILD='3f23fa59b6';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -3267,7 +3306,7 @@ function openAccount(){
 $('#roleChip').addEventListener('click',openAccount);
 
 /* ===== pantallas de entrada ===== */
-function authCard(inner){$('#view').innerHTML=`<div class="card" style="max-width:420px;margin:24px auto;width:100%">${inner}</div>`;return $('#view .card');}
+function authCard(inner){$('#view').innerHTML=`<div class="card auth">${inner}</div>`;return $('#view .card');}
 function takeFlash(){try{const m=sessionStorage.getItem('yg_msg');sessionStorage.removeItem('yg_msg');return m||'';}catch(e){return '';}}
 function showAuth(state,info){
   S.ready=false;tabsHtml='';$('#tabs').innerHTML='';closeModal();

@@ -176,7 +176,7 @@ async function cobrarOtro(c,o){
 }
 function paymentRow(p){
   const c=S.clientes.get(p.c);
-  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.hora||'')} · ${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)} · <span class="mono">${esc(p.recibo)}</span>${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''}</div></div>
+  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
     <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
 }
 function morosoMsg(c,b){
@@ -321,7 +321,7 @@ function cutRow(c,s,kind){
 }
 function calendarHTML(){
   return [1,2].map(cy=>{const p=proximoCorte(cy);
-    return `<div class="per"><span class="grow"><b>Ciclo ${cy}</b><br><span class="small muted">${esc(cicloTxt(cy))}</span></span><span class="small" style="text-align:right">Próximo corte<br><b>${esc(dateLabel(p.fecha))}</b>${p.nota?`<br><span class="muted">el ${dm(p.nota.raw)} es ${esc(p.nota.why)}</span>`:''}</span></div>`;}).join('');
+    return `<div class="per cal"><span class="grow"><b>Ciclo ${cy}</b><br><span class="small muted">${esc(cicloTxt(cy))}</span></span><span class="small cal-next">Próximo corte<br><b>${esc(dateLabel(p.fecha))}</b></span>${p.nota?`<span class="small muted cal-note">El ${dm(p.nota.raw)} es ${esc(p.nota.why)}: el corte pasa al día siguiente hábil.</span>`:''}</div>`;}).join('');
 }
 function drawCortes(body){
   const cd=cortesData(),cap=100;
