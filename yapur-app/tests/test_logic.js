@@ -42,7 +42,22 @@ al=allocate([{per:'2026-08',rest:15000}],18000);t('sobrante al ultimo mes',al.le
 // recibo
 S.ajustes.empresa='YAPUR.NET';S.clientes.set('c1',{id:'c1',nombre:'Cliente Prueba',codigo:'7'});
 S.pagos.set('r1',{id:'r1',c:'c1',concepto:'mensualidad',per:'2026-09',monto:15000,fecha:'2026-10-19',hora:'13:40',recibo:'R261019-ABC',metodo:'efectivo'});
-const rt=receiptText('R261019-ABC');t('recibo trae total y cliente',rt.includes('TOTAL')&&rt.includes('Cliente Prueba')&&rt.includes('RECIBO N° R261019-ABC'),rt);
+const rt=receiptText('R261019-ABC');t('recibo trae total, cliente y número',rt.includes('IMPORTE TOTAL')&&rt.includes('Cliente Prueba')&&rt.includes('Comp. Nro: R261019-ABC')&&rt.includes('NO VÁLIDO COMO FACTURA'),rt);
+t('recibo sin datos de la empresa usa el nombre de la empresa',rt.split('\\n')[0]==='YAPUR.NET'&&!rt.includes('CUIT')&&!rt.includes('Alias'),rt);
+S.ajustes.recibo={leyenda:'SOLUCIONES INFORMATICAS',razon:'EMISOR DE PRUEBA',cuit:'20111111112',iibb:'20111111112',dom:'Calle 1 500, Pueblo',tel:'Ana: 3844-000000',web:'www.ejemplo.net',pv:'00004',alias:['mi.alias','otro.alias']};
+S.clientes.set('c1',{id:'c1',nombre:'Cliente Prueba',codigo:'7',dni:'30111222',dir:'Lavalle 100',loc:'Pueblo',ciclo:1});
+const rt2=receiptText('R261019-ABC'),L2=rt2.split('\\n');
+t('recibo con datos: encabezado como el de papel',L2[0]==='SOLUCIONES INFORMATICAS'&&L2[1]==='EMISOR DE PRUEBA'&&rt2.includes('CUIT: 20111111112 / Ingresos Brutos: 20111111112')&&rt2.includes('Calle 1 500, Pueblo')&&rt2.includes('Ana: 3844-000000 / Web: www.ejemplo.net'),rt2);
+t('recibo con datos: punto de venta, cliente, condiciones y alias',rt2.includes('Punto de venta: 00004')&&rt2.includes('DNI / CUIT: 30111222')&&rt2.includes('Dirección: Lavalle 100, Pueblo')&&rt2.includes('Condición de venta: Contado')&&rt2.includes('Condición frente al IVA: Consumidor Final')&&rt2.includes('Alias: mi.alias')&&rt2.includes('Alias: otro.alias'),rt2);
+t('recibo: período facturado y vencimiento del mes pagado',rt2.includes('Período facturado: 01/09/2026 al 30/09/2026 · Vto. para el pago: 10/09/2026')&&rt2.includes('Abono Mensual Servicio de Internet (septiembre de 2026)'),rt2);
+const rh=receiptHTML(receiptData('R261019-ABC'));
+t('recibo HTML: tabla con el servicio, total y alias',rh.includes('Producto / Servicio')&&rh.includes('Importe total')&&rh.includes('Alias: mi.alias')&&!rh.includes('ANULADO'),rh.slice(0,200));
+S.clientes.set('c1',{id:'c1',nombre:'<b>Hack</b> & Cía',codigo:'7'});
+t('recibo HTML: escapa lo que viene de los datos',!receiptHTML(receiptData('R261019-ABC')).includes('<b>Hack</b>')&&receiptHTML(receiptData('R261019-ABC')).includes('&lt;b&gt;Hack'));
+S.pagos.set('r2',{id:'r2',c:'c1',concepto:'instalacion',nota:'Cable y ficha',monto:10000,fecha:'2026-10-19',hora:'13:50',recibo:'R261019-XYZ',metodo:'transferencia',anulado:true});
+const rt3=receiptText('R261019-XYZ');
+t('recibo de instalación: sin período, con el medio de pago y anulado',!rt3.includes('Período')&&rt3.includes('Instalación: Cable y ficha')&&rt3.includes('Condición de venta: Transferencia')&&rt3.includes('RECIBO ANULADO')&&receiptHTML(receiptData('R261019-XYZ')).includes('ANULADO'),rt3);
+S.ajustes.recibo=null;S.pagos.delete('r2');
 // shards
 const sh=new Set();for(let i=0;i<2000;i++)sh.add(clientShard(newId()+i));
 t('clientes reparten en 16 lotes',sh.size===16,sh.size);
@@ -102,6 +117,39 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   const t0=Date.now(),rg=rtBuild(grande);rtMatch(rg.items);const ms=Date.now()-t0;
   t('router: 6.000 clientes detectados contra 6.000 cargados se procesan en menos de 2 s',rg.items.length===6000&&ms<2000,[rg.items.length,ms]);
   for(let i=0;i<6000;i++)S.clientes.delete('g'+i);
+}
+// importar: velocidad → plan, cobrar desde por cliente, precio igual al del plan y clientes que ya existen
+{
+  S.planes.clear();S.clientes.clear();S.pagos.clear();
+  S.planes.set('p5',{id:'p5',nombre:'Plan_5',bajada:5,subida:5,precio:17000});
+  S.planes.set('p35',{id:'p35',nombre:'Plan_3.5',bajada:3.5,subida:3.5,precio:17000});
+  S.planes.set('p10',{id:'p10',nombre:'Plan_10',bajada:10,subida:10,precio:18000});
+  const hd='nombre;dni;velocidad;ciclo;precio especial;cobrar desde;notas';
+  const r1=parseCsv(hd+'\\r\\nAna Pérez;30111222;5.0;1;17000;2026-11;sin novedad\\r\\nBeto Díaz;;3,5;2;$ 28.000;2026-10;con tv\\r\\nCarla Ruiz;;10;1;;11/2026;\\r\\nDaniel Sosa;;40;2;18000;;\\r\\nEsteban Luna;;;1;;;\\r\\n');
+  const ai=analyzeImport(r1,{estado:'activo',desde:'2026-09',ciclo:1});
+  const R=n=>ai.recs.find(x=>x.nombre===n);
+  t('import vel: la velocidad elige el plan (5.0 y 3,5)',R('Ana Pérez').planId==='p5'&&R('Beto Díaz').planId==='p35',[R('Ana Pérez').planId,R('Beto Díaz').planId]);
+  t('import vel: precio igual al del plan no queda como precio especial; distinto sí',R('Ana Pérez').precio===null&&R('Beto Díaz').precio===28000&&R('Carla Ruiz').precio===null,[R('Ana Pérez').precio,R('Beto Díaz').precio]);
+  t('import vel: cobrar desde por fila (yyyy-mm, mm/yyyy) o el general',R('Ana Pérez').desde==='2026-11'&&R('Beto Díaz').desde==='2026-10'&&R('Carla Ruiz').desde==='2026-11'&&R('Daniel Sosa').desde==='2026-09',ai.recs.map(x=>x.desde));
+  t('import vel: velocidad sin plan avisa y deja el precio',!R('Daniel Sosa').planId&&R('Daniel Sosa').precio===18000&&ai.velFalta.get('40')===1&&!ai.velFalta.has('null'),[...ai.velFalta]);
+  t('import vel: ciclo por fila',R('Ana Pérez').ciclo===1&&R('Beto Díaz').ciclo===2&&R('Daniel Sosa').ciclo===2);
+  t('import vel: sin velocidad queda sin plan sin avisar',!R('Esteban Luna').planId&&ai.velFalta.size===1);
+  t('parseMes entiende varios formatos',parseMes('2026-11')==='2026-11'&&parseMes('2026-11-05')==='2026-11'&&parseMes('11/2026')==='2026-11'&&parseMes('05/11/2026')==='2026-11'&&parseMes('hola')===''&&parseMes('2026-13')==='');
+  // ya existentes
+  S.clientes.set('e1',{id:'e1',_doc:'s1',nombre:'Pérez Ana',estado:'activo',ciclo:1,desde:'2026-10',ip:'10.0.0.9'});
+  S.clientes.set('e2',{id:'e2',_doc:'s1',nombre:'Beto Díaz',estado:'activo',tel:'3844111111',precio:30000,ciclo:1,desde:'2026-10'});
+  const sk=analyzeImport(r1,{estado:'activo',desde:'2026-09',ciclo:1,existentes:'saltear'});
+  t('import existentes: por nombre, sin importar el orden, no se vuelven a crear',sk.recs.length===3&&sk.existen===2&&!sk.recs.some(x=>x.nombre==='Ana Pérez'||x.nombre==='Beto Díaz')&&sk.upd.length===0,[sk.recs.length,sk.existen,sk.upd.length]);
+  S.loaded.pagos=true;S.paidIdx.clear();S.paidIdx.set('e2',new Map([['2026-10',30000]]));
+  const co=analyzeImport(r1,{estado:'activo',desde:'2026-09',ciclo:1,existentes:'completar'});
+  const u1=co.upd.find(x=>x.id==='e1'),u2=co.upd.find(x=>x.id==='e2');
+  t('import completar: llena lo que faltaba (dni, plan, notas) y no pisa lo que ya tenía (ip)',u1&&u1.patch.dni==='30111222'&&u1.patch.planId==='p5'&&u1.patch.notas==='sin novedad'&&!('ip' in u1.patch),u1);
+  t('import completar: sin pagos cargados toma cobrar desde y ciclo del archivo',u1.patch.desde==='2026-11'&&u1.shard==='s1',u1);
+  t('import completar: con pagos no toca cobrar desde ni ciclo, ni el precio que ya tenía',u2&&!('desde' in u2.patch)&&!('ciclo' in u2.patch)&&!('precio' in u2.patch)&&!('tel' in u2.patch)&&u2.patch.planId==='p35',u2);
+  S.loaded.pagos=false;
+  const nx=analyzeImport(r1,{estado:'activo',desde:'2026-09',ciclo:1});
+  t('import sin opción existentes: no cambia el comportamiento anterior',nx.recs.length===5&&nx.existen===0&&nx.upd.length===0,nx.recs.length);
+  S.clientes.clear();S.planes.clear();S.paidIdx.clear();
 }
 console.log(out.join('\\n'));
 `;
