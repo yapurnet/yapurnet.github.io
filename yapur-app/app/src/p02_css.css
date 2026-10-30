@@ -12,7 +12,7 @@
 .tab:hover{color:var(--ink)}
 .tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
 .tab .count{margin-left:6px;font-size:12px;background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:99px}
-.wrap{max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
+.wrap{width:100%;max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
 
 /* ---------- botones y chips ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--line);
@@ -31,6 +31,7 @@
 .chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .chip.info{background:var(--info-soft);color:var(--info);border-color:transparent}
 .chip.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.chip.quiet{background:transparent;border:1px dashed var(--line);color:var(--muted);font-weight:500}
 
 /* ---------- tarjetas, listas, filtros ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -38,13 +39,16 @@
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .toolbar{display:flex;flex-direction:column;gap:10px}
 .toolbar .line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.search{flex:1 1 220px;min-width:0}
+.search{flex:1 1 150px;min-width:0}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
-.seg button{border:1px solid var(--line);background:var(--surface);padding:6px 12px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted)}
+.seg button{border:1px solid var(--line);background:var(--surface);padding:6px 12px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);white-space:nowrap}
+.seg button:hover{border-color:var(--accent-line);color:var(--ink)}
 .seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .list{display:flex;flex-direction:column;gap:8px}
 .item{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;cursor:pointer;text-align:left;width:100%}
 .item:hover{border-color:var(--accent-line)}
+.item:active{background:var(--surface-2)}
+.item .s+.s{margin-top:-4px}
 .item .t{font-weight:700;overflow-wrap:anywhere}
 .item .s{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .item .tags{display:flex;gap:6px;flex-wrap:wrap;grid-column:1/-1}
@@ -90,7 +94,7 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .kv dt{color:var(--muted)} .kv dd{margin:0;overflow-wrap:anywhere}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
-.kpi .n{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.kpi .n{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kpi .l{font-size:13px;color:var(--muted)}
 .kpi.bad .n{color:var(--bad)}
 .plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
@@ -139,3 +143,36 @@ button.chip[hidden],.netbar[hidden]{display:none}
 .upd-act{display:flex;gap:6px}
 .upd .btn.primary{background:var(--accent-ink);border-color:var(--accent-ink);color:var(--accent)}
 .upd .btn.ghost{color:var(--accent-ink);border-color:transparent}
+
+/* ---------- retoques de lectura ---------- */
+/* los filtros del celular van en una sola fila que se desliza, no en cinco renglones */
+@media (max-width:699px){
+  .brand-sub{display:none}
+  .toolbar .seg{flex-wrap:nowrap;overflow-x:auto;margin-inline:-16px;padding:2px 16px 6px;scrollbar-width:none}
+  .toolbar .seg::-webkit-scrollbar{display:none}
+  .toolbar .seg button{flex:none}
+}
+.wrap>.card,.wrap>.kpis,.wrap>.plans{scroll-margin-top:72px}
+.aj-index{position:sticky;top:calc(var(--sat) + 56px);z-index:10;background:var(--bg);margin-block:-8px 0;padding-block:8px}
+/* tres contadores chicos en una fila */
+.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.kpis.three .kpi{padding:10px 12px}
+.kpis.three .kpi .n{font-size:22px}
+@media (max-width:420px){.kpis.three .kpi .l{font-size:12px}}
+/* calendario de cortes: el aviso de feriado va en su propio renglón */
+.cal{flex-wrap:wrap;align-items:flex-start}
+.cal-next{text-align:right;flex:none}
+.cal-note{flex:1 0 100%;padding-top:6px;border-top:1px dashed var(--line)}
+/* tarjeta de plan: nombre y «Editar» arriba, la velocidad manda */
+.plan .head-row{align-items:flex-start;flex-wrap:nowrap}
+.plan .tags-inline{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.plan .speed{font-size:40px}
+/* entrar */
+.card.auth{max-width:400px;width:100%;margin:6vh auto 24px;padding:24px;box-shadow:var(--shadow);gap:14px}
+.card.auth h2{font-size:24px}
+.item .s .mono{white-space:nowrap}
+/* en la compu los contadores van de a 4 y las cifras nunca se cortan en dos renglones */
+@media (min-width:760px){.kpis{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:359px){.kpi .n{font-size:22px}}
+/* tablas en el celular: menos aire para que entren las cuatro columnas sin deslizar */
+@media (max-width:480px){th,td{padding:8px 8px}th{letter-spacing:.02em;font-size:11px}th.right,td.right{white-space:nowrap}}

@@ -32,10 +32,10 @@ function clientRow(c){
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
-    <div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
+    <div class="side">${c.estado==='activo'?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasOf(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasOf(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip warn">Sin ubicación</span>'}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
 }
 function mountClientPicker(host,opts){
   host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;

@@ -175,6 +175,10 @@ VIEWS.ajustes={
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
       <dt>Permisos</dt><dd>Los controla el servidor, no solo la pantalla: un técnico no recibe los pagos ni puede cambiar precios aunque pruebe con otra herramienta.</dd>
       <dt>Pagos</dt><dd>Un pago registrado no se edita: solo se anula, y queda anotado quién lo hizo.</dd></dl></div>`;
+    /* índice: saltar a cada sección sin recorrer toda la pantalla */
+    const secs=$$('.card',el).filter(c=>c.parentElement===el&&$('h2',c));
+    el.insertAdjacentHTML('afterbegin',`<div class="toolbar aj-index"><div class="seg">${secs.map((c,i)=>{c.id='aj-sec'+i;return `<button type="button" data-sec="aj-sec${i}">${esc($('h2',c).textContent)}</button>`;}).join('')}</div></div>`);
+    $('.aj-index',el).addEventListener('click',e=>{const b=e.target.closest('[data-sec]');if(!b)return;const t=$('#'+b.dataset.sec,el);if(t)t.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});});
     $('#aj-emp',el).addEventListener('submit',async e=>{e.preventDefault();
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');

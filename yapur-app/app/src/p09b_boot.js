@@ -139,7 +139,7 @@ function openAccount(){
 $('#roleChip').addEventListener('click',openAccount);
 
 /* ===== pantallas de entrada ===== */
-function authCard(inner){$('#view').innerHTML=`<div class="card" style="max-width:420px;margin:24px auto;width:100%">${inner}</div>`;return $('#view .card');}
+function authCard(inner){$('#view').innerHTML=`<div class="card auth">${inner}</div>`;return $('#view .card');}
 function takeFlash(){try{const m=sessionStorage.getItem('yg_msg');sessionStorage.removeItem('yg_msg');return m||'';}catch(e){return '';}}
 function showAuth(state,info){
   S.ready=false;tabsHtml='';$('#tabs').innerHTML='';closeModal();

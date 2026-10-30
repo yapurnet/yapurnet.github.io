@@ -67,15 +67,13 @@ function bindVig(pre,el,item,get){
 function planCard(p){
   const n=planClientCount(p.id);
   return `<article class="plan${p.activo===false?' off':''}">
-    <div class="head-row"><span class="chip accent">${esc(TEC_PLAN[p.tecnologia]||'Todas las tecnologías')}</span>${p.activo===false?'<span class="chip">Inactivo</span>':''}</div>
-    <h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3>
+    <div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(p.nombre)}</h3><div class="tags-inline">${TEC_PLAN[p.tecnologia]?`<span class="chip accent">${esc(TEC_PLAN[p.tecnologia])}</span>`:''}${p.activo===false?'<span class="chip">Inactivo</span>':''}${isAdmin()?`<button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button>`:''}</div></div>
     <div><div class="speed">${esc(p.bajada)}<small>Mbps de bajada</small></div><div class="speed-up">subida ${esc(p.subida)} Mbps</div></div>
     ${can('precios')?`<div class="price">${fmtMoney(planNow(p))}<span class="muted small" style="font-family:var(--f-body);font-weight:500"> / mes</span></div>${nextChangeHTML(p)}`:''}
     <div class="qbox">${esc(queueText(p))}</div>
     <div class="actions start"><button class="btn small ghost" type="button" data-copy="${esc(queueText(p))}" data-copy-label="Parámetros de la cola">Copiar parámetros de la cola</button></div>
     ${p.perfil?`<div class="small muted">Perfil: <span class="mono">${esc(p.perfil)}</span></div>`:''}
-    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div>
-    ${isAdmin()?`<div class="actions start"><button class="btn small" type="button" data-edit-plan="${esc(p.id)}">Editar</button></div>`:''}</article>`;
+    <div class="small muted">${n} ${n===1?'cliente activo':'clientes activos'}${can('precios')&&n?' · '+fmtMoney(n*planNow(p))+' por mes':''}</div></article>`;
 }
 function qRowHTML([k,label,key,kind,ex],q){
   const val=s=>esc(q[k+s]==null?'':q[k+s]);
