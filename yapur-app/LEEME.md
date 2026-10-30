@@ -91,6 +91,15 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Clientes sin plan:** si al importar avisa «Velocidades sin plan», creá esos planes en *Planes* (la velocidad de bajada tiene que coincidir) y volvé a importar el mismo CSV con **Completar** tildado: les asigna el plan, y si su precio especial es igual al del plan, lo saca.
 - **Datos del recibo:** *Ajustes → Datos del recibo* (nombre comercial, razón social, CUIT, Ingresos Brutos, domicilio, teléfonos, web, punto de venta y alias de pago). Se cargan una vez y salen en todos los recibos, como en el recibo de papel: ORIGINAL · NO VÁLIDO COMO FACTURA, punto de venta y número, cliente, condición de venta, período facturado y vencimiento, tabla con el servicio, importe total y alias. Se puede copiar, mandar por WhatsApp (mismo contenido en texto) o **imprimir** (desde la computadora). El número del recibo sigue siendo el código de la app (fecha + letras).
 
+## Asignar planes y servicios a los clientes ya cargados
+
+En **Ajustes → Importar clientes (CSV)** tildá **Actualizar el plan, los servicios y el precio de los que ya están cargados** y elegí desde qué mes rigen (por defecto el siguiente). El archivo necesita la columna `nombre` y, según lo que quieras cambiar, `plan`, `servicios` y `precio especial`.
+- Se buscan por nombre (sin importar el orden de las palabras). **No se crean clientes nuevos**: las filas sin coincidencia se cuentan aparte y se saltean.
+- `plan` con el nombre exacto del plan (creálo antes en Planes). `Sin plan` deja solo los servicios. `servicios` admite varios: `Multimedia + Multimedia Net`.
+- `precio especial` vacío = que cobre el precio del plan. Si es igual al del plan, se saca solo.
+- Una fila sin plan ni servicios no toca a nadie. Lo que tenía cada cliente queda guardado hasta el mes anterior, así los meses viejos y la deuda anterior conservan su precio.
+- Antes de confirmar ves cuántos cambian, por plan.
+
 ## Empezar a cobrar de cero y «Deuda anterior»
 
 **Ajustes → Clientes y cobranzas → Empezar a cobrar de cero.** Elegís el mes desde el que se cobra (por defecto el siguiente) y la pantalla te cuenta cuántos clientes se mueven y cuánto suman las deudas. Al confirmar, todos los clientes activos y suspendidos pasan a «cobrar desde» ese mes: ninguno figura como moroso ni «A cortar» por meses anteriores.

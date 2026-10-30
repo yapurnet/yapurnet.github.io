@@ -75,7 +75,17 @@ function planBySpeed(v){
   const l=[...S.planes.values()].filter(p=>Number(p.bajada)===n).sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
   return l[0]||null;
 }
-/* opts.existentes: 'completar' → los que ya existen (mismo nombre) reciben solo los datos que les faltan · otro valor → se cuentan y se dejan como están */
+/* Cliente ya cargado en modo «actualizar»: plan, servicios y precio nuevos. Lo anterior queda como vigencia hasta el mes previo a `eff`,
+   así los meses viejos (y la deuda anterior) siguen con el precio que tenían. n = {planId?, extras?, precio?} (lo que no viene no se toca). */
+function actualizarPatch(ex,n,eff){
+  const before={planId:ex.planId||null,extras:Array.isArray(ex.extras)?ex.extras:[],precio:hasNum(ex.precio)?Number(ex.precio):null};
+  const after={planId:n.planId!==undefined?n.planId:before.planId,extras:n.extras!==undefined?n.extras:before.extras,precio:n.precio!==undefined?n.precio:before.precio};
+  if(after.planId===before.planId&&sameExtras(after.extras,before.extras)&&after.precio===before.precio)return null;
+  const prev=addMonths(eff,-1),hp=Array.isArray(ex.hp)?ex.hp:[],patch={planId:after.planId,extras:after.extras,precio:after.precio};
+  if(!(hp.length&&hp[hp.length-1].h>=prev))patch.hp=hp.concat([{h:prev,planId:before.planId,precio:before.precio,extras:before.extras}]);
+  return patch;
+}
+/* opts.existentes: 'actualizar' → plan, servicios y precio del archivo (rigen desde opts.vigencia) · 'completar' → los que ya existen (mismo nombre) reciben solo los datos que les faltan · otro valor → se cuentan y se dejan como están */
 function analyzeImport(rows,opts){
   const head=rows[0].map(h=>HREV[norm(h).replace(/[^a-z0-9]+/g,' ').trim()]||null);
   const idx={};head.forEach((f,i)=>{if(f&&!(f in idx))idx[f]=i;});
@@ -83,7 +93,7 @@ function analyzeImport(rows,opts){
   const byKey=new Map();
   if(opts.existentes){for(const c of S.clientes.values()){const k=nameKey(c.nombre);if(k)byKey.set(k,byKey.has(k)?null:c);}}
   const taken=new Set();
-  const out={recs:[],upd:[],existen:0,sinNombre:0,dup:0,planesFalta:new Set(),velFalta:new Map(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
+  const out={recs:[],upd:[],act:{n:0,igual:0,porPlan:new Map(),conServ:0},sinMatch:0,existen:0,sinNombre:0,dup:0,planesFalta:new Set(),velFalta:new Map(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
   for(let i=1;i<rows.length;i++){
     const r=rows[i],g=f=>idx[f]!==undefined?String(r[idx[f]]==null?'':r[idx[f]]).trim():'';
     const nombre=g('nombre');if(!nombre){out.sinNombre++;continue;}
@@ -99,7 +109,23 @@ function analyzeImport(rows,opts){
     if(ex){   /* ya está cargado: se completa o se deja */
       if(taken.has(ex.id)){out.existen++;continue;}
       taken.add(ex.id);out.existen++;
-      if(opts.existentes==='completar'){
+      if(opts.existentes==='actualizar'){
+        const eff=opts.vigencia||addMonths(curMonth(),1),sin=/^(sin plan|ninguno|ninguna)$/.test(pk),n={};
+        const svc=idx.servicios!==undefined?g('servicios'):'';
+        if(pk||svc){   /* una fila sin plan ni servicios no toca nada */
+          if(idx.plan!==undefined&&pk){if(sin)n.planId=null;else if(plan)n.planId=plan.id;}
+          if(idx.servicios!==undefined)n.extras=parseServicios(svc,out.serviciosFalta);
+          if(idx.precio!==undefined){
+            let p=num(g('precio'));const ep=n.planId!==undefined?(n.planId?S.planes.get(n.planId):null):S.planes.get(ex.planId);
+            if(p!==null&&ep&&p===histPrice(ep,eff))p=null;
+            n.precio=p;
+          }
+          const patch=actualizarPatch(ex,n,eff);
+          if(patch){out.act.n++;out.upd.push({id:ex.id,shard:ex._doc||clientShard(ex.id),patch});
+            const pl=S.planes.get(patch.planId);const k=pl?pl.nombre:'Sin plan';out.act.porPlan.set(k,(out.act.porPlan.get(k)||0)+1);if(patch.extras.length)out.act.conServ++;}
+          else out.act.igual++;
+        }
+      }else if(opts.existentes==='completar'){
         const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
         fill('dni',g('dni'));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
         fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
@@ -113,6 +139,7 @@ function analyzeImport(rows,opts){
       }
       continue;
     }
+    if(opts.existentes==='actualizar'){out.sinMatch++;continue;}   /* en este modo no se crean clientes: solo se actualizan los que ya están */
     if(cod)used.add(cod);
     const extras=parseServicios(g('servicios'),out.serviciosFalta);
     const tk=norm(g('tec'));
@@ -258,28 +285,30 @@ function openImport(){
     ${F('Cobrar desde (mes)','imp-desde',`<input id="imp-desde" type="month" value="${cur}">`,'Antes de este mes no se genera deuda. Dejalo en el mes actual si no querés arrastrar deudas viejas.')}</div>
     ${F('Ciclo de cobro (si el archivo no lo trae)','imp-ciclo',`<select id="imp-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),n===1)).join('')}</select>`,'En el archivo, la columna «ciclo» puede decir 1 o 2.')}
     <label class="per"><input type="checkbox" id="imp-comp" checked><span class="grow"><b>Completar los clientes que ya están cargados</b><br><span class="small muted">Si el nombre coincide, solo se llenan los datos que les faltan. No se pisa nada de lo que ya tienen.</span></span></label>
+    <label class="per"><input type="checkbox" id="imp-act"><span class="grow"><b>Actualizar el plan, los servicios y el precio de los que ya están cargados</b><br><span class="small muted">Se usan el plan, los servicios y el precio especial del archivo. El resto de sus datos no se toca, y lo anterior queda como estaba hasta el mes previo al que elijas.</span></span></label>
+    <div id="imp-vig-box" hidden>${F('Los cambios rigen desde','imp-vig',`<input id="imp-vig" type="month" min="${cur}" max="${addMonths(cur,3)}" value="${addMonths(cur,1)}">`,'Antes de ese mes cada cliente conserva su plan y precio actuales.')}</div>
     ${F('Archivo CSV','imp-file','<input id="imp-file" type="file">')}
     <div id="imp-out"></div>`;
   openModal({title:'Importar clientes',html,wide:true,onMount(el){
     let rows=null;
-    const opts=()=>({estado:$('#imp-estado',el).value,desde:$('#imp-desde',el).value||cur,ciclo:Number($('#imp-ciclo',el).value)===2?2:1,existentes:$('#imp-comp',el).checked?'completar':'saltear'});
+    const opts=()=>({estado:$('#imp-estado',el).value,desde:$('#imp-desde',el).value||cur,ciclo:Number($('#imp-ciclo',el).value)===2?2:1,existentes:$('#imp-act',el).checked?'actualizar':($('#imp-comp',el).checked?'completar':'saltear'),vigencia:$('#imp-vig',el).value||addMonths(cur,1)});
     const show=()=>{
       const out=$('#imp-out',el);if(!rows)return;
       const a=analyzeImport(rows,opts());
       if(!a.cols.includes('nombre')){out.innerHTML='<div class="notice bad">No encontré una columna de nombre. Revisá la primera fila del archivo.</div>';return;}
       const velF=[...a.velFalta].map(([k,n])=>k+' Mbps ('+n+')');
-      out.innerHTML=`<div class="card flat"><h3>${a.recs.length} ${a.recs.length===1?'cliente listo':'clientes listos'} para importar</h3>
-        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}${a.existen?`<dt>Ya cargados (mismo nombre)</dt><dd>${a.existen} no se vuelven a crear${a.upd.length?`; a ${a.upd.length} se les completan datos que les faltaban`:''}</dd>`:''}
+      out.innerHTML=`<div class="card flat"><h3>${opts().existentes==='actualizar'?a.act.n+' '+(a.act.n===1?'cliente se actualiza':'clientes se actualizan')+' desde '+esc(monthLabel(opts().vigencia)):a.recs.length+' '+(a.recs.length===1?'cliente listo':'clientes listos')+' para importar'}</h3>
+        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}${a.sinMatch?`<dt>Sin cliente con ese nombre</dt><dd>${a.sinMatch} filas se saltean: en este modo no se crean clientes nuevos</dd>`:''}${a.existen?`<dt>Ya cargados (mismo nombre)</dt><dd>${a.existen} no se vuelven a crear${opts().existentes==='actualizar'?`: ${a.act.n} cambian de plan, servicios o precio${a.act.porPlan.size?' ('+[...a.act.porPlan].map(([k,v])=>esc(k)+': '+v).join(' · ')+(a.act.conServ?' · '+a.act.conServ+' con servicios':'')+')':''}${a.act.igual?`; ${a.act.igual} ya estaban así`:''}`:a.upd.length?`; a ${a.upd.length} se les completan datos que les faltaban`:''}</dd>`:''}
         ${velF.length?`<dt>Velocidades sin plan</dt><dd>${velF.map(esc).join(', ')}. Esos clientes quedan sin plan (se cobra igual por su precio). Creá el plan y volvé a importar con «Completar» tildado.</dd>`:''}
         ${a.planesFalta.size?`<dt>Planes que no existen</dt><dd>${[...a.planesFalta].map(esc).join(', ')}. Esos clientes quedan sin plan. Creá los planes antes para que se asignen.</dd>`:''}${a.serviciosFalta.size?`<dt>Servicios que no existen</dt><dd>${[...a.serviciosFalta].map(esc).join(', ')}. Se ignoran: creálos en Planes y volvé a importar o asignalos a mano.</dd>`:''}<dt>Sin ubicación</dt><dd>${a.sinGeo}</dd></dl>
-        <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length||a.upd.length?'':' disabled'}>${a.recs.length?'Importar '+a.recs.length:'Completar '+a.upd.length}${a.recs.length&&a.upd.length?' y completar '+a.upd.length:''}</button></div><div class="hint" id="imp-prog"></div></div>`;
+        <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length||a.upd.length?'':' disabled'}>${(()=>{const v=opts().existentes==='actualizar'?'Actualizar':'Completar';return a.recs.length?'Importar '+a.recs.length:v+' '+a.upd.length;})()}${a.recs.length&&a.upd.length?(opts().existentes==='actualizar'?' y actualizar ':' y completar ')+a.upd.length:''}</button></div><div class="hint" id="imp-prog"></div></div>`;
       const go=$('#imp-go',el);
       if(go)go.addEventListener('click',async()=>{
         go.disabled=true;const total=a.recs.length;
         try{
           await saveImported(a.recs,(done,t)=>{$('#imp-prog',el).textContent=`Importando… ${done} de ${t}`;});
           await updateImported(a.upd,(done,t)=>{$('#imp-prog',el).textContent=`Completando… ${done} de ${t}`;});
-          toast((total?total+' clientes importados':'')+(total&&a.upd.length?' · ':'')+(a.upd.length?a.upd.length+' completados':''));closeModal();
+          toast((total?total+' clientes importados':'')+(total&&a.upd.length?' · ':'')+(a.upd.length?a.upd.length+(opts().existentes==='actualizar'?' actualizados':' completados'):''));closeModal();
         }catch(err){dbError(err);go.disabled=false;$('#imp-prog',el).textContent='No se pudo terminar la importación. Revisá cuántos clientes se cargaron antes de volver a intentar.';}
       });
     };
@@ -290,7 +319,7 @@ function openImport(){
       rd.onerror=()=>toast('No se pudo leer el archivo','bad');
       rd.readAsText(f,'utf-8');
     });
-    ['imp-estado','imp-desde','imp-ciclo','imp-comp'].forEach(i=>$('#'+i,el).addEventListener('change',show));
+    ['imp-estado','imp-desde','imp-ciclo','imp-comp','imp-act','imp-vig'].forEach(i=>$('#'+i,el).addEventListener('change',()=>{$('#imp-vig-box',el).hidden=!$('#imp-act',el).checked;show();}));
     $('#imp-tpl',el).addEventListener('click',()=>saveFile('modelo-clientes.csv',toCsv([IMP_COLS])));
   }});
 }
