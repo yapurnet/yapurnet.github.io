@@ -148,7 +148,7 @@ function openImport(){
     ${F('Cobrar desde (mes)','imp-desde',`<input id="imp-desde" type="month" value="${cur}">`,'Antes de este mes no se genera deuda. Dejalo en el mes actual si no querés arrastrar deudas viejas.')}</div>
     ${F('Ciclo de cobro (si el archivo no lo trae)','imp-ciclo',`<select id="imp-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),n===1)).join('')}</select>`,'En el archivo, la columna «ciclo» puede decir 1 o 2.')}
     <label class="per"><input type="checkbox" id="imp-comp" checked><span class="grow"><b>Completar los clientes que ya están cargados</b><br><span class="small muted">Si el nombre coincide, solo se llenan los datos que les faltan. No se pisa nada de lo que ya tienen.</span></span></label>
-    ${F('Archivo CSV','imp-file','<input id="imp-file" type="file" accept=".csv,.txt,text/csv">')}
+    ${F('Archivo CSV','imp-file','<input id="imp-file" type="file">')}
     <div id="imp-out"></div>`;
   openModal({title:'Importar clientes',html,wide:true,onMount(el){
     let rows=null;

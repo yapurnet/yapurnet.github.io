@@ -1781,7 +1781,7 @@ VIEWS.ajustes={
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
       <div class="list" id="aj-routers"></div></div>
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
-      <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" accept=".json,application/json" hidden></div></div>
+      <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
       <dt>Permisos</dt><dd>Los controla el servidor, no solo la pantalla: un técnico no recibe los pagos ni puede cambiar precios aunque pruebe con otra herramienta.</dd>
       <dt>Pagos</dt><dd>Un pago registrado no se edita: solo se anula, y queda anotado quién lo hizo.</dd></dl></div>`;
@@ -2007,7 +2007,7 @@ function openImport(){
     ${F('Cobrar desde (mes)','imp-desde',`<input id="imp-desde" type="month" value="${cur}">`,'Antes de este mes no se genera deuda. Dejalo en el mes actual si no querés arrastrar deudas viejas.')}</div>
     ${F('Ciclo de cobro (si el archivo no lo trae)','imp-ciclo',`<select id="imp-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),n===1)).join('')}</select>`,'En el archivo, la columna «ciclo» puede decir 1 o 2.')}
     <label class="per"><input type="checkbox" id="imp-comp" checked><span class="grow"><b>Completar los clientes que ya están cargados</b><br><span class="small muted">Si el nombre coincide, solo se llenan los datos que les faltan. No se pisa nada de lo que ya tienen.</span></span></label>
-    ${F('Archivo CSV','imp-file','<input id="imp-file" type="file" accept=".csv,.txt,text/csv">')}
+    ${F('Archivo CSV','imp-file','<input id="imp-file" type="file">')}
     <div id="imp-out"></div>`;
   openModal({title:'Importar clientes',html,wide:true,onMount(el){
     let rows=null;
@@ -3015,7 +3015,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='446c5cd2ac';
+const BUILD='9ac6b607b8';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
