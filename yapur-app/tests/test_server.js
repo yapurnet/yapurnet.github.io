@@ -154,6 +154,14 @@ async function openStream(token) {
     t('vigencia: el técnico no puede tocar el historial de facturación del cliente', r.s === 403 && /facturaci/i.test(r.j.error), r);
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);
     t('vigencia: al técnico no le llega el historial de precios del cliente', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.hp === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { deudaAnt: { m: 1, det: 'x' } } } } }, T);
+    t('deuda anterior: el técnico no puede tocarla (es dato de facturación)', r.s === 403 && /facturaci/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { deudaAnt: { m: 20000, det: 'Octubre 2026', f: '2026-10-30' } } } } }, O);
+    t('deuda anterior: la oficina la carga', r.s === 200 && r.j.data.items.cv1.deudaAnt.m === 20000, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, O);
+    t('deuda anterior: la oficina la ve', r.s === 200 && r.j.data.items.cv1.deudaAnt && r.j.data.items.cv1.deudaAnt.m === 20000, r.j);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T);
+    t('deuda anterior: al técnico (sin permisos de dinero) no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined, r.j);
 
     /* ---- cobros en la calle (técnicos con permiso) ---- */
     const HOY = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10), AYER = new Date(Date.now() - 27 * 3600e3).toISOString().slice(0, 10), PG = HOY.slice(0, 4) + '-s07';
@@ -162,6 +170,8 @@ async function openStream(token) {
     const TEC2_ID = r.j.user.id;
     r = await call('POST', '/api/login', { usuario: 'tec2', clave: 'marcos1' });
     const T2 = r.j.token;
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T2);
+    t('deuda anterior: a quien solo cobra en la calle no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
     const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cr1', concepto: 'instalacion', monto: 30000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
     r = await PAGO(T2, 'pt1');
     t('cobros: cobra una instalación y queda a su nombre', r.s === 200 && r.j.data === null, r);

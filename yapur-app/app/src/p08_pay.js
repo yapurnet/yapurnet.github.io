@@ -1,5 +1,5 @@
 /* ===== cobranzas ===== */
-const CB={sub:'cobrar',fecha:'',mq:'',min:1};
+const CB={sub:'cobrar',fecha:'',mq:'',dq:'',min:1};
 const newRecibo=f=>'R'+f.replace(/-/g,'').slice(2)+'-'+Math.random().toString(36).slice(2,5).toUpperCase();
 const paymentsOfReceipt=r=>[...S.pagos.values()].filter(p=>p.recibo===r);
 const paymentsOn=d=>[...S.pagos.values()].filter(p=>p.fecha===d).sort((a,b)=>(b.hora||'').localeCompare(a.hora||''));
@@ -84,11 +84,29 @@ function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
   const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
-    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
-    ${c&&c.tel?`<a class="btn" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:''}
+    <div class="actions start" style="margin-top:12px">${d.anulado?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
-    ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
-    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));}});
+    ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
+    <div id="rc-tel" class="card flat" hidden><p class="small muted" style="margin:0 0 8px">Este cliente no tiene teléfono cargado. Escribí su número de WhatsApp (con el código de área, sin 0 ni 15) y se abre el chat con el recibo listo para mandar.</p>
+      ${F('WhatsApp del cliente','rc-num','<input id="rc-num" type="tel" inputmode="tel" autocomplete="off" placeholder="3844 56-2605">')}
+      ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
+      <div class="actions"><a class="btn primary" id="rc-wa-go" target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
+    onMount(el){
+      const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
+      const wa=$('#rc-wa',el);
+      if(wa&&wa.tagName==='BUTTON'){   /* sin teléfono cargado: se pide el número en el momento */
+        const box=$('#rc-tel',el),inp=$('#rc-num',el),go=$('#rc-wa-go',el);
+        const num2=()=>waNumber(inp.value),ok=()=>{const n=num2();return n.length>=12&&n.length<=14;};
+        const sync=()=>{go.href=ok()?waUrl(inp.value,txt):'#';};
+        wa.addEventListener('click',()=>{box.hidden=false;inp.focus();});
+        inp.addEventListener('input',sync);
+        go.addEventListener('click',e=>{
+          if(!ok()){e.preventDefault();return toast('Escribí el número con el código de área (por ejemplo 3844 56-2605)','bad');}
+          const sv=$('#rc-save',el);
+          if(c&&sv&&sv.checked)saveClient(c,{tel:inp.value.trim()}).then(()=>toast('Número guardado en la ficha')).catch(dbError);
+        });
+      }
+    }});
 }
 function openAnular(recibo){
   openModal({title:'Anular recibo',html:`<p>El recibo <span class="mono">${esc(recibo)}</span> queda marcado como anulado y los meses vuelven a figurar como pendientes. No se borra, queda en la caja del día.</p>
@@ -100,20 +118,21 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
-function openCobro(clientId){
+function openCobro(clientId,con1){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
   const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reclamos, reconexiones y otros */
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
-  const mens=b.aplica&&!campo,con0=mens?'mensualidad':'instalacion';
+  const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':'instalacion';
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>mens||k!=='mensualidad').map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:true).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
-    <div id="cb-mens" class="list"${mens?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
-    <div id="cb-otro"${mens?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
+    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
     <div class="hint" id="cb-sum"></div>
@@ -129,20 +148,25 @@ function openCobro(clientId){
         const r=num(m.value)||0,t=total();
         h.className='hint'+(r<t?' bad':'');
         h.textContent=!sel().length?'Marcá los meses que paga.':r===t?`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`:r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
+      }else if(con==='deuda_anterior'){
+        const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
+        h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
       }else h.textContent='';
     };
     $('#cb-con',el).addEventListener('click',e=>{const x=e.target.closest('[data-con]');if(!x)return;con=x.dataset.con;manual=false;
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
-      $('#cb-monto',el).value=con==='mensualidad'?'':'';sum();});
+      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';sum();});
     $('#cb-mens',el).addEventListener('change',()=>{manual=false;sum();});
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
+    if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
     sum();
     $('#cb-go',el).addEventListener('click',async()=>{
       const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
       const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
       const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
       const items={};
+      if(con==='deuda_anterior'&&monto>daRest+0.005)return toast('Es más que la deuda anterior: faltan '+fmtMoney(daRest),'bad');
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
@@ -178,6 +202,10 @@ function paymentRow(p){
   const c=S.clientes.get(p.c);
   return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
     <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
+}
+function deudaAntMsg(c,r){
+  const d=c.deudaAnt&&c.deudaAnt.det;
+  return `Hola ${c.nombre.split(' ')[0]}, te escribimos de ${S.ajustes.empresa}. Tenés una deuda anterior pendiente de ${fmtMoney(r)}${d?' ('+d+')':''}. Si ya abonaste, avisanos y lo revisamos. ¡Gracias!`;
 }
 function morosoMsg(c,b){
   const meses=b.periods.filter(p=>p.rest>0&&p.venc&&p.per<=todayStr().slice(0,7)).map(p=>monthLabel(p.per));
@@ -376,7 +404,7 @@ VIEWS.miscobros={
 VIEWS.cobranzas={
   mount(el){
     if(!CB.fecha)CB.fecha=todayStr();
-    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['cortes','A cortar']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
+    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['dant','Deuda anterior'],['cortes','A cortar']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
     if(!subs.some(s=>s[0]===CB.sub))CB.sub=subs.length?subs[0][0]:'cobrar';
     el.innerHTML=`<div class="seg" id="cb-sub">${subs.map(([k,l])=>`<button type="button" data-s="${k}" aria-pressed="${CB.sub===k}">${l}</button>`).join('')}</div><div id="cb-body" class="wrap" style="padding:0"></div>`;
     $('#cb-sub',el).addEventListener('click',e=>{const b=e.target.closest('[data-s]');if(!b)return;CB.sub=b.dataset.s;$$('#cb-sub button',el).forEach(x=>x.setAttribute('aria-pressed',String(x===b)));this.draw(true);});
@@ -388,6 +416,7 @@ VIEWS.cobranzas={
       const rb=e.target.closest('[data-recon]');if(rb)return setSuspension([S.clientes.get(rb.dataset.recon)].filter(Boolean),false);
       const pb=e.target.closest('[data-prom]');if(pb)return openPromesa(pb.dataset.prom);
       const bk=e.target.closest('[data-bulk]');if(bk)return bulkCortes(bk.dataset.bulk);
+      const da=e.target.closest('[data-cobrar-da]');if(da)return openCobro(da.dataset.cobrarDa,'deuda_anterior');
     });
     this.draw(true);
   },
@@ -419,6 +448,19 @@ VIEWS.cobranzas={
         <div class="list" style="margin-top:12px">${ps.length?ps.map(paymentRow).join(''):'<div class="empty"><b>Sin movimientos</b><span>No hay cobros registrados en esta fecha.</span></div>'}</div>`;
     }else if(CB.sub==='cortes'){
       drawCortes(body);
+    }else if(CB.sub==='dant'){
+      if(full||!$('#cb-dq')){
+        body.innerHTML=`<p class="muted small">Lo que cada cliente debía antes de empezar a cobrar de cero. Va aparte de las mensualidades: no genera cortes ni figura como moroso.</p>
+          <div class="toolbar"><div class="line"><input id="cb-dq" class="search" type="search" placeholder="Buscar por nombre, teléfono o domicilio" value="${esc(CB.dq||'')}"></div></div><div id="cb-dtot" class="hint"></div><div class="list" id="cb-dlist"></div>`;
+        $('#cb-dq',body).addEventListener('input',e=>{CB.dq=e.target.value;this.draw(false);});
+      }
+      const rows=searchClients(CB.dq||'',c=>deudaAntRest(c)>0).sort((a,b)=>deudaAntRest(b)-deudaAntRest(a)||norm(a.nombre).localeCompare(norm(b.nombre)));
+      const all=[...S.clientes.values()].filter(c=>c.deudaAnt&&Number(c.deudaAnt.m)>0);
+      const orig=all.reduce((s,c)=>s+Number(c.deudaAnt.m),0),rest=all.reduce((s,c)=>s+deudaAntRest(c),0);
+      $('#cb-dtot',body).textContent=all.length?`${all.filter(c=>deudaAntRest(c)>0).length} con deuda · ${fmtMoney(rest)} por cobrar${orig>rest?` (se cobraron ${fmtMoney(orig-rest)} de ${fmtMoney(orig)})`:''}`:'Nadie tiene deuda anterior cargada. Para dejar a todos en cero usá Ajustes, «Empezar a cobrar de cero».';
+      $('#cb-dlist',body).innerHTML=rows.length?rows.slice(0,80).map(c=>{const r=deudaAntRest(c);return `<div class="item" style="cursor:default"><div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div><div class="s">${can('telefono')?esc(c.tel||'Sin teléfono')+' · ':''}${esc(c.dir||'')}</div>${c.deudaAnt.det?`<div class="s small">${esc(c.deudaAnt.det)}</div>`:''}</div>
+        <div class="side"><b class="tnum">${fmtMoney(r)}</b>${r<Number(c.deudaAnt.m)?`<span class="chip">Pagó ${fmtMoney(Number(c.deudaAnt.m)-r)}</span>`:''}</div>
+        <div class="tags">${can('cobrar')?`<button class="btn small primary" type="button" data-cobrar-da="${esc(c.id)}">Cobrar</button>`:''}${c.tel&&can('telefono')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(c.tel,deudaAntMsg(c,r))}">Recordar por WhatsApp</a>`:''}<button class="btn small ghost" type="button" data-open-client="${esc(c.id)}">Ficha</button></div></div>`;}).join('')+(rows.length>80?`<div class="hint">Se muestran los primeros 80. Usá el buscador para ver el resto.</div>`:''):'<div class="empty"><b>Sin deuda anterior</b><span>Ningún cliente tiene deuda anterior pendiente.</span></div>';
     }else{
       if(full||!$('#cb-mq')){
         body.innerHTML=`<div class="toolbar"><div class="line"><input id="cb-mq" class="search" type="search" placeholder="Buscar moroso por nombre, teléfono o domicilio" value="${esc(CB.mq)}"></div>

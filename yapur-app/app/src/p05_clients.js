@@ -148,6 +148,7 @@ function openClient(id){
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${deudaAntBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
@@ -163,12 +164,27 @@ function openClient(id){
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
       else if(a.dataset.act==='nap')openRed(c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
+      else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
+      else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
       else if(a.dataset.act==='promesa')openPromesa(c.id);
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- deuda anterior en la ficha ----- */
+function deudaAntBlock(c){
+  const d=c.deudaAnt;if(!d||!(Number(d.m)>0)||!(can('cobrar')||can('caja')||can('precios')))return '';
+  const rest=deudaAntRest(c),paid=deudaAntPagado(c);
+  if(rest<=0)return `<div class="hint ok">Deuda anterior saldada: ${esc(fmtMoney(d.m))}${d.det?' · '+esc(d.det):''}.</div>`;
+  return `<div class="notice"><b>Deuda anterior: ${esc(fmtMoney(rest))}</b><div class="small">${d.det?esc(d.det)+'. ':''}Debía ${esc(fmtMoney(d.m))}${paid>0?' y ya pagó '+esc(fmtMoney(paid)):''}. Va aparte de las mensualidades: no genera cortes.</div>
+    <div class="actions start" style="margin-top:8px">${can('cobrar')?'<button class="btn small primary" type="button" data-act="cobrar-da">Cobrar deuda anterior</button>':''}${can('editarClientes')?'<button class="btn small" type="button" data-act="saldar-da">Dar por saldada</button>':''}</div></div>`;
+}
+async function saldarDeudaAnt(id){
+  const c=S.clientes.get(id);if(!c||!c.deudaAnt)return;
+  if(!await askConfirm(`Se da por saldada la deuda anterior de ${c.nombre} (faltan ${fmtMoney(deudaAntRest(c))}). No se registra ningún cobro: la deuda se perdona. ¿Seguro?`,'Dar por saldada'))return;
+  try{await saveClient(c,{deudaAnt:Object.assign({},c.deudaAnt,{m:deudaAntPagado(c),s:todayStr()})});toast('Deuda anterior saldada');closeModal();}catch(e){dbError(e);}
 }
 /* ----- promesas de pago en la ficha ----- */
 function promesaBlock(c,owes){
@@ -229,6 +245,7 @@ function openClientForm(id){
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
       <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`)}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
+      <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
@@ -258,6 +275,15 @@ function openClientForm(id){
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:v('cf-dni'),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+      }
+      if(full&&$('#cf-da',el)){
+        const raw=v('cf-da'),n=raw===''?0:num(raw),det=v('cf-dad')||'';
+        if(n===null||n<0)return toast('La deuda anterior no se entiende','bad');
+        const was=old?deudaAntRest(old):0,wasDet=old&&old.deudaAnt&&old.deudaAnt.det||'';
+        if(Math.abs(n-was)>0.004||det!==wasDet){
+          const paid=old?deudaAntPagado(old):0;
+          patch.deudaAnt=n>0||paid>0?{m:paid+n,det,f:(old&&old.deudaAnt&&old.deudaAnt.f)||todayStr()}:null;
+        }
       }
       if(patch.estado&&patch.estado!=='suspendido')patch.corteMora=null;
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
@@ -301,7 +327,7 @@ VIEWS.clientes={
     const seg=$('#cl-seg');if(!seg)return;
     const fs=[['todos','Todos'],['activo','Activos'],['suspendido','Suspendidos'],['pendiente','Por instalar'],['nogeo','Sin ubicación']];
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
-    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['c1','Ciclo 1'],['c2','Ciclo 2']);
+    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
@@ -309,6 +335,7 @@ VIEWS.clientes={
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
+      if(CL.estado==='dant')return deudaAntRest(c)>0;
       if(CL.estado.startsWith('sv:'))return c.estado!=='baja'&&Array.isArray(c.extras)&&c.extras.includes(CL.estado.slice(3));
       if(CL.estado==='c1'||CL.estado==='c2')return c.estado!=='baja'&&cicloOf(c)===Number(CL.estado[1]);
       return c.estado===CL.estado;

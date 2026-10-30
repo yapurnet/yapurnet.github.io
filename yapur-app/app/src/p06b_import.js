@@ -198,6 +198,58 @@ function openPreciosBloque(){
       show();
     }});
 }
+/* ===== empezar a cobrar de cero ===== */
+const capFirst=s=>String(s).charAt(0).toUpperCase()+String(s).slice(1);
+function mesesTxt(l){
+  const nm=m=>capFirst(monthLabel(m)),nom=m=>monthLabel(m).split(' de ')[0],y=l[0].slice(0,4),same=l.every(m=>m.slice(0,4)===y);
+  if(l.length===1)return nm(l[0]);
+  if(l.length<=3)return same?capFirst(l.slice(0,-1).map(m=>nom(m).toLowerCase()).join(', ')+' y '+nom(l[l.length-1]).toLowerCase())+' de '+y:l.map(nm).join(', ');
+  return (same?nom(l[0]):nm(l[0]))+' a '+monthLabel(l[l.length-1])+' ('+l.length+' meses)';
+}
+/* Qué clientes pasan a cobrarse desde el mes `eff`. Lo que debían antes queda como «deuda anterior» (aparte de las mensualidades). */
+function bulkCero(eff){
+  const out={cambian:[],conDeuda:0,sinDeuda:0,monto:0,yaDesde:0,omitidos:0};
+  for(const c of S.clientes.values()){
+    if(c.estado!=='activo'&&c.estado!=='suspendido'){out.omitidos++;continue;}
+    const from=c.desde||(c.alta?c.alta.slice(0,7):curMonth());
+    if(from>=eff){out.yaDesde++;continue;}
+    const d=deudaPrevia(c,eff),patch={desde:eff};
+    if(d.monto>0){
+      const prev=c.deudaAnt&&Number(c.deudaAnt.m)>0?c.deudaAnt:null;
+      patch.deudaAnt={m:(prev?Number(prev.m):0)+d.monto,det:[prev&&prev.det,mesesTxt(d.meses)].filter(Boolean).join(' + '),f:(prev&&prev.f)||todayStr()};
+      out.conDeuda++;out.monto+=d.monto;
+    }else out.sinDeuda++;
+    out.cambian.push({id:c.id,shard:c._doc||clientShard(c.id),patch});
+  }
+  return out;
+}
+function openCeroBloque(){
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar la facturación de los clientes','bad');
+  const cur=curMonth();
+  openModal({title:'Empezar a cobrar de cero',wide:true,html:`<p class="muted small">Deja a todos los clientes en cero: no se les cobra ni se les genera deuda antes del mes que elijas. Lo que cada uno debía hasta ese momento queda anotado como <b>Deuda anterior</b>: se ve en su ficha, en Cobranzas y en el Resumen, se cobra aparte y <b>no genera cortes</b>.</p>
+    ${S.loaded.clientes&&S.loaded.pagos?'':'<div class="notice bad">Todavía están cargando los clientes y los cobros. Esperá unos segundos y volvé a abrir esto.</div>'}
+    ${F('Empezar a cobrar desde','cz-mes',`<input id="cz-mes" type="month" min="${cur}" max="${addMonths(cur,3)}" value="${addMonths(cur,1)}">`,'Los clientes con «cobrar desde» en ese mes o después no se tocan.')}
+    <div id="cz-out"></div>`,
+    onMount(el){
+      const show=()=>{
+        const eff=$('#cz-mes',el).value,out=$('#cz-out',el);
+        if(!/^\d{4}-\d{2}$/.test(eff)||eff<cur){out.innerHTML='<div class="notice bad">Elegí el mes desde el que se empieza a cobrar (este mes o uno posterior).</div>';return;}
+        if(!S.loaded.clientes||!S.loaded.pagos){out.innerHTML='';return;}
+        const res=bulkCero(eff);
+        out.innerHTML=`<div class="card flat"><h3>${res.cambian.length} ${res.cambian.length===1?'cliente empieza':'clientes empiezan'} a cobrarse desde ${esc(monthLabel(eff))}</h3>
+          <dl class="kv"><dt>Con deuda anterior</dt><dd>${res.conDeuda} ${res.conDeuda===1?'cliente':'clientes'} · ${esc(fmtMoney(res.monto))}</dd><dt>Al día</dt><dd>${res.sinDeuda} ${res.sinDeuda===1?'cliente':'clientes'} sin deuda</dd>${res.yaDesde?`<dt>Ya empiezan ese mes o después</dt><dd>${res.yaDesde} no se tocan</dd>`:''}${res.omitidos?`<dt>Por instalar, de baja o sin servicio</dt><dd>${res.omitidos} no se tocan</dd>`:''}</dl>
+          <div class="actions"><button class="btn primary" type="button" id="cz-go"${res.cambian.length?'':' disabled'}>Poner a ${res.cambian.length} en cero</button></div><div class="hint" id="cz-prog"></div></div>`;
+        const go=$('#cz-go',el);
+        if(go)go.addEventListener('click',async()=>{
+          if(!await askConfirm(`Se pone en cero a ${res.cambian.length} clientes: empiezan a cobrarse desde ${monthLabel(eff)} y ${res.conDeuda} quedan con deuda anterior (${fmtMoney(res.monto)}). ¿Seguro?`,'Poner en cero'))return;
+          go.disabled=true;
+          try{await applyBulkPrecios(res.cambian,(d,t)=>{const h=$('#cz-prog',el);if(h)h.textContent=`Actualizando… ${d} de ${t}`;});toast(res.cambian.length+' clientes en cero');closeModal();}
+          catch(err){dbError(err);go.disabled=false;const h=$('#cz-prog',el);if(h)h.textContent='No se pudo terminar. Los que ya cambiaron no se repiten: volvé a abrir esto y revisá cuántos faltan.';}
+        });
+      };
+      $('#cz-mes',el).addEventListener('input',show);show();
+    }});
+}
 function openImport(){
   const cur=todayStr().slice(0,7);
   const html=`<p class="muted small">Elegí un archivo .csv (en Excel: Guardar como, CSV). La primera fila lleva los nombres de las columnas. Se reconocen: ${IMP_COLS.join(', ')}.</p>

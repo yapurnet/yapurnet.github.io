@@ -40,7 +40,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -115,8 +115,10 @@ function watchSharded(coll,target,key){
 /* ===== cálculo de cobranzas ===== */
 function rebuildDerived(){
   S.paidIdx=new Map();S.payByClient=new Map();S.billCache=new Map();S.cutCache=new Map();
+  S.payDA=new Map();
   for(const p of S.pagos.values()){
     let l=S.payByClient.get(p.c);if(!l){l=[];S.payByClient.set(p.c,l);}l.push(p);
+    if(!p.anulado&&p.concepto==='deuda_anterior')S.payDA.set(p.c,(S.payDA.get(p.c)||0)+(Number(p.monto)||0));
     if(p.anulado||p.concepto!=='mensualidad'||!p.per)continue;
     let m=S.paidIdx.get(p.c);if(!m){m=new Map();S.paidIdx.set(p.c,m);}
     m.set(p.per,(m.get(p.per)||0)+(Number(p.monto)||0));
@@ -206,6 +208,18 @@ function proximoCorte(cy){
   return {per,fecha:d,nota:corteNota(per,cy)};
 }
 
+/* ----- deuda anterior -----
+   Lo que el cliente debía antes de empezar a cobrar de cero. Va aparte de las mensualidades: no genera cortes ni «morosos».
+   c.deudaAnt = {m: monto original, det: 'Octubre 2026', f: fecha en que se pasó a cero}. Lo que falta = m − cobros de «Deuda anterior» no anulados. */
+const deudaAntPagado=c=>(S.payDA&&S.payDA.get(c.id))||0;
+const deudaAntRest=c=>{const d=c&&c.deudaAnt;if(!d||!(Number(d.m)>0))return 0;return Math.max(0,Math.round((Number(d.m)-deudaAntPagado(c))*100)/100);};
+const deudaAntChip=c=>(can('cobrar')||can('caja')||can('precios'))&&deudaAntRest(c)>0?`<span class="chip warn">Deuda anterior · ${fmtMoney(deudaAntRest(c))}</span>`:'';
+/* qué meses adeuda hoy un cliente antes del mes `eff` (los que se pasan a cero) */
+function deudaPrevia(c,eff){
+  const b=billing(c),pend=b.aplica?b.periods.filter(p=>p.per<eff&&p.rest>0):[];
+  return {monto:pend.reduce((s,p)=>s+p.rest,0),meses:pend.map(p=>p.per)};
+}
+
 /* ----- facturación ----- */
 function billing(c,withNext){
   const key=c.id+(withNext?'+':'');
@@ -266,7 +280,8 @@ function cutLine(c){
   if(s.k==='plazo')return {cls:'info',txt:`${monthLabel(s.first.per)}: paga del ${dm(s.first.desde)} al ${dm(s.first.due)}. Corte el ${dmy(s.corte)}.`};
   return null;
 }
-function billChip(c){
+const billChip=c=>{const d=deudaAntChip(c),b=billChip0(c);return (d?b.replace('>Al día<','>Mes al día<'):b)+d;};
+function billChip0(c){
   if(!(can('cobrar')||can('caja')))return '';
   const s=cutState(c),b=s.b;if(!b.aplica)return '';
   if(b.price<=0)return '<span class="chip warn">Sin precio</span>';

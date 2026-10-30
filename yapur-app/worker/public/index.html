@@ -230,6 +230,8 @@ button.chip[hidden],.netbar[hidden]{display:none}
 @media (max-width:359px){.kpi .n{font-size:22px}}
 /* tablas en el celular: menos aire para que entren las cuatro columnas sin deslizar */
 @media (max-width:480px){th,td{padding:8px 8px}th{letter-spacing:.02em;font-size:11px}th.right,td.right{white-space:nowrap}}
+.kpi.tap{cursor:pointer}
+.kpi.tap:hover{border-color:var(--accent-line)}
 
 </style>
 </head>
@@ -289,7 +291,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -364,8 +366,10 @@ function watchSharded(coll,target,key){
 /* ===== cálculo de cobranzas ===== */
 function rebuildDerived(){
   S.paidIdx=new Map();S.payByClient=new Map();S.billCache=new Map();S.cutCache=new Map();
+  S.payDA=new Map();
   for(const p of S.pagos.values()){
     let l=S.payByClient.get(p.c);if(!l){l=[];S.payByClient.set(p.c,l);}l.push(p);
+    if(!p.anulado&&p.concepto==='deuda_anterior')S.payDA.set(p.c,(S.payDA.get(p.c)||0)+(Number(p.monto)||0));
     if(p.anulado||p.concepto!=='mensualidad'||!p.per)continue;
     let m=S.paidIdx.get(p.c);if(!m){m=new Map();S.paidIdx.set(p.c,m);}
     m.set(p.per,(m.get(p.per)||0)+(Number(p.monto)||0));
@@ -455,6 +459,18 @@ function proximoCorte(cy){
   return {per,fecha:d,nota:corteNota(per,cy)};
 }
 
+/* ----- deuda anterior -----
+   Lo que el cliente debía antes de empezar a cobrar de cero. Va aparte de las mensualidades: no genera cortes ni «morosos».
+   c.deudaAnt = {m: monto original, det: 'Octubre 2026', f: fecha en que se pasó a cero}. Lo que falta = m − cobros de «Deuda anterior» no anulados. */
+const deudaAntPagado=c=>(S.payDA&&S.payDA.get(c.id))||0;
+const deudaAntRest=c=>{const d=c&&c.deudaAnt;if(!d||!(Number(d.m)>0))return 0;return Math.max(0,Math.round((Number(d.m)-deudaAntPagado(c))*100)/100);};
+const deudaAntChip=c=>(can('cobrar')||can('caja')||can('precios'))&&deudaAntRest(c)>0?`<span class="chip warn">Deuda anterior · ${fmtMoney(deudaAntRest(c))}</span>`:'';
+/* qué meses adeuda hoy un cliente antes del mes `eff` (los que se pasan a cero) */
+function deudaPrevia(c,eff){
+  const b=billing(c),pend=b.aplica?b.periods.filter(p=>p.per<eff&&p.rest>0):[];
+  return {monto:pend.reduce((s,p)=>s+p.rest,0),meses:pend.map(p=>p.per)};
+}
+
 /* ----- facturación ----- */
 function billing(c,withNext){
   const key=c.id+(withNext?'+':'');
@@ -515,7 +531,8 @@ function cutLine(c){
   if(s.k==='plazo')return {cls:'info',txt:`${monthLabel(s.first.per)}: paga del ${dm(s.first.desde)} al ${dm(s.first.due)}. Corte el ${dmy(s.corte)}.`};
   return null;
 }
-function billChip(c){
+const billChip=c=>{const d=deudaAntChip(c),b=billChip0(c);return (d?b.replace('>Al día<','>Mes al día<'):b)+d;};
+function billChip0(c){
   if(!(can('cobrar')||can('caja')))return '';
   const s=cutState(c),b=s.b;if(!b.aplica)return '';
   if(b.price<=0)return '<span class="chip warn">Sin precio</span>';
@@ -1021,6 +1038,7 @@ function openClient(id){
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${deudaAntBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
@@ -1036,12 +1054,27 @@ function openClient(id){
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
       else if(a.dataset.act==='nap')openRed(c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
+      else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
+      else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
       else if(a.dataset.act==='promesa')openPromesa(c.id);
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- deuda anterior en la ficha ----- */
+function deudaAntBlock(c){
+  const d=c.deudaAnt;if(!d||!(Number(d.m)>0)||!(can('cobrar')||can('caja')||can('precios')))return '';
+  const rest=deudaAntRest(c),paid=deudaAntPagado(c);
+  if(rest<=0)return `<div class="hint ok">Deuda anterior saldada: ${esc(fmtMoney(d.m))}${d.det?' · '+esc(d.det):''}.</div>`;
+  return `<div class="notice"><b>Deuda anterior: ${esc(fmtMoney(rest))}</b><div class="small">${d.det?esc(d.det)+'. ':''}Debía ${esc(fmtMoney(d.m))}${paid>0?' y ya pagó '+esc(fmtMoney(paid)):''}. Va aparte de las mensualidades: no genera cortes.</div>
+    <div class="actions start" style="margin-top:8px">${can('cobrar')?'<button class="btn small primary" type="button" data-act="cobrar-da">Cobrar deuda anterior</button>':''}${can('editarClientes')?'<button class="btn small" type="button" data-act="saldar-da">Dar por saldada</button>':''}</div></div>`;
+}
+async function saldarDeudaAnt(id){
+  const c=S.clientes.get(id);if(!c||!c.deudaAnt)return;
+  if(!await askConfirm(`Se da por saldada la deuda anterior de ${c.nombre} (faltan ${fmtMoney(deudaAntRest(c))}). No se registra ningún cobro: la deuda se perdona. ¿Seguro?`,'Dar por saldada'))return;
+  try{await saveClient(c,{deudaAnt:Object.assign({},c.deudaAnt,{m:deudaAntPagado(c),s:todayStr()})});toast('Deuda anterior saldada');closeModal();}catch(e){dbError(e);}
 }
 /* ----- promesas de pago en la ficha ----- */
 function promesaBlock(c,owes){
@@ -1102,6 +1135,7 @@ function openClientForm(id){
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
       <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`)}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
+      <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
@@ -1131,6 +1165,15 @@ function openClientForm(id){
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:v('cf-dni'),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+      }
+      if(full&&$('#cf-da',el)){
+        const raw=v('cf-da'),n=raw===''?0:num(raw),det=v('cf-dad')||'';
+        if(n===null||n<0)return toast('La deuda anterior no se entiende','bad');
+        const was=old?deudaAntRest(old):0,wasDet=old&&old.deudaAnt&&old.deudaAnt.det||'';
+        if(Math.abs(n-was)>0.004||det!==wasDet){
+          const paid=old?deudaAntPagado(old):0;
+          patch.deudaAnt=n>0||paid>0?{m:paid+n,det,f:(old&&old.deudaAnt&&old.deudaAnt.f)||todayStr()}:null;
+        }
       }
       if(patch.estado&&patch.estado!=='suspendido')patch.corteMora=null;
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
@@ -1174,7 +1217,7 @@ VIEWS.clientes={
     const seg=$('#cl-seg');if(!seg)return;
     const fs=[['todos','Todos'],['activo','Activos'],['suspendido','Suspendidos'],['pendiente','Por instalar'],['nogeo','Sin ubicación']];
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
-    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['c1','Ciclo 1'],['c2','Ciclo 2']);
+    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
@@ -1182,6 +1225,7 @@ VIEWS.clientes={
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
+      if(CL.estado==='dant')return deudaAntRest(c)>0;
       if(CL.estado.startsWith('sv:'))return c.estado!=='baja'&&Array.isArray(c.extras)&&c.extras.includes(CL.estado.slice(3));
       if(CL.estado==='c1'||CL.estado==='c2')return c.estado!=='baja'&&cicloOf(c)===Number(CL.estado[1]);
       return c.estado===CL.estado;
@@ -1811,7 +1855,7 @@ VIEWS.ajustes={
       <p class="muted small">Cada persona entra con su usuario y su clave. Vos elegís qué puede ver y hacer. Los técnicos aparecen para asignarles órdenes.</p>
       <div class="list" id="aj-users"></div></div>
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
-      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
+      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-cero">Empezar a cobrar de cero</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
       <div class="list" id="aj-routers"></div></div>
@@ -1879,6 +1923,7 @@ VIEWS.ajustes={
     loadUsers();bindRouters(el);
     $('#aj-imp',el).addEventListener('click',()=>openImport());
     $('#aj-prb',el).addEventListener('click',()=>openPreciosBloque());
+    $('#aj-cero',el).addEventListener('click',()=>openCeroBloque());
     $('#aj-exc',el).addEventListener('click',exportClientes);
     $('#aj-exp',el).addEventListener('click',exportPagos);
     this.update();
@@ -2095,6 +2140,58 @@ function openPreciosBloque(){
       };
       ['pb-max','pb-min','pb-new','pb-mes','pb-exc'].forEach(i=>$('#'+i,el).addEventListener('input',show));
       show();
+    }});
+}
+/* ===== empezar a cobrar de cero ===== */
+const capFirst=s=>String(s).charAt(0).toUpperCase()+String(s).slice(1);
+function mesesTxt(l){
+  const nm=m=>capFirst(monthLabel(m)),nom=m=>monthLabel(m).split(' de ')[0],y=l[0].slice(0,4),same=l.every(m=>m.slice(0,4)===y);
+  if(l.length===1)return nm(l[0]);
+  if(l.length<=3)return same?capFirst(l.slice(0,-1).map(m=>nom(m).toLowerCase()).join(', ')+' y '+nom(l[l.length-1]).toLowerCase())+' de '+y:l.map(nm).join(', ');
+  return (same?nom(l[0]):nm(l[0]))+' a '+monthLabel(l[l.length-1])+' ('+l.length+' meses)';
+}
+/* Qué clientes pasan a cobrarse desde el mes `eff`. Lo que debían antes queda como «deuda anterior» (aparte de las mensualidades). */
+function bulkCero(eff){
+  const out={cambian:[],conDeuda:0,sinDeuda:0,monto:0,yaDesde:0,omitidos:0};
+  for(const c of S.clientes.values()){
+    if(c.estado!=='activo'&&c.estado!=='suspendido'){out.omitidos++;continue;}
+    const from=c.desde||(c.alta?c.alta.slice(0,7):curMonth());
+    if(from>=eff){out.yaDesde++;continue;}
+    const d=deudaPrevia(c,eff),patch={desde:eff};
+    if(d.monto>0){
+      const prev=c.deudaAnt&&Number(c.deudaAnt.m)>0?c.deudaAnt:null;
+      patch.deudaAnt={m:(prev?Number(prev.m):0)+d.monto,det:[prev&&prev.det,mesesTxt(d.meses)].filter(Boolean).join(' + '),f:(prev&&prev.f)||todayStr()};
+      out.conDeuda++;out.monto+=d.monto;
+    }else out.sinDeuda++;
+    out.cambian.push({id:c.id,shard:c._doc||clientShard(c.id),patch});
+  }
+  return out;
+}
+function openCeroBloque(){
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar la facturación de los clientes','bad');
+  const cur=curMonth();
+  openModal({title:'Empezar a cobrar de cero',wide:true,html:`<p class="muted small">Deja a todos los clientes en cero: no se les cobra ni se les genera deuda antes del mes que elijas. Lo que cada uno debía hasta ese momento queda anotado como <b>Deuda anterior</b>: se ve en su ficha, en Cobranzas y en el Resumen, se cobra aparte y <b>no genera cortes</b>.</p>
+    ${S.loaded.clientes&&S.loaded.pagos?'':'<div class="notice bad">Todavía están cargando los clientes y los cobros. Esperá unos segundos y volvé a abrir esto.</div>'}
+    ${F('Empezar a cobrar desde','cz-mes',`<input id="cz-mes" type="month" min="${cur}" max="${addMonths(cur,3)}" value="${addMonths(cur,1)}">`,'Los clientes con «cobrar desde» en ese mes o después no se tocan.')}
+    <div id="cz-out"></div>`,
+    onMount(el){
+      const show=()=>{
+        const eff=$('#cz-mes',el).value,out=$('#cz-out',el);
+        if(!/^\d{4}-\d{2}$/.test(eff)||eff<cur){out.innerHTML='<div class="notice bad">Elegí el mes desde el que se empieza a cobrar (este mes o uno posterior).</div>';return;}
+        if(!S.loaded.clientes||!S.loaded.pagos){out.innerHTML='';return;}
+        const res=bulkCero(eff);
+        out.innerHTML=`<div class="card flat"><h3>${res.cambian.length} ${res.cambian.length===1?'cliente empieza':'clientes empiezan'} a cobrarse desde ${esc(monthLabel(eff))}</h3>
+          <dl class="kv"><dt>Con deuda anterior</dt><dd>${res.conDeuda} ${res.conDeuda===1?'cliente':'clientes'} · ${esc(fmtMoney(res.monto))}</dd><dt>Al día</dt><dd>${res.sinDeuda} ${res.sinDeuda===1?'cliente':'clientes'} sin deuda</dd>${res.yaDesde?`<dt>Ya empiezan ese mes o después</dt><dd>${res.yaDesde} no se tocan</dd>`:''}${res.omitidos?`<dt>Por instalar, de baja o sin servicio</dt><dd>${res.omitidos} no se tocan</dd>`:''}</dl>
+          <div class="actions"><button class="btn primary" type="button" id="cz-go"${res.cambian.length?'':' disabled'}>Poner a ${res.cambian.length} en cero</button></div><div class="hint" id="cz-prog"></div></div>`;
+        const go=$('#cz-go',el);
+        if(go)go.addEventListener('click',async()=>{
+          if(!await askConfirm(`Se pone en cero a ${res.cambian.length} clientes: empiezan a cobrarse desde ${monthLabel(eff)} y ${res.conDeuda} quedan con deuda anterior (${fmtMoney(res.monto)}). ¿Seguro?`,'Poner en cero'))return;
+          go.disabled=true;
+          try{await applyBulkPrecios(res.cambian,(d,t)=>{const h=$('#cz-prog',el);if(h)h.textContent=`Actualizando… ${d} de ${t}`;});toast(res.cambian.length+' clientes en cero');closeModal();}
+          catch(err){dbError(err);go.disabled=false;const h=$('#cz-prog',el);if(h)h.textContent='No se pudo terminar. Los que ya cambiaron no se repiten: volvé a abrir esto y revisá cuántos faltan.';}
+        });
+      };
+      $('#cz-mes',el).addEventListener('input',show);show();
     }});
 }
 function openImport(){
@@ -2525,7 +2622,7 @@ function cobroOrdenHTML(o){
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
     <div id="ff-cobro-box" hidden>
-      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad'&&k!=='deuda_anterior').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
     </div></div>`;
@@ -2629,7 +2726,7 @@ VIEWS.ordenes={
 };
 
 /* ===== cobranzas ===== */
-const CB={sub:'cobrar',fecha:'',mq:'',min:1};
+const CB={sub:'cobrar',fecha:'',mq:'',dq:'',min:1};
 const newRecibo=f=>'R'+f.replace(/-/g,'').slice(2)+'-'+Math.random().toString(36).slice(2,5).toUpperCase();
 const paymentsOfReceipt=r=>[...S.pagos.values()].filter(p=>p.recibo===r);
 const paymentsOn=d=>[...S.pagos.values()].filter(p=>p.fecha===d).sort((a,b)=>(b.hora||'').localeCompare(a.hora||''));
@@ -2714,11 +2811,29 @@ function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
   const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
-    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
-    ${c&&c.tel?`<a class="btn" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:''}
+    <div class="actions start" style="margin-top:12px">${d.anulado?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
-    ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
-    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));}});
+    ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
+    <div id="rc-tel" class="card flat" hidden><p class="small muted" style="margin:0 0 8px">Este cliente no tiene teléfono cargado. Escribí su número de WhatsApp (con el código de área, sin 0 ni 15) y se abre el chat con el recibo listo para mandar.</p>
+      ${F('WhatsApp del cliente','rc-num','<input id="rc-num" type="tel" inputmode="tel" autocomplete="off" placeholder="3844 56-2605">')}
+      ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
+      <div class="actions"><a class="btn primary" id="rc-wa-go" target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
+    onMount(el){
+      const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
+      const wa=$('#rc-wa',el);
+      if(wa&&wa.tagName==='BUTTON'){   /* sin teléfono cargado: se pide el número en el momento */
+        const box=$('#rc-tel',el),inp=$('#rc-num',el),go=$('#rc-wa-go',el);
+        const num2=()=>waNumber(inp.value),ok=()=>{const n=num2();return n.length>=12&&n.length<=14;};
+        const sync=()=>{go.href=ok()?waUrl(inp.value,txt):'#';};
+        wa.addEventListener('click',()=>{box.hidden=false;inp.focus();});
+        inp.addEventListener('input',sync);
+        go.addEventListener('click',e=>{
+          if(!ok()){e.preventDefault();return toast('Escribí el número con el código de área (por ejemplo 3844 56-2605)','bad');}
+          const sv=$('#rc-save',el);
+          if(c&&sv&&sv.checked)saveClient(c,{tel:inp.value.trim()}).then(()=>toast('Número guardado en la ficha')).catch(dbError);
+        });
+      }
+    }});
 }
 function openAnular(recibo){
   openModal({title:'Anular recibo',html:`<p>El recibo <span class="mono">${esc(recibo)}</span> queda marcado como anulado y los meses vuelven a figurar como pendientes. No se borra, queda en la caja del día.</p>
@@ -2730,20 +2845,21 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
-function openCobro(clientId){
+function openCobro(clientId,con1){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
   const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reclamos, reconexiones y otros */
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
-  const mens=b.aplica&&!campo,con0=mens?'mensualidad':'instalacion';
+  const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':'instalacion';
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>mens||k!=='mensualidad').map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:true).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
-    <div id="cb-mens" class="list"${mens?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
-    <div id="cb-otro"${mens?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
+    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
     <div class="hint" id="cb-sum"></div>
@@ -2759,20 +2875,25 @@ function openCobro(clientId){
         const r=num(m.value)||0,t=total();
         h.className='hint'+(r<t?' bad':'');
         h.textContent=!sel().length?'Marcá los meses que paga.':r===t?`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`:r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
+      }else if(con==='deuda_anterior'){
+        const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
+        h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
       }else h.textContent='';
     };
     $('#cb-con',el).addEventListener('click',e=>{const x=e.target.closest('[data-con]');if(!x)return;con=x.dataset.con;manual=false;
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
-      $('#cb-monto',el).value=con==='mensualidad'?'':'';sum();});
+      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';sum();});
     $('#cb-mens',el).addEventListener('change',()=>{manual=false;sum();});
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
+    if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
     sum();
     $('#cb-go',el).addEventListener('click',async()=>{
       const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
       const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
       const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
       const items={};
+      if(con==='deuda_anterior'&&monto>daRest+0.005)return toast('Es más que la deuda anterior: faltan '+fmtMoney(daRest),'bad');
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
@@ -2808,6 +2929,10 @@ function paymentRow(p){
   const c=S.clientes.get(p.c);
   return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
     <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
+}
+function deudaAntMsg(c,r){
+  const d=c.deudaAnt&&c.deudaAnt.det;
+  return `Hola ${c.nombre.split(' ')[0]}, te escribimos de ${S.ajustes.empresa}. Tenés una deuda anterior pendiente de ${fmtMoney(r)}${d?' ('+d+')':''}. Si ya abonaste, avisanos y lo revisamos. ¡Gracias!`;
 }
 function morosoMsg(c,b){
   const meses=b.periods.filter(p=>p.rest>0&&p.venc&&p.per<=todayStr().slice(0,7)).map(p=>monthLabel(p.per));
@@ -3006,7 +3131,7 @@ VIEWS.miscobros={
 VIEWS.cobranzas={
   mount(el){
     if(!CB.fecha)CB.fecha=todayStr();
-    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['cortes','A cortar']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
+    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['dant','Deuda anterior'],['cortes','A cortar']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
     if(!subs.some(s=>s[0]===CB.sub))CB.sub=subs.length?subs[0][0]:'cobrar';
     el.innerHTML=`<div class="seg" id="cb-sub">${subs.map(([k,l])=>`<button type="button" data-s="${k}" aria-pressed="${CB.sub===k}">${l}</button>`).join('')}</div><div id="cb-body" class="wrap" style="padding:0"></div>`;
     $('#cb-sub',el).addEventListener('click',e=>{const b=e.target.closest('[data-s]');if(!b)return;CB.sub=b.dataset.s;$$('#cb-sub button',el).forEach(x=>x.setAttribute('aria-pressed',String(x===b)));this.draw(true);});
@@ -3018,6 +3143,7 @@ VIEWS.cobranzas={
       const rb=e.target.closest('[data-recon]');if(rb)return setSuspension([S.clientes.get(rb.dataset.recon)].filter(Boolean),false);
       const pb=e.target.closest('[data-prom]');if(pb)return openPromesa(pb.dataset.prom);
       const bk=e.target.closest('[data-bulk]');if(bk)return bulkCortes(bk.dataset.bulk);
+      const da=e.target.closest('[data-cobrar-da]');if(da)return openCobro(da.dataset.cobrarDa,'deuda_anterior');
     });
     this.draw(true);
   },
@@ -3049,6 +3175,19 @@ VIEWS.cobranzas={
         <div class="list" style="margin-top:12px">${ps.length?ps.map(paymentRow).join(''):'<div class="empty"><b>Sin movimientos</b><span>No hay cobros registrados en esta fecha.</span></div>'}</div>`;
     }else if(CB.sub==='cortes'){
       drawCortes(body);
+    }else if(CB.sub==='dant'){
+      if(full||!$('#cb-dq')){
+        body.innerHTML=`<p class="muted small">Lo que cada cliente debía antes de empezar a cobrar de cero. Va aparte de las mensualidades: no genera cortes ni figura como moroso.</p>
+          <div class="toolbar"><div class="line"><input id="cb-dq" class="search" type="search" placeholder="Buscar por nombre, teléfono o domicilio" value="${esc(CB.dq||'')}"></div></div><div id="cb-dtot" class="hint"></div><div class="list" id="cb-dlist"></div>`;
+        $('#cb-dq',body).addEventListener('input',e=>{CB.dq=e.target.value;this.draw(false);});
+      }
+      const rows=searchClients(CB.dq||'',c=>deudaAntRest(c)>0).sort((a,b)=>deudaAntRest(b)-deudaAntRest(a)||norm(a.nombre).localeCompare(norm(b.nombre)));
+      const all=[...S.clientes.values()].filter(c=>c.deudaAnt&&Number(c.deudaAnt.m)>0);
+      const orig=all.reduce((s,c)=>s+Number(c.deudaAnt.m),0),rest=all.reduce((s,c)=>s+deudaAntRest(c),0);
+      $('#cb-dtot',body).textContent=all.length?`${all.filter(c=>deudaAntRest(c)>0).length} con deuda · ${fmtMoney(rest)} por cobrar${orig>rest?` (se cobraron ${fmtMoney(orig-rest)} de ${fmtMoney(orig)})`:''}`:'Nadie tiene deuda anterior cargada. Para dejar a todos en cero usá Ajustes, «Empezar a cobrar de cero».';
+      $('#cb-dlist',body).innerHTML=rows.length?rows.slice(0,80).map(c=>{const r=deudaAntRest(c);return `<div class="item" style="cursor:default"><div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div><div class="s">${can('telefono')?esc(c.tel||'Sin teléfono')+' · ':''}${esc(c.dir||'')}</div>${c.deudaAnt.det?`<div class="s small">${esc(c.deudaAnt.det)}</div>`:''}</div>
+        <div class="side"><b class="tnum">${fmtMoney(r)}</b>${r<Number(c.deudaAnt.m)?`<span class="chip">Pagó ${fmtMoney(Number(c.deudaAnt.m)-r)}</span>`:''}</div>
+        <div class="tags">${can('cobrar')?`<button class="btn small primary" type="button" data-cobrar-da="${esc(c.id)}">Cobrar</button>`:''}${c.tel&&can('telefono')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(c.tel,deudaAntMsg(c,r))}">Recordar por WhatsApp</a>`:''}<button class="btn small ghost" type="button" data-open-client="${esc(c.id)}">Ficha</button></div></div>`;}).join('')+(rows.length>80?`<div class="hint">Se muestran los primeros 80. Usá el buscador para ver el resto.</div>`:''):'<div class="empty"><b>Sin deuda anterior</b><span>Ningún cliente tiene deuda anterior pendiente.</span></div>';
     }else{
       if(full||!$('#cb-mq')){
         body.innerHTML=`<div class="toolbar"><div class="line"><input id="cb-mq" class="search" type="search" placeholder="Buscar moroso por nombre, teléfono o domicilio" value="${esc(CB.mq)}"></div>
@@ -3072,11 +3211,12 @@ VIEWS.resumen={
   update(){
     const root=$('#rs');if(!root)return;
     const today=todayStr(),cur=today.slice(0,7);
-    let act=0,susp=0,ingreso=0,deuda=0,morosos=0;const planCount=new Map(),svCount=new Map(),debtors=[];
+    let act=0,susp=0,ingreso=0,deuda=0,morosos=0,dant=0,dantN=0;const planCount=new Map(),svCount=new Map(),debtors=[];
     for(const c of S.clientes.values()){
       if(c.estado==='activo'){act++;ingreso+=priceOf(c);if(c.planId)planCount.set(c.planId,(planCount.get(c.planId)||0)+1);extrasOf(c).forEach(s=>svCount.set(s.id,(svCount.get(s.id)||0)+1));}
       else if(c.estado==='suspendido')susp++;
       const b=billing(c);if(b.vencidos>0){morosos++;deuda+=b.deuda;debtors.push({c,b});}
+      const dr=deudaAntRest(c);if(dr>0){dant+=dr;dantN++;}
     }
     let hoy=0,mes=0;const porMes={};
     for(const p of S.pagos.values()){if(p.anulado)continue;const m=Number(p.monto)||0;if(p.fecha===today)hoy+=m;const ym=p.fecha.slice(0,7);porMes[ym]=(porMes[ym]||0)+m;}
@@ -3094,6 +3234,7 @@ VIEWS.resumen={
       <div class="kpi"><span class="n">${fmtMoney(hoy)}</span><span class="l">Cobrado hoy</span></div>
       <div class="kpi"><span class="n">${fmtMoney(mes)}</span><span class="l">Cobrado en ${esc(monthLabel(cur))}</span></div>
       <div class="kpi bad"><span class="n">${fmtMoney(deuda)}</span><span class="l">Deuda vencida · ${morosos} ${morosos===1?'cliente':'clientes'}</span></div>
+      ${dantN&&can('caja')?`<div class="kpi tap" data-go="cobranzas" data-sub="dant" role="button" tabindex="0"><span class="n">${fmtMoney(dant)}</span><span class="l">Deuda anterior · ${dantN} ${dantN===1?'cliente':'clientes'}</span></div>`:''}
       <div class="kpi"><span class="n">${fmtMoney(ingreso)}</span><span class="l">Facturación mensual de activos</span></div>
       <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div></div>
     <div class="card"><div class="head-row"><h3>Cortes y promesas</h3>${can('caja')?'<button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Ver lista</button>':''}</div>
@@ -3113,7 +3254,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='3f23fa59b6';
+const BUILD='f2095bee0c';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
