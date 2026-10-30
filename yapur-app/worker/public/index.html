@@ -1776,7 +1776,7 @@ VIEWS.ajustes={
       <p class="muted small">Cada persona entra con su usuario y su clave. Vos elegís qué puede ver y hacer. Los técnicos aparecen para asignarles órdenes.</p>
       <div class="list" id="aj-users"></div></div>
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
-      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
+      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
       <div class="list" id="aj-routers"></div></div>
@@ -1839,6 +1839,7 @@ VIEWS.ajustes={
     $('#aj-rs-file',el).addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)restoreFromFile(f);});
     loadUsers();bindRouters(el);
     $('#aj-imp',el).addEventListener('click',()=>openImport());
+    $('#aj-prb',el).addEventListener('click',()=>openPreciosBloque());
     $('#aj-exc',el).addEventListener('click',exportClientes);
     $('#aj-exp',el).addEventListener('click',exportPagos);
     this.update();
@@ -1962,7 +1963,9 @@ function analyzeImport(rows,opts){
         const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
         fill('dni',g('dni'));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
         fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
-        if(plan)fill('planId',plan.id);
+        if(plan){fill('planId',plan.id);
+          if(patch.planId&&hasNum(ex.precio)){const hp=Array.isArray(ex.hp)?ex.hp:[],ref=hp.length?addMonths(hp[hp.length-1].h,1):curMonth();
+            if(Number(ex.precio)===histPrice(plan,ref))patch.precio=null;}}   /* su precio especial coincide con el del plan: ahora lo da el plan */
         if(precio!==null&&!hasNum(ex.precio))patch.precio=precio;
         const sinPagos=S.loaded.pagos&&!(S.paidIdx.get(ex.id)||new Map()).size;   /* con pagos cargados no se toca desde cuándo se cobra */
         if(sinPagos){if(idx.desde!==undefined&&parseMes(g('desde')))patch.desde=desde;if(idx.ciclo!==undefined&&g('ciclo'))patch.ciclo=parseCiclo(g('ciclo'),cicloOf(ex));}
@@ -1998,6 +2001,62 @@ async function updateImported(upd,prog){
   upd.forEach(u=>{(groups[u.shard]=groups[u.shard]||{})[u.id]=Object.assign({},u.patch,{mod:Date.now()});});
   let done=0;const total=upd.length;
   for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;if(prog)prog(done,total);}
+}
+/* ===== subir precios en bloque ===== */
+/* Calcula qué clientes pasan al precio nuevo desde el mes `desde`. Los meses anteriores conservan su precio (queda guardado como vigencia). */
+function bulkPrecios(o){
+  const eff=o.desde,prev=addMonths(eff,-1),ex=norm(o.excluir||'').trim();
+  const out={cambian:[],bajo:0,nota:0,hist:0,porPrecio:new Map()};
+  for(const c of S.clientes.values()){
+    if(c.estado!=='activo'&&c.estado!=='suspendido')continue;
+    const base=priceBaseAt(c,eff);
+    if(!(base>0)||base>o.max||base>=o.nuevo)continue;
+    if(base<o.min){out.bajo++;continue;}
+    if(ex&&norm(c.notas||'').includes(ex)){out.nota++;continue;}
+    const hp=Array.isArray(c.hp)?c.hp:[];
+    if(hp.length&&hp[hp.length-1].h>=prev){out.hist++;continue;}   /* ya tiene un cambio de precio en esas fechas: se revisa a mano */
+    const plan=S.planes.get(c.planId),precio=plan&&histPrice(plan,eff)===o.nuevo?null:o.nuevo;
+    out.cambian.push({id:c.id,shard:c._doc||clientShard(c.id),de:base,patch:{precio,hp:hp.concat([{h:prev,planId:c.planId||null,precio:hasNum(c.precio)?Number(c.precio):null,extras:Array.isArray(c.extras)?c.extras:[]}])}});
+    out.porPrecio.set(base,(out.porPrecio.get(base)||0)+1);
+  }
+  return out;
+}
+async function applyBulkPrecios(list,prog){
+  const groups={};
+  list.forEach(u=>{(groups[u.shard]=groups[u.shard]||{})[u.id]=Object.assign({},u.patch,{mod:Date.now()});});
+  let done=0;const total=list.length;
+  for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;if(prog)prog(done,total);}
+}
+function openPreciosBloque(){
+  const cur=curMonth();
+  openModal({title:'Subir precios de abonos',wide:true,html:`<p class="muted small">Los clientes cuyo abono esté entre los dos montos pasan al precio nuevo desde el mes que elijas. Los meses anteriores conservan el precio que tenían. Los servicios adicionales no se tocan.</p>
+    <div class="grid2">${F('Pagan hasta ($)','pb-max','<input id="pb-max" type="text" inputmode="decimal" value="17.000" autocomplete="off">')}${F('y desde ($)','pb-min','<input id="pb-min" type="text" inputmode="decimal" value="10.000" autocomplete="off">','Por debajo de este monto no se toca (suelen ser solo TV o adicionales).')}</div>
+    <div class="grid2">${F('Pasan a ($)','pb-new','<input id="pb-new" type="text" inputmode="decimal" value="18.000" autocomplete="off">')}${F('Desde el mes','pb-mes',`<input id="pb-mes" type="month" min="${cur}" max="${addMonths(cur,3)}" value="${addMonths(cur,1)}">`)}</div>
+    ${F('No incluir si las notas dicen','pb-exc','<input id="pb-exc" value="solo tv" autocomplete="off">','Dejalo vacío para no excluir a nadie.')}
+    <div id="pb-out"></div>`,
+    onMount(el){
+      let res=null;
+      const val=()=>({max:num($('#pb-max',el).value),min:num($('#pb-min',el).value),nuevo:num($('#pb-new',el).value),desde:$('#pb-mes',el).value,excluir:$('#pb-exc',el).value});
+      const show=()=>{
+        const o=val(),out=$('#pb-out',el);res=null;
+        if(o.max===null||o.min===null||o.nuevo===null||!/^\d{4}-\d{2}$/.test(o.desde)||o.desde<cur){out.innerHTML='<div class="notice bad">Completá los montos y el mes (este mes o uno posterior).</div>';return;}
+        if(o.nuevo<=o.max){out.innerHTML='<div class="notice bad">El precio nuevo tiene que ser mayor que el máximo.</div>';return;}
+        res=bulkPrecios(o);
+        const por=[...res.porPrecio].sort((a,b)=>a[0]-b[0]).map(([p,n])=>fmtMoney(p)+': '+n).join(' · ');
+        out.innerHTML=`<div class="card flat"><h3>${res.cambian.length} ${res.cambian.length===1?'cliente pasa':'clientes pasan'} a ${esc(fmtMoney(o.nuevo))} desde ${esc(monthLabel(o.desde))}</h3>
+          <dl class="kv">${por?`<dt>Hoy pagan</dt><dd>${esc(por)}</dd>`:''}${res.bajo?`<dt>Por debajo de ${esc(fmtMoney(o.min))}</dt><dd>${res.bajo} no se tocan</dd>`:''}${res.nota?`<dt>Con «${esc(o.excluir.trim())}» en las notas</dt><dd>${res.nota} no se tocan</dd>`:''}${res.hist?`<dt>Con otro cambio de precio en esas fechas</dt><dd>${res.hist} se saltean: revisalos a mano</dd>`:''}</dl>
+          <div class="actions"><button class="btn primary" type="button" id="pb-go"${res.cambian.length?'':' disabled'}>Subir ${res.cambian.length}</button></div><div class="hint" id="pb-prog"></div></div>`;
+        const go=$('#pb-go',el);
+        if(go)go.addEventListener('click',async()=>{
+          if(!await askConfirm(`Se sube a ${fmtMoney(o.nuevo)} el abono de ${res.cambian.length} clientes desde ${monthLabel(o.desde)}. Los meses anteriores quedan como estaban. ¿Seguro?`,'Subir precios'))return;
+          go.disabled=true;
+          try{await applyBulkPrecios(res.cambian,(d,t)=>{const h=$('#pb-prog',el);if(h)h.textContent=`Actualizando… ${d} de ${t}`;});toast(res.cambian.length+' clientes actualizados');closeModal();}
+          catch(err){dbError(err);go.disabled=false;const h=$('#pb-prog',el);if(h)h.textContent='No se pudo terminar. Los que ya cambiaron no se repiten: volvé a abrir esto y revisá cuántos faltan.';}
+        });
+      };
+      ['pb-max','pb-min','pb-new','pb-mes','pb-exc'].forEach(i=>$('#'+i,el).addEventListener('input',show));
+      show();
+    }});
 }
 function openImport(){
   const cur=todayStr().slice(0,7);
@@ -3015,7 +3074,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='9ac6b607b8';
+const BUILD='78705db022';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

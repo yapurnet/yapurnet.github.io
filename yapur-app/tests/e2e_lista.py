@@ -17,6 +17,10 @@ def shard(cid):   # igual que clientShard() de la app
     for ch in cid: h = ((h ^ ord(ch)) * 16777619) & 0xffffffff
     return 'c%02d' % (h % 16)
 
+def addm(ym, n):
+    y, m = map(int, ym.split('-')); m += n; y += (m - 1) // 12; m = (m - 1) % 12 + 1
+    return '%04d-%02d' % (y, m)
+
 ERR = []
 async def login(ctx, user, clave):
     pg = await ctx.new_page()
@@ -98,6 +102,32 @@ async def main():
         check('Ana (cobra desde noviembre) no debe nada de octubre', (b['per'] == [] if cur < '2026-11' else b['per'][0] == '2026-11'), b)
         bb = await pg.evaluate("(() => { const c = [...S.clientes.values()].find(c => c.nombre === 'Beto Díaz'); return {price: priceOf(c), first: billing(c).periods[0] && billing(c).periods[0].per}; })()")
         check('Beto paga su precio especial y se le cobra desde octubre', bb['price'] == 28000 and bb['first'] == '2026-10', bb)
+
+        # 3b) subir precios en bloque: los de $17.000 o menos pasan a $18.000 desde el mes que viene
+        for cid, c in {'k1': {'nombre': 'Uno Prueba', 'precio': 17000}, 'k2': {'nombre': 'Dos Prueba', 'precio': 15000}, 'k3': {'nombre': 'Tres Prueba', 'precio': 15000, 'notas': 'solo tv'},
+                       'k4': {'nombre': 'Cuatro Prueba', 'precio': 2700}, 'k5': {'nombre': 'Cinco Prueba', 'precio': 18000}}.items():
+            api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: {**c, 'estado': 'activo', 'desde': cur, 'ciclo': 1}}}}, TA)
+        await pg.wait_for_function("S.clientes.size === 10", timeout=10000)
+        await pg.click('#tabs [data-tab=ajustes]'); await pg.click('#aj-prb')
+        await pg.wait_for_selector('#pb-out h3')
+        txt = await pg.inner_text('#pb-out')
+        check('muestra cuántos pasan, cuántos se dejan por monto bajo y por la nota «solo tv»', '3 clientes pasan a' in txt and '1 no se tocan' in txt.replace('\n', ' ') or ('3 clientes pasan a' in txt and 'solo tv' in txt and 'Por debajo de' in txt), txt)
+        nxt = await pg.evaluate('addMonths(curMonth(), 1)')
+        check('propone el mes que viene como fecha de vigencia', await pg.input_value('#pb-mes') == nxt)
+        if os.environ.get('YAPUR_SHOT_PB'): await pg.screenshot(path=os.environ['YAPUR_SHOT_PB'])
+        await pg.click('#pb-go')
+        await pg.click('.sheet [data-act=yes]')
+        await pg.wait_for_function("['Uno Prueba', 'Dos Prueba', 'Ana Pérez'].every(n => { const c = [...S.clientes.values()].find(c => c.nombre === n); return c && c.precio === 18000; })", timeout=10000)
+        pr = await pg.evaluate("""(() => { const f = n => [...S.clientes.values()].find(c => c.nombre === n);
+          const r = {}; for (const n of ['Uno Prueba', 'Dos Prueba', 'Tres Prueba', 'Cuatro Prueba', 'Cinco Prueba', 'Ana Pérez']) { const c = f(n); r[n] = [priceAt(c, curMonth()), priceAt(c, addMonths(curMonth(), 1))]; } return r; })()""")
+        check('los que pagaban 17.000 o 15.000 siguen igual este mes y pagan 18.000 el mes que viene', pr['Uno Prueba'] == [17000, 18000] and pr['Dos Prueba'] == [15000, 18000] and pr['Ana Pérez'] == [17000, 18000], pr)
+        check('«solo tv», el adicional de 2.700 y el que ya pagaba 18.000 no cambian', pr['Tres Prueba'] == [15000, 15000] and pr['Cuatro Prueba'] == [2700, 2700] and pr['Cinco Prueba'] == [18000, 18000], pr)
+        st, k1 = api('GET', '/api/doc/clientes/' + shard('k1'), None, TA)
+        it = k1['data']['items']['k1']
+        check('en el servidor queda el precio viejo como historial y el nuevo vigente', it['precio'] == 18000 and it['hp'][0]['precio'] == 17000 and it['hp'][0]['h'] == addm(cur, 0), it)
+        await pg.click('#tabs [data-tab=ajustes]'); await pg.click('#aj-prb'); await pg.wait_for_selector('#pb-out h3')
+        check('volver a correrlo no cambia a nadie', '0 clientes pasan' in await pg.inner_text('#pb-out'), await pg.inner_text('#pb-out'))
+        await pg.click('.sheet [data-close]')
 
         # 4) recibo con el formato del papel
         cid = await pg.evaluate("[...S.clientes.values()].find(c => c.nombre === 'Beto Díaz').id")
