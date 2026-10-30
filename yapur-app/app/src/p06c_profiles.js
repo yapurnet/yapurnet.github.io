@@ -1,7 +1,7 @@
 /* ===== ajustes y usuarios del equipo (solo administrador) ===== */
 async function saveAjustes(patch){
   const next=Object.assign({},S.ajustes,patch);
-  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10});
+  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null});
 }
 function permsBoxHTML(base,cur){
   const defs=PERM_DEF[base];let g='',html='';
@@ -143,6 +143,16 @@ VIEWS.ajustes={
     el.innerHTML=`<div class="card"><h2>Empresa</h2><form class="form" id="aj-emp" novalidate>
       ${F('Nombre que se muestra arriba','aj-nombre',`<input id="aj-nombre" value="${esc(S.ajustes.empresa)}">`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar</button></div></form></div>
+    <div class="card"><h2>Datos del recibo</h2><p class="muted small">Es lo que sale arriba y abajo de cada recibo, como en tu recibo de papel. Se carga una sola vez.</p>
+      <form class="form" id="aj-rec" novalidate>
+      ${F('Nombre comercial (arriba del recibo)','aj-r-ley',`<input id="aj-r-ley" value="${esc((S.ajustes.recibo||{}).leyenda||'')}" autocomplete="off" placeholder="Soluciones Informáticas">`)}
+      ${F('Razón social','aj-r-raz',`<input id="aj-r-raz" value="${esc((S.ajustes.recibo||{}).razon||'')}" autocomplete="off">`)}
+      <div class="grid2">${F('CUIT','aj-r-cuit',`<input id="aj-r-cuit" value="${esc((S.ajustes.recibo||{}).cuit||'')}" inputmode="numeric" autocomplete="off">`)}${F('Ingresos Brutos','aj-r-iibb',`<input id="aj-r-iibb" value="${esc((S.ajustes.recibo||{}).iibb||'')}" inputmode="numeric" autocomplete="off">`)}</div>
+      ${F('Domicilio comercial','aj-r-dom',`<input id="aj-r-dom" value="${esc((S.ajustes.recibo||{}).dom||'')}" autocomplete="off">`)}
+      ${F('Teléfonos de contacto','aj-r-tel',`<input id="aj-r-tel" value="${esc((S.ajustes.recibo||{}).tel||'')}" autocomplete="off" placeholder="Nombre: 3844-000000 / Nombre: 3844-111111">`)}
+      <div class="grid2">${F('Sitio web','aj-r-web',`<input id="aj-r-web" value="${esc((S.ajustes.recibo||{}).web||'')}" autocomplete="off">`)}${F('Punto de venta','aj-r-pv',`<input id="aj-r-pv" value="${esc((S.ajustes.recibo||{}).pv||'')}" inputmode="numeric" autocomplete="off" placeholder="00004">`)}</div>
+      ${F('Alias para pagar (uno por línea)','aj-r-ali',`<textarea id="aj-r-ali" rows="3">${esc(((S.ajustes.recibo||{}).alias||[]).join('\n'))}</textarea>`)}
+      <div class="actions start"><button class="btn primary" type="submit">Guardar datos del recibo</button></div></form></div>
     <div class="card"><h2>Ciclos de cobro y promesas</h2><p class="muted small">Cada cliente paga en uno de los dos ciclos. Si el día de corte cae sábado, domingo o feriado, el corte pasa al siguiente día hábil.</p>
       <form class="form" id="aj-cic" novalidate>
       ${[1,2].map(cy=>`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Ciclo ${cy}</legend><div class="grid2">${cicField(cy,'desde','Paga desde el día')}${cicField(cy,'hasta','Paga hasta el día')}</div>${cicField(cy,'corte','Se corta el día')}</fieldset>`).join('')}
@@ -169,6 +179,10 @@ VIEWS.ajustes={
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
+    $('#aj-rec',el).addEventListener('submit',async e=>{e.preventDefault();
+      const v=id=>$('#aj-r-'+id,el).value.trim().slice(0,200);
+      const recibo={leyenda:v('ley'),razon:v('raz'),cuit:v('cuit'),iibb:v('iibb'),dom:v('dom'),tel:v('tel'),web:v('web'),pv:v('pv'),alias:$('#aj-r-ali',el).value.split(/\r?\n/).map(x=>x.trim().slice(0,80)).filter(Boolean).slice(0,6)};
+      try{await saveAjustes({recibo});toast('Datos del recibo guardados');}catch(err){dbError(err);}});
     $('#aj-cic',el).addEventListener('submit',async e=>{e.preventDefault();
       const ciclos={};
       for(const cy of [1,2]){

@@ -9,25 +9,86 @@ function allocate(sel,received){
   if(left>0&&out.length)out[out.length-1].monto+=left;
   return out;
 }
-function receiptText(recibo){
-  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return '';
-  const p0=ps[0],c=S.clientes.get(p0.c);
+/* Datos del recibo (formato del recibo en papel): quién emite, a quién, qué se cobra y el período */
+function receiptData(recibo){
+  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return null;
+  const p0=ps[0],c=S.clientes.get(p0.c),R=S.ajustes.recibo||{};
   const total=ps.reduce((s,p)=>s+(Number(p.monto)||0),0);
-  const lines=[S.ajustes.empresa,'RECIBO N° '+recibo,'Fecha: '+dmy(p0.fecha)+(p0.hora?' '+p0.hora:''),'Cliente: '+(c?c.nombre+(c.codigo?' (#'+c.codigo+')':''):'—'),''];
-  ps.forEach(p=>lines.push((p.concepto==='mensualidad'&&p.per?'Abono '+monthLabel(p.per):(CONCEPTOS[p.concepto]||'Otro')+(p.nota&&p.concepto!=='mensualidad'?': '+p.nota:''))+'  '+fmtMoney(p.monto)));
-  lines.push('','TOTAL  '+fmtMoney(total),'Medio de pago: '+(METODOS[p0.metodo]||p0.metodo));
-  if(c&&p0.concepto==='mensualidad'&&servicioTxt(c)!=='Sin plan')lines.push('Servicio: '+servicioTxt(c));
-  if(p0.anulado)lines.push('','*** RECIBO ANULADO ***');
-  return lines.join('\n');
+  const cond=p=>p.metodo==='efectivo'?'Contado':(METODOS[p.metodo]||p.metodo||'');
+  const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
+  let periodo=null;
+  if(mens.length){
+    const a=mens[0].per,z=mens[mens.length-1].per;
+    periodo={desde:a+'-01',hasta:z+'-'+pad(daysIn(z)),vto:z+'-'+pad(Math.min(cicloCfg(cicloOf(c)).hasta,daysIn(z)))};
+  }
+  return {
+    nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
+    emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
+      tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
+    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final',servicio:c&&mens.length&&servicioTxt(c)!=='Sin plan'?servicioTxt(c):''},
+    lineas:ps.map(p=>({
+      desc:p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''),
+      cant:1,cond:cond(p),unit:Number(p.monto)||0})),
+    medio:METODOS[p0.metodo]||p0.metodo||''
+  };
+}
+function receiptText(recibo){
+  const d=receiptData(recibo);if(!d)return '';
+  const e=d.emisor,c=d.cliente,L=[];
+  if(e.leyenda)L.push(e.leyenda);
+  L.push(e.razon);
+  const ident=[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / ');if(ident)L.push(ident);
+  if(e.dom)L.push(e.dom);
+  const cont=[e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / ');if(cont)L.push(cont);
+  L.push('','RECIBO - NO VÁLIDO COMO FACTURA (ORIGINAL)',(e.pv?'Punto de venta: '+e.pv+'   ':'')+'Comp. Nro: '+d.nro,'Fecha de emisión: '+dmy(d.fecha)+(d.hora?' '+d.hora:''),'');
+  L.push('Cliente: '+c.nombre+(c.codigo?' (#'+c.codigo+')':''));
+  if(c.dni)L.push('DNI / CUIT: '+c.dni);
+  if(c.dir)L.push('Dirección: '+c.dir);
+  L.push('Condición de venta: '+d.cond,'Condición frente al IVA: '+c.iva);
+  if(d.periodo)L.push('Período facturado: '+dmy(d.periodo.desde)+' al '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto));
+  L.push('');
+  d.lineas.forEach(l=>L.push(l.desc+(l.cant>1?'  x'+l.cant:'')+'  '+fmtMoney(l.unit*l.cant)));
+  L.push('','IMPORTE TOTAL: '+fmtMoney(d.total));
+  if(c.servicio)L.push('Servicio: '+c.servicio);
+  if(e.alias.length)L.push('',...e.alias.map(a=>'Alias: '+a));
+  if(d.anulado)L.push('','*** RECIBO ANULADO ***');
+  return L.join('\n');
+}
+/* el recibo como en el papel: encabezado, datos del cliente, tabla y total */
+const RC_CSS='.rc{background:#fff;color:#111;border:1px solid #222;font:13px/1.45 system-ui,sans-serif;max-width:640px;margin:0 auto;position:relative}.rc *{box-sizing:border-box}.rc .h{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px;border-bottom:1px solid #222}.rc .h b{font-size:15px}.rc .tt{text-align:center;font-weight:700;letter-spacing:.04em}.rc .nv{font-size:11px;text-align:right}.rc .b{padding:8px 12px;border-bottom:1px solid #222;overflow-wrap:anywhere}.rc .b div{margin:1px 0}.rc table{width:100%;table-layout:fixed;border-collapse:collapse}.rc .w1{width:12%}.rc .w2{width:20%}.rc .w3{width:19%}.rc th,.rc td{padding:5px 8px;border-bottom:1px solid #ccc;text-align:left;vertical-align:top}.rc th{background:#eee;font-size:11px;text-transform:uppercase}.rc .r{text-align:right;white-space:nowrap}.rc .tot{display:flex;justify-content:flex-end;gap:14px;padding:8px 12px;font-size:15px;font-weight:700;border-bottom:1px solid #222}.rc .al{padding:8px 12px;font-size:12px}.rc .an{position:absolute;inset:40% 0 auto;text-align:center;font-size:34px;font-weight:800;color:#c00;transform:rotate(-12deg);opacity:.55;pointer-events:none}@media (max-width:520px){.rc{font-size:12.5px}.rc .h{display:block}.rc .tt,.rc .nv{text-align:left;margin-top:4px}.rc .cp{display:none}.rc .w1{width:13%}.rc .w2,.rc .w3{width:27%}.rc th,.rc td{padding:5px 5px}}';
+function receiptHTML(d){
+  const e=d.emisor,c=d.cliente;
+  return `<style>${RC_CSS}</style><div class="rc">
+    <div class="h"><div><b>${esc(e.leyenda||e.razon)}</b>${e.leyenda?`<div>${esc(e.razon)}</div>`:''}</div><div class="tt">RECIBO</div><div class="nv">ORIGINAL<br>NO VÁLIDO COMO FACTURA</div></div>
+    <div class="b">${[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).length?`<div>${esc([e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / '))}</div>`:''}
+      ${e.dom?`<div>${esc(e.dom)}</div>`:''}${e.tel||e.web?`<div>${esc([e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / '))}</div>`:''}
+      <div>${e.pv?'Punto de venta: <b>'+esc(e.pv)+'</b> · ':''}Comp. Nro: <b>${esc(d.nro)}</b> · Fecha de emisión: <b>${esc(dmy(d.fecha))}</b>${d.hora?' '+esc(d.hora):''}</div></div>
+    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
+      <div>Condición de venta: ${esc(d.cond)} · Condición frente al IVA: ${esc(c.iva)}</div>
+      ${d.periodo?`<div>Período facturado desde: ${esc(dmy(d.periodo.desde))} hasta: ${esc(dmy(d.periodo.hasta))} · Vto. para el pago: ${esc(dmy(d.periodo.vto))}</div>`:''}</div>
+    <table><thead><tr><th>Producto / Servicio</th><th class="r w1">Cant.</th><th class="cp w2">Condición de pago</th><th class="r w3">Precio unit.</th><th class="r w3">Subtotal</th></tr></thead><tbody>
+      ${d.lineas.map(l=>`<tr><td>${esc(l.desc)}</td><td class="r">${l.cant}</td><td class="cp">${esc(l.cond)}</td><td class="r">${esc(fmtMoney(l.unit))}</td><td class="r">${esc(fmtMoney(l.unit*l.cant))}</td></tr>`).join('')}</tbody></table>
+    <div class="tot"><span>Importe total:</span><span>${esc(fmtMoney(d.total))}</span></div>
+    ${c.servicio||e.alias.length?`<div class="al">${c.servicio?`<div>Servicio: ${esc(c.servicio)}</div>`:''}${e.alias.map(a=>`<div>Alias: ${esc(a)}</div>`).join('')}</div>`:''}
+    ${d.anulado?'<div class="an">ANULADO</div>':''}</div>`;
+}
+/* imprime solo el recibo, en una hoja aparte (desde la computadora de la oficina) */
+function printReceipt(d){
+  try{
+    const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title><style>@page{margin:12mm}body{margin:0}</style>'+receiptHTML(d));doc.close();
+    setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}setTimeout(()=>f.remove(),2000);},150);
+  }catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}
 }
 function openReceipt(recibo){
-  const txt=receiptText(recibo);if(!txt)return toast('No se encontró el recibo','bad');
-  const ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
-  openModal({title:'Recibo '+recibo,html:`<div class="receipt">${esc(txt)}</div>
-    <div class="actions start"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
+  const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
+  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
+  openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
+    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     ${c&&c.tel?`<a class="btn" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:''}
+    <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
-    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));}});
+    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));}});
 }
 function openAnular(recibo){
   openModal({title:'Anular recibo',html:`<p>El recibo <span class="mono">${esc(recibo)}</span> queda marcado como anulado y los meses vuelven a figurar como pendientes. No se borra, queda en la caja del día.</p>

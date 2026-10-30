@@ -1611,7 +1611,7 @@ VIEWS.planes={
 /* ===== ajustes y usuarios del equipo (solo administrador) ===== */
 async function saveAjustes(patch){
   const next=Object.assign({},S.ajustes,patch);
-  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10});
+  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null});
 }
 function permsBoxHTML(base,cur){
   const defs=PERM_DEF[base];let g='',html='';
@@ -1753,6 +1753,16 @@ VIEWS.ajustes={
     el.innerHTML=`<div class="card"><h2>Empresa</h2><form class="form" id="aj-emp" novalidate>
       ${F('Nombre que se muestra arriba','aj-nombre',`<input id="aj-nombre" value="${esc(S.ajustes.empresa)}">`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar</button></div></form></div>
+    <div class="card"><h2>Datos del recibo</h2><p class="muted small">Es lo que sale arriba y abajo de cada recibo, como en tu recibo de papel. Se carga una sola vez.</p>
+      <form class="form" id="aj-rec" novalidate>
+      ${F('Nombre comercial (arriba del recibo)','aj-r-ley',`<input id="aj-r-ley" value="${esc((S.ajustes.recibo||{}).leyenda||'')}" autocomplete="off" placeholder="Soluciones Informáticas">`)}
+      ${F('Razón social','aj-r-raz',`<input id="aj-r-raz" value="${esc((S.ajustes.recibo||{}).razon||'')}" autocomplete="off">`)}
+      <div class="grid2">${F('CUIT','aj-r-cuit',`<input id="aj-r-cuit" value="${esc((S.ajustes.recibo||{}).cuit||'')}" inputmode="numeric" autocomplete="off">`)}${F('Ingresos Brutos','aj-r-iibb',`<input id="aj-r-iibb" value="${esc((S.ajustes.recibo||{}).iibb||'')}" inputmode="numeric" autocomplete="off">`)}</div>
+      ${F('Domicilio comercial','aj-r-dom',`<input id="aj-r-dom" value="${esc((S.ajustes.recibo||{}).dom||'')}" autocomplete="off">`)}
+      ${F('Teléfonos de contacto','aj-r-tel',`<input id="aj-r-tel" value="${esc((S.ajustes.recibo||{}).tel||'')}" autocomplete="off" placeholder="Nombre: 3844-000000 / Nombre: 3844-111111">`)}
+      <div class="grid2">${F('Sitio web','aj-r-web',`<input id="aj-r-web" value="${esc((S.ajustes.recibo||{}).web||'')}" autocomplete="off">`)}${F('Punto de venta','aj-r-pv',`<input id="aj-r-pv" value="${esc((S.ajustes.recibo||{}).pv||'')}" inputmode="numeric" autocomplete="off" placeholder="00004">`)}</div>
+      ${F('Alias para pagar (uno por línea)','aj-r-ali',`<textarea id="aj-r-ali" rows="3">${esc(((S.ajustes.recibo||{}).alias||[]).join('\n'))}</textarea>`)}
+      <div class="actions start"><button class="btn primary" type="submit">Guardar datos del recibo</button></div></form></div>
     <div class="card"><h2>Ciclos de cobro y promesas</h2><p class="muted small">Cada cliente paga en uno de los dos ciclos. Si el día de corte cae sábado, domingo o feriado, el corte pasa al siguiente día hábil.</p>
       <form class="form" id="aj-cic" novalidate>
       ${[1,2].map(cy=>`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Ciclo ${cy}</legend><div class="grid2">${cicField(cy,'desde','Paga desde el día')}${cicField(cy,'hasta','Paga hasta el día')}</div>${cicField(cy,'corte','Se corta el día')}</fieldset>`).join('')}
@@ -1779,6 +1789,10 @@ VIEWS.ajustes={
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
+    $('#aj-rec',el).addEventListener('submit',async e=>{e.preventDefault();
+      const v=id=>$('#aj-r-'+id,el).value.trim().slice(0,200);
+      const recibo={leyenda:v('ley'),razon:v('raz'),cuit:v('cuit'),iibb:v('iibb'),dom:v('dom'),tel:v('tel'),web:v('web'),pv:v('pv'),alias:$('#aj-r-ali',el).value.split(/\r?\n/).map(x=>x.trim().slice(0,80)).filter(Boolean).slice(0,6)};
+      try{await saveAjustes({recibo});toast('Datos del recibo guardados');}catch(err){dbError(err);}});
     $('#aj-cic',el).addEventListener('submit',async e=>{e.preventDefault();
       const ciclos={};
       for(const cy of [1,2]){
@@ -1870,6 +1884,8 @@ const HSYN={
   loc:['localidad','barrio','ciudad','zona'],
   ref:['referencia','referencias','como llegar'],
   plan:['plan','servicio','abono'],
+  vel:['velocidad','vel','mbps','mb','megas','velocidad mbps'],
+  desde:['cobrar desde','desde','facturar desde','facturacion desde'],
   tec:['tecnologia','tipo','medio'],
   usuario:['usuario','pppoe','user','usuario pppoe'],
   servicios:['servicios','servicios adicionales','adicionales','adicional','extras'],
@@ -1884,7 +1900,7 @@ const HSYN={
   notas:['notas','observaciones','obs','comentarios']
 };
 const HREV={};for(const f in HSYN)HSYN[f].forEach(s=>{HREV[s]=f;});
-const IMP_COLS=['codigo','nombre','dni','telefono','telefono 2','direccion','localidad','referencia','plan','servicios','tecnologia','usuario','ip','nodo','equipo','latitud','longitud','estado','fecha de alta','precio especial','ciclo','notas'];
+const IMP_COLS=['codigo','nombre','dni','telefono','telefono 2','direccion','localidad','referencia','plan','velocidad','servicios','tecnologia','usuario','ip','nodo','equipo','latitud','longitud','estado','fecha de alta','cobrar desde','precio especial','ciclo','notas'];
 function parseCiclo(v,def){
   const t=norm(v).trim();if(!t)return def;
   if(/13\s*(al|a|-)\s*20|\b20\b|\b23\b|\b2\b|dos|segund/.test(t))return 2;
@@ -1904,19 +1920,57 @@ function parseServicios(txt,falta){
   });
   return ids;
 }
+/* "2026-11", "11/2026" o una fecha completa → "2026-11" ('' si no se entiende) */
+function parseMes(v){
+  const t=String(v||'').trim();let m=t.match(/^(\d{4})-(\d{1,2})/);if(m&&+m[2]>=1&&+m[2]<=12)return m[1]+'-'+pad(m[2]);
+  m=t.match(/^(?:\d{1,2}[\/.-])?(\d{1,2})[\/.-](\d{4})$/);if(m&&+m[1]>=1&&+m[1]<=12)return m[2]+'-'+pad(m[1]);
+  return '';
+}
+/* "Pérez, Juan (casa)" y "juan perez casa" dan la misma clave: se comparan por palabras, sin importar el orden */
+const nameKey=n=>norm(n).replace(/[^a-z0-9]+/g,' ').trim().split(' ').filter(Boolean).sort().join(' ');
+/* plan cuya velocidad de bajada coincide con la del archivo (2.5, 5, 10…) */
+function planBySpeed(v){
+  const n=num(String(v||'').replace(/mb(ps|its)?/i,''));if(n===null||n<=0)return null;
+  const l=[...S.planes.values()].filter(p=>Number(p.bajada)===n).sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
+  return l[0]||null;
+}
+/* opts.existentes: 'completar' → los que ya existen (mismo nombre) reciben solo los datos que les faltan · otro valor → se cuentan y se dejan como están */
 function analyzeImport(rows,opts){
   const head=rows[0].map(h=>HREV[norm(h).replace(/[^a-z0-9]+/g,' ').trim()]||null);
   const idx={};head.forEach((f,i)=>{if(f&&!(f in idx))idx[f]=i;});
   const used=new Set(S.clientes.size?[...S.clientes.values()].map(c=>c.codigo).filter(Boolean):[]);
-  const out={recs:[],sinNombre:0,dup:0,planesFalta:new Set(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
+  const byKey=new Map();
+  if(opts.existentes){for(const c of S.clientes.values()){const k=nameKey(c.nombre);if(k)byKey.set(k,byKey.has(k)?null:c);}}
+  const taken=new Set();
+  const out={recs:[],upd:[],existen:0,sinNombre:0,dup:0,planesFalta:new Set(),velFalta:new Map(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
   for(let i=1;i<rows.length;i++){
     const r=rows[i],g=f=>idx[f]!==undefined?String(r[idx[f]]==null?'':r[idx[f]]).trim():'';
     const nombre=g('nombre');if(!nombre){out.sinNombre++;continue;}
     const cod=g('codigo');
     if(cod&&used.has(cod)){out.dup++;continue;}
-    if(cod)used.add(cod);
     const pk=norm(g('plan'));let plan=null;
     if(pk){plan=[...S.planes.values()].find(p=>norm(p.nombre)===pk);if(!plan)out.planesFalta.add(g('plan'));}
+    else if(g('vel')){plan=planBySpeed(g('vel'));if(!plan){const k=String(num(g('vel')));if(k!=='null')out.velFalta.set(k,(out.velFalta.get(k)||0)+1);}}
+    const desde=parseMes(g('desde'))||opts.desde;
+    let precio=num(g('precio'));
+    if(precio!==null&&plan&&precio===histPrice(plan,desde))precio=null;   /* igual al del plan: no es un precio especial */
+    const ex=opts.existentes?byKey.get(nameKey(nombre)):undefined;
+    if(ex){   /* ya está cargado: se completa o se deja */
+      if(taken.has(ex.id)){out.existen++;continue;}
+      taken.add(ex.id);out.existen++;
+      if(opts.existentes==='completar'){
+        const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
+        fill('dni',g('dni'));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
+        fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
+        if(plan)fill('planId',plan.id);
+        if(precio!==null&&!hasNum(ex.precio))patch.precio=precio;
+        const sinPagos=S.loaded.pagos&&!(S.paidIdx.get(ex.id)||new Map()).size;   /* con pagos cargados no se toca desde cuándo se cobra */
+        if(sinPagos){if(idx.desde!==undefined&&parseMes(g('desde')))patch.desde=desde;if(idx.ciclo!==undefined&&g('ciclo'))patch.ciclo=parseCiclo(g('ciclo'),cicloOf(ex));}
+        if(Object.keys(patch).length)out.upd.push({id:ex.id,shard:ex._doc||clientShard(ex.id),patch});
+      }
+      continue;
+    }
+    if(cod)used.add(cod);
     const extras=parseServicios(g('servicios'),out.serviciosFalta);
     const tk=norm(g('tec'));
     const tec=/fibra|gpon|ftth/.test(tk)?'fibra':(/wifi|wireless|antena|radio/.test(tk)?'wireless':null);
@@ -1926,9 +1980,8 @@ function analyzeImport(rows,opts){
     if(g('lat')&&g('lng'))geo=parseCoords(g('lat').replace(',','.')+', '+g('lng').replace(',','.'));
     else if(g('geo'))geo=parseCoords(g('geo'));
     if(!geo)out.sinGeo++;
-    const precio=num(g('precio'));
     out.recs.push({codigo:cod||'',nombre,dni:g('dni'),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
-      lat:geo?geo.lat:null,lng:geo?geo.lng:null,estado,alta:parseDateAny(g('alta'))||todayStr(),desde:opts.desde,ciclo:parseCiclo(g('ciclo'),opts.ciclo||1),precio:precio,notas:g('notas'),creado:Date.now(),mod:Date.now()});
+      lat:geo?geo.lat:null,lng:geo?geo.lng:null,estado,alta:parseDateAny(g('alta'))||todayStr(),desde,ciclo:parseCiclo(g('ciclo'),opts.ciclo||1),precio:precio,notas:g('notas'),creado:Date.now(),mod:Date.now()});
   }
   return out;
 }
@@ -1939,6 +1992,13 @@ async function saveImported(recs,prog){
   let done=0;const total=recs.length;
   for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;if(prog)prog(done,total);}
 }
+/* completa los clientes que ya existían: solo los campos del parche, sin tocar el resto */
+async function updateImported(upd,prog){
+  const groups={};
+  upd.forEach(u=>{(groups[u.shard]=groups[u.shard]||{})[u.id]=Object.assign({},u.patch,{mod:Date.now()});});
+  let done=0;const total=upd.length;
+  for(const sh of Object.keys(groups)){await putMany('clientes',sh,groups[sh]);done+=Object.keys(groups[sh]).length;if(prog)prog(done,total);}
+}
 function openImport(){
   const cur=todayStr().slice(0,7);
   const html=`<p class="muted small">Elegí un archivo .csv (en Excel: Guardar como, CSV). La primera fila lleva los nombres de las columnas. Se reconocen: ${IMP_COLS.join(', ')}.</p>
@@ -1946,25 +2006,29 @@ function openImport(){
     <div class="grid2">${F('Estado de los clientes importados','imp-estado',`<select id="imp-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k==='activo')).join('')}</select>`,'Si el archivo trae una columna de estado, se usa esa.')}
     ${F('Cobrar desde (mes)','imp-desde',`<input id="imp-desde" type="month" value="${cur}">`,'Antes de este mes no se genera deuda. Dejalo en el mes actual si no querés arrastrar deudas viejas.')}</div>
     ${F('Ciclo de cobro (si el archivo no lo trae)','imp-ciclo',`<select id="imp-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),n===1)).join('')}</select>`,'En el archivo, la columna «ciclo» puede decir 1 o 2.')}
+    <label class="per"><input type="checkbox" id="imp-comp" checked><span class="grow"><b>Completar los clientes que ya están cargados</b><br><span class="small muted">Si el nombre coincide, solo se llenan los datos que les faltan. No se pisa nada de lo que ya tienen.</span></span></label>
     ${F('Archivo CSV','imp-file','<input id="imp-file" type="file" accept=".csv,.txt,text/csv">')}
     <div id="imp-out"></div>`;
   openModal({title:'Importar clientes',html,wide:true,onMount(el){
     let rows=null;
-    const opts=()=>({estado:$('#imp-estado',el).value,desde:$('#imp-desde',el).value||cur,ciclo:Number($('#imp-ciclo',el).value)===2?2:1});
+    const opts=()=>({estado:$('#imp-estado',el).value,desde:$('#imp-desde',el).value||cur,ciclo:Number($('#imp-ciclo',el).value)===2?2:1,existentes:$('#imp-comp',el).checked?'completar':'saltear'});
     const show=()=>{
       const out=$('#imp-out',el);if(!rows)return;
       const a=analyzeImport(rows,opts());
       if(!a.cols.includes('nombre')){out.innerHTML='<div class="notice bad">No encontré una columna de nombre. Revisá la primera fila del archivo.</div>';return;}
+      const velF=[...a.velFalta].map(([k,n])=>k+' Mbps ('+n+')');
       out.innerHTML=`<div class="card flat"><h3>${a.recs.length} ${a.recs.length===1?'cliente listo':'clientes listos'} para importar</h3>
-        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}
+        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}${a.existen?`<dt>Ya cargados (mismo nombre)</dt><dd>${a.existen} no se vuelven a crear${a.upd.length?`; a ${a.upd.length} se les completan datos que les faltaban`:''}</dd>`:''}
+        ${velF.length?`<dt>Velocidades sin plan</dt><dd>${velF.map(esc).join(', ')}. Esos clientes quedan sin plan (se cobra igual por su precio). Creá el plan y volvé a importar con «Completar» tildado.</dd>`:''}
         ${a.planesFalta.size?`<dt>Planes que no existen</dt><dd>${[...a.planesFalta].map(esc).join(', ')}. Esos clientes quedan sin plan. Creá los planes antes para que se asignen.</dd>`:''}${a.serviciosFalta.size?`<dt>Servicios que no existen</dt><dd>${[...a.serviciosFalta].map(esc).join(', ')}. Se ignoran: creálos en Planes y volvé a importar o asignalos a mano.</dd>`:''}<dt>Sin ubicación</dt><dd>${a.sinGeo}</dd></dl>
-        <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length?'':' disabled'}>Importar ${a.recs.length}</button></div><div class="hint" id="imp-prog"></div></div>`;
+        <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length||a.upd.length?'':' disabled'}>${a.recs.length?'Importar '+a.recs.length:'Completar '+a.upd.length}${a.recs.length&&a.upd.length?' y completar '+a.upd.length:''}</button></div><div class="hint" id="imp-prog"></div></div>`;
       const go=$('#imp-go',el);
       if(go)go.addEventListener('click',async()=>{
         go.disabled=true;const total=a.recs.length;
         try{
           await saveImported(a.recs,(done,t)=>{$('#imp-prog',el).textContent=`Importando… ${done} de ${t}`;});
-          toast(total+' clientes importados');closeModal();
+          await updateImported(a.upd,(done,t)=>{$('#imp-prog',el).textContent=`Completando… ${done} de ${t}`;});
+          toast((total?total+' clientes importados':'')+(total&&a.upd.length?' · ':'')+(a.upd.length?a.upd.length+' completados':''));closeModal();
         }catch(err){dbError(err);go.disabled=false;$('#imp-prog',el).textContent='No se pudo terminar la importación. Revisá cuántos clientes se cargaron antes de volver a intentar.';}
       });
     };
@@ -1975,7 +2039,7 @@ function openImport(){
       rd.onerror=()=>toast('No se pudo leer el archivo','bad');
       rd.readAsText(f,'utf-8');
     });
-    ['imp-estado','imp-desde','imp-ciclo'].forEach(i=>$('#'+i,el).addEventListener('change',show));
+    ['imp-estado','imp-desde','imp-ciclo','imp-comp'].forEach(i=>$('#'+i,el).addEventListener('change',show));
     $('#imp-tpl',el).addEventListener('click',()=>saveFile('modelo-clientes.csv',toCsv([IMP_COLS])));
   }});
 }
@@ -2477,25 +2541,86 @@ function allocate(sel,received){
   if(left>0&&out.length)out[out.length-1].monto+=left;
   return out;
 }
-function receiptText(recibo){
-  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return '';
-  const p0=ps[0],c=S.clientes.get(p0.c);
+/* Datos del recibo (formato del recibo en papel): quién emite, a quién, qué se cobra y el período */
+function receiptData(recibo){
+  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return null;
+  const p0=ps[0],c=S.clientes.get(p0.c),R=S.ajustes.recibo||{};
   const total=ps.reduce((s,p)=>s+(Number(p.monto)||0),0);
-  const lines=[S.ajustes.empresa,'RECIBO N° '+recibo,'Fecha: '+dmy(p0.fecha)+(p0.hora?' '+p0.hora:''),'Cliente: '+(c?c.nombre+(c.codigo?' (#'+c.codigo+')':''):'—'),''];
-  ps.forEach(p=>lines.push((p.concepto==='mensualidad'&&p.per?'Abono '+monthLabel(p.per):(CONCEPTOS[p.concepto]||'Otro')+(p.nota&&p.concepto!=='mensualidad'?': '+p.nota:''))+'  '+fmtMoney(p.monto)));
-  lines.push('','TOTAL  '+fmtMoney(total),'Medio de pago: '+(METODOS[p0.metodo]||p0.metodo));
-  if(c&&p0.concepto==='mensualidad'&&servicioTxt(c)!=='Sin plan')lines.push('Servicio: '+servicioTxt(c));
-  if(p0.anulado)lines.push('','*** RECIBO ANULADO ***');
-  return lines.join('\n');
+  const cond=p=>p.metodo==='efectivo'?'Contado':(METODOS[p.metodo]||p.metodo||'');
+  const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
+  let periodo=null;
+  if(mens.length){
+    const a=mens[0].per,z=mens[mens.length-1].per;
+    periodo={desde:a+'-01',hasta:z+'-'+pad(daysIn(z)),vto:z+'-'+pad(Math.min(cicloCfg(cicloOf(c)).hasta,daysIn(z)))};
+  }
+  return {
+    nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
+    emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
+      tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
+    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final',servicio:c&&mens.length&&servicioTxt(c)!=='Sin plan'?servicioTxt(c):''},
+    lineas:ps.map(p=>({
+      desc:p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''),
+      cant:1,cond:cond(p),unit:Number(p.monto)||0})),
+    medio:METODOS[p0.metodo]||p0.metodo||''
+  };
+}
+function receiptText(recibo){
+  const d=receiptData(recibo);if(!d)return '';
+  const e=d.emisor,c=d.cliente,L=[];
+  if(e.leyenda)L.push(e.leyenda);
+  L.push(e.razon);
+  const ident=[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / ');if(ident)L.push(ident);
+  if(e.dom)L.push(e.dom);
+  const cont=[e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / ');if(cont)L.push(cont);
+  L.push('','RECIBO - NO VÁLIDO COMO FACTURA (ORIGINAL)',(e.pv?'Punto de venta: '+e.pv+'   ':'')+'Comp. Nro: '+d.nro,'Fecha de emisión: '+dmy(d.fecha)+(d.hora?' '+d.hora:''),'');
+  L.push('Cliente: '+c.nombre+(c.codigo?' (#'+c.codigo+')':''));
+  if(c.dni)L.push('DNI / CUIT: '+c.dni);
+  if(c.dir)L.push('Dirección: '+c.dir);
+  L.push('Condición de venta: '+d.cond,'Condición frente al IVA: '+c.iva);
+  if(d.periodo)L.push('Período facturado: '+dmy(d.periodo.desde)+' al '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto));
+  L.push('');
+  d.lineas.forEach(l=>L.push(l.desc+(l.cant>1?'  x'+l.cant:'')+'  '+fmtMoney(l.unit*l.cant)));
+  L.push('','IMPORTE TOTAL: '+fmtMoney(d.total));
+  if(c.servicio)L.push('Servicio: '+c.servicio);
+  if(e.alias.length)L.push('',...e.alias.map(a=>'Alias: '+a));
+  if(d.anulado)L.push('','*** RECIBO ANULADO ***');
+  return L.join('\n');
+}
+/* el recibo como en el papel: encabezado, datos del cliente, tabla y total */
+const RC_CSS='.rc{background:#fff;color:#111;border:1px solid #222;font:13px/1.45 system-ui,sans-serif;max-width:640px;margin:0 auto;position:relative}.rc *{box-sizing:border-box}.rc .h{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px;border-bottom:1px solid #222}.rc .h b{font-size:15px}.rc .tt{text-align:center;font-weight:700;letter-spacing:.04em}.rc .nv{font-size:11px;text-align:right}.rc .b{padding:8px 12px;border-bottom:1px solid #222;overflow-wrap:anywhere}.rc .b div{margin:1px 0}.rc table{width:100%;table-layout:fixed;border-collapse:collapse}.rc .w1{width:12%}.rc .w2{width:20%}.rc .w3{width:19%}.rc th,.rc td{padding:5px 8px;border-bottom:1px solid #ccc;text-align:left;vertical-align:top}.rc th{background:#eee;font-size:11px;text-transform:uppercase}.rc .r{text-align:right;white-space:nowrap}.rc .tot{display:flex;justify-content:flex-end;gap:14px;padding:8px 12px;font-size:15px;font-weight:700;border-bottom:1px solid #222}.rc .al{padding:8px 12px;font-size:12px}.rc .an{position:absolute;inset:40% 0 auto;text-align:center;font-size:34px;font-weight:800;color:#c00;transform:rotate(-12deg);opacity:.55;pointer-events:none}@media (max-width:520px){.rc{font-size:12.5px}.rc .h{display:block}.rc .tt,.rc .nv{text-align:left;margin-top:4px}.rc .cp{display:none}.rc .w1{width:13%}.rc .w2,.rc .w3{width:27%}.rc th,.rc td{padding:5px 5px}}';
+function receiptHTML(d){
+  const e=d.emisor,c=d.cliente;
+  return `<style>${RC_CSS}</style><div class="rc">
+    <div class="h"><div><b>${esc(e.leyenda||e.razon)}</b>${e.leyenda?`<div>${esc(e.razon)}</div>`:''}</div><div class="tt">RECIBO</div><div class="nv">ORIGINAL<br>NO VÁLIDO COMO FACTURA</div></div>
+    <div class="b">${[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).length?`<div>${esc([e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / '))}</div>`:''}
+      ${e.dom?`<div>${esc(e.dom)}</div>`:''}${e.tel||e.web?`<div>${esc([e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / '))}</div>`:''}
+      <div>${e.pv?'Punto de venta: <b>'+esc(e.pv)+'</b> · ':''}Comp. Nro: <b>${esc(d.nro)}</b> · Fecha de emisión: <b>${esc(dmy(d.fecha))}</b>${d.hora?' '+esc(d.hora):''}</div></div>
+    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
+      <div>Condición de venta: ${esc(d.cond)} · Condición frente al IVA: ${esc(c.iva)}</div>
+      ${d.periodo?`<div>Período facturado desde: ${esc(dmy(d.periodo.desde))} hasta: ${esc(dmy(d.periodo.hasta))} · Vto. para el pago: ${esc(dmy(d.periodo.vto))}</div>`:''}</div>
+    <table><thead><tr><th>Producto / Servicio</th><th class="r w1">Cant.</th><th class="cp w2">Condición de pago</th><th class="r w3">Precio unit.</th><th class="r w3">Subtotal</th></tr></thead><tbody>
+      ${d.lineas.map(l=>`<tr><td>${esc(l.desc)}</td><td class="r">${l.cant}</td><td class="cp">${esc(l.cond)}</td><td class="r">${esc(fmtMoney(l.unit))}</td><td class="r">${esc(fmtMoney(l.unit*l.cant))}</td></tr>`).join('')}</tbody></table>
+    <div class="tot"><span>Importe total:</span><span>${esc(fmtMoney(d.total))}</span></div>
+    ${c.servicio||e.alias.length?`<div class="al">${c.servicio?`<div>Servicio: ${esc(c.servicio)}</div>`:''}${e.alias.map(a=>`<div>Alias: ${esc(a)}</div>`).join('')}</div>`:''}
+    ${d.anulado?'<div class="an">ANULADO</div>':''}</div>`;
+}
+/* imprime solo el recibo, en una hoja aparte (desde la computadora de la oficina) */
+function printReceipt(d){
+  try{
+    const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title><style>@page{margin:12mm}body{margin:0}</style>'+receiptHTML(d));doc.close();
+    setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}setTimeout(()=>f.remove(),2000);},150);
+  }catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}
 }
 function openReceipt(recibo){
-  const txt=receiptText(recibo);if(!txt)return toast('No se encontró el recibo','bad');
-  const ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
-  openModal({title:'Recibo '+recibo,html:`<div class="receipt">${esc(txt)}</div>
-    <div class="actions start"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
+  const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
+  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
+  openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
+    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     ${c&&c.tel?`<a class="btn" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:''}
+    <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
-    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));}});
+    onMount(el){const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));}});
 }
 function openAnular(recibo){
   openModal({title:'Anular recibo',html:`<p>El recibo <span class="mono">${esc(recibo)}</span> queda marcado como anulado y los meses vuelven a figurar como pendientes. No se borra, queda en la caja del día.</p>
@@ -2890,7 +3015,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='020b813dc4';
+const BUILD='446c5cd2ac';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
