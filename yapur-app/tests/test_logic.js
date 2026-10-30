@@ -151,6 +151,44 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   t('import sin opción existentes: no cambia el comportamiento anterior',nx.recs.length===5&&nx.existen===0&&nx.upd.length===0,nx.recs.length);
   S.clientes.clear();S.planes.clear();S.paidIdx.clear();
 }
+// subir precios en bloque
+{
+  S.planes.clear();S.clientes.clear();S.pagos.clear();S.ajustes.servicios=null;
+  S.planes.set('p5',{id:'p5',nombre:'Plan_5',bajada:5,subida:5,precio:18000});
+  S.planes.set('p7',{id:'p7',nombre:'Plan_7',bajada:7,subida:7,precio:17000});
+  const mk=(id,o)=>S.clientes.set(id,Object.assign({id,_doc:'s1',nombre:id,estado:'activo',desde:'2026-08',ciclo:1},o));
+  mk('a',{planId:'p5',precio:17000});             // plan a 18.000 con precio viejo: vuelve al plan
+  mk('b',{precio:15000,notas:'Personal'});       // sin plan: queda en 18.000 explícito
+  mk('c',{precio:18000});                          // ya está
+  mk('d',{precio:2700});                           // adicional: no se toca
+  mk('e',{precio:15000,notas:'cambio | SOLO TV'});  // excluido por la nota
+  mk('f',{planId:'p7'});                           // sin precio especial, plan viejo a 17.000
+  mk('g',{precio:17000,estado:'baja'});            // de baja: no cuenta
+  mk('h',{precio:17000,hp:[{h:'2026-10',planId:null,precio:16000,extras:[]}]}); // cambio posterior: se saltea
+  mk('i',{precio:23000});                          // otro nivel
+  const o={max:17000,min:10000,nuevo:18000,desde:'2026-11',excluir:'solo tv'};
+  const r=bulkPrecios(o);
+  const by=Object.fromEntries(r.cambian.map(x=>[x.id,x]));
+  t('bloque: cambia a, b y f; no toca c, d, e, g, h ni i',Object.keys(by).sort().join()==='a,b,f',Object.keys(by));
+  t('bloque: cuenta lo que dejó afuera por monto, por nota y por otro cambio',r.bajo===1&&r.nota===1&&r.hist===1,[r.bajo,r.nota,r.hist]);
+  t('bloque: si el plan ya vale lo nuevo, el precio especial se saca',by.a.patch.precio===null&&by.b.patch.precio===18000&&by.f.patch.precio===18000,[by.a.patch.precio,by.b.patch.precio,by.f.patch.precio]);
+  t('bloque: guarda el estado anterior hasta octubre',by.a.patch.hp.length===1&&by.a.patch.hp[0].h==='2026-10'&&by.a.patch.hp[0].precio===17000&&by.a.patch.hp[0].planId==='p5'&&by.f.patch.hp[0].precio===null&&by.f.patch.hp[0].planId==='p7',[by.a.patch.hp,by.f.patch.hp]);
+  t('bloque: porPrecio agrupa lo que se cambia',r.porPrecio.get(17000)===2&&r.porPrecio.get(15000)===1,[...r.porPrecio]);
+  // aplicado: octubre conserva el precio, noviembre toma el nuevo
+  for(const x of r.cambian)Object.assign(S.clientes.get(x.id),x.patch);
+  const ca=S.clientes.get('a'),cb=S.clientes.get('b'),cf=S.clientes.get('f');
+  t('bloque aplicado: octubre sigue en el precio viejo y noviembre en el nuevo',priceAt(ca,'2026-10')===17000&&priceAt(ca,'2026-11')===18000&&priceAt(cb,'2026-10')===15000&&priceAt(cb,'2026-11')===18000&&priceAt(cf,'2026-10')===17000&&priceAt(cf,'2026-11')===18000,[priceAt(ca,'2026-10'),priceAt(ca,'2026-11'),priceAt(cb,'2026-10'),priceAt(cb,'2026-11'),priceAt(cf,'2026-10'),priceAt(cf,'2026-11')]);
+  t('bloque aplicado: meses anteriores a octubre también conservan el precio viejo',priceAt(cb,'2026-08')===15000&&priceAt(cb,'2026-09')===15000);
+  t('bloque: correrlo de nuevo no cambia a nadie más',bulkPrecios(o).cambian.length===0,bulkPrecios(o).cambian.map(x=>x.id));
+  // «completar» al asignar el plan: un precio especial igual al del plan se saca
+  S.clientes.clear();
+  S.clientes.set('z',{id:'z',_doc:'s1',nombre:'Zeta Zoe',estado:'activo',precio:18000,ciclo:1,desde:'2026-11'});
+  S.clientes.set('y',{id:'y',_doc:'s1',nombre:'Yepes Yago',estado:'activo',precio:28000,ciclo:1,desde:'2026-11'});
+  const cz=analyzeImport(parseCsv('nombre;velocidad;precio especial\\r\\nZoe Zeta;5;18000\\r\\nYago Yepes;5;28000\\r\\n'),{estado:'activo',desde:'2026-11',ciclo:1,existentes:'completar'});
+  const uz=cz.upd.find(x=>x.id==='z'),uy=cz.upd.find(x=>x.id==='y');
+  t('completar: al asignarle el plan, el precio especial igual al del plan se saca; uno distinto se respeta',uz&&uz.patch.planId==='p5'&&uz.patch.precio===null&&uy&&uy.patch.planId==='p5'&&!('precio' in uy.patch),[uz,uy]);
+  S.clientes.clear();S.planes.clear();
+}
 console.log(out.join('\\n'));
 `;
 const ctx={console,document:{addEventListener(){},querySelector(){return null},querySelectorAll(){return []},createElement(){return {style:{}}}},window:{},localStorage:{getItem(){return null},setItem(){}},navigator:{},setTimeout,Intl,Date,Math,FileReader:function(){}};

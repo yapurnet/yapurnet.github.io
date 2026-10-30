@@ -166,7 +166,7 @@ VIEWS.ajustes={
       <p class="muted small">Cada persona entra con su usuario y su clave. Vos elegís qué puede ver y hacer. Los técnicos aparecen para asignarles órdenes.</p>
       <div class="list" id="aj-users"></div></div>
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
-      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
+      <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
       <div class="list" id="aj-routers"></div></div>
@@ -229,6 +229,7 @@ VIEWS.ajustes={
     $('#aj-rs-file',el).addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)restoreFromFile(f);});
     loadUsers();bindRouters(el);
     $('#aj-imp',el).addEventListener('click',()=>openImport());
+    $('#aj-prb',el).addEventListener('click',()=>openPreciosBloque());
     $('#aj-exc',el).addEventListener('click',exportClientes);
     $('#aj-exp',el).addEventListener('click',exportPagos);
     this.update();
