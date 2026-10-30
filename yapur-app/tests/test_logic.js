@@ -211,6 +211,32 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   t('con «cobrar desde» el mes que viene, hoy no debe mensualidades',billing(S.clientes.get('dc')).deuda===0&&billing(S.clientes.get('dc')).vencidos===0);
   S.clientes.clear();S.pagos.clear();S.planes.clear();rebuildDerived();
 }
+// importar en modo «actualizar»: plan, servicios y precio nuevos; lo anterior queda como vigencia
+{
+  S.clientes.clear();S.pagos.clear();S.planes.clear();
+  S.planes.set('p100',{id:'p100',nombre:'Plan 100',bajada:100,subida:100,precio:18000});
+  S.planes.set('p200',{id:'p200',nombre:'Plan 200',bajada:200,subida:200,precio:19000});
+  const base={estado:'activo',ciclo:1,desde:'2026-11',_doc:'s1'};
+  S.clientes.set('a',Object.assign({},base,{id:'a',nombre:'Ana Alda',precio:17000}));
+  S.clientes.set('b',Object.assign({},base,{id:'b',nombre:'Beto Bos',precio:18000,hp:[{h:'2026-10',planId:null,precio:17000,extras:[]}]}));
+  S.clientes.set('c',Object.assign({},base,{id:'c',nombre:'Carlos Cruz',precio:32000}));
+  S.clientes.set('d',Object.assign({},base,{id:'d',nombre:'Dora Dix',precio:15000}));
+  S.clientes.set('f',Object.assign({},base,{id:'f',nombre:'Fede Fax',planId:'p200',precio:null}));
+  S.clientes.set('g',Object.assign({},base,{id:'g',nombre:'Gaby Gil',precio:28000}));
+  rebuildDerived();
+  const csv='nombre;plan;servicios;precio especial\\r\\nAna Alda;Plan 100;;\\r\\nBeto Bos;Plan 100;;\\r\\nCarlos Cruz;Plan 100;Multimedia;\\r\\nDora Dix;Sin plan;Multimedia;\\r\\nFede Fax;Plan 200;;\\r\\nNadie Nunca;Plan 100;;\\r\\nGaby Gil;;;\\r\\n';
+  const ca=analyzeImport(parseCsv(csv),{estado:'activo',desde:'2026-11',ciclo:1,existentes:'actualizar',vigencia:'2026-11'});
+  const P=id=>{const u=ca.upd.find(x=>x.id===id);return u&&u.patch;};
+  const ap=(id)=>Object.assign({},S.clientes.get(id),P(id));
+  t('actualizar: no crea clientes nuevos (el que no existe se cuenta aparte)',ca.recs.length===0&&ca.sinMatch===1,[ca.recs.length,ca.sinMatch]);
+  t('actualizar: resumen de lo que cambia',ca.act.n===4&&ca.act.igual===1&&ca.act.conServ===2&&ca.act.porPlan.get('Plan 100')===3&&ca.act.porPlan.get('Sin plan')===1,[ca.act.n,ca.act.igual,ca.act.conServ,[...ca.act.porPlan]]);
+  t('actualizar: precio especial 17.000 → Plan 100 sin precio propio; octubre sigue en 17.000 y noviembre en 18.000',P('a').planId==='p100'&&P('a').precio===null&&priceAt(ap('a'),'2026-10')===17000&&priceAt(ap('a'),'2026-11')===18000,[P('a'),priceAt(ap('a'),'2026-10'),priceAt(ap('a'),'2026-11')]);
+  t('actualizar: quien ya tenía historial de octubre no suma otro; octubre 17.000 y noviembre 18.000',P('b').hp===undefined&&priceAt(ap('b'),'2026-10')===17000&&priceAt(ap('b'),'2026-11')===18000,[P('b'),priceAt(ap('b'),'2026-10'),priceAt(ap('b'),'2026-11')]);
+  t('actualizar: Plan 100 + Multimedia = 33.000 desde noviembre (antes pagaba 32.000 todo junto)',priceAt(ap('c'),'2026-11')===33000&&priceAt(ap('c'),'2026-10')===32000&&P('c').extras.length===1,[priceAt(ap('c'),'2026-11'),priceAt(ap('c'),'2026-10'),P('c').extras]);
+  t('actualizar: «Sin plan» + Multimedia deja solo el servicio',P('d').planId===null&&P('d').extras.length===1&&priceAt(ap('d'),'2026-11')===15000,[P('d'),priceAt(ap('d'),'2026-11')]);
+  t('actualizar: si ya estaba así no cambia nada; una fila sin plan ni servicios no toca a nadie',!P('f')&&!P('g'));
+  S.clientes.clear();S.planes.clear();S.pagos.clear();rebuildDerived();
+}
 console.log(out.join('\\n'));
 `;
 const ctx={console,document:{addEventListener(){},querySelector(){return null},querySelectorAll(){return []},createElement(){return {style:{}}}},window:{},localStorage:{getItem(){return null},setItem(){}},navigator:{},setTimeout,Intl,Date,Math,FileReader:function(){}};
