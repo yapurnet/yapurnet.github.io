@@ -104,6 +104,13 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 
 La pestaña **Técnicos** muestra, para cada técnico, cuándo fue la última vez que mandó su posición, su precisión, el recorrido del día y dos botones: **Ver en el mapa** (abre Maps en su última posición) y **Recorrido del día** (ruta aproximada en Maps). Hay un selector de día para mirar los anteriores. La ve el administrador y quien tenga el permiso **«Ver dónde están los técnicos»** (Ajustes → Perfiles).
 
+**Cómo saber si un técnico dejó de mandar** (se ve sin instalar nada nuevo):
+- Cada técnico tiene un cartel de estado: **En línea** (mandó hace 10 minutos o menos), **Sin señal · hace N min** (pasaron más de 10 minutos; en rojo si pasó más de una hora), **Todavía no mandó su posición** (hoy, dentro del horario, no llegó nada), **Fuera de horario** o **Todavía no aceptó el aviso**.
+- Arriba aparece un cartel amarillo con **quiénes están sin señal ahora** y desde cuándo, y esos técnicos suben al principio de la lista. La pestaña se actualiza sola cada minuto mientras se mira el día de hoy.
+- **Tramos sin señal:** en cada técnico, «Sin señal 1 h 20 min en 3 tramos» se despliega con la lista de horarios (por ejemplo «10:05 a 10:48 · 43 min»). Cuenta como tramo todo silencio de **más de 10 minutos** dentro del horario, incluido el del arranque («antes de su primera posición») y el que todavía sigue abierto. Vale para cualquier día guardado (14 días). Si un día no tiene ningún punto, no se inventa un tramo: puede ser un día libre.
+- **Avisarle por WhatsApp:** cuando está sin señal o todavía no mandó nada, el botón abre el chat del técnico con el mensaje ya escrito («…la oficina no recibe tu ubicación desde las 10:05. Abrí la app…»). Hace falta que tenga el teléfono cargado y el permiso para ver teléfonos. No se manda solo: lo enviás vos.
+- Un silencio no siempre es culpa del técnico: celular apagado, sin datos o Android durmiendo la app (ver «Batería» más abajo).
+
 Cómo funciona, para que sea claro y justo con quien trabaja en la calle:
 - **Solo en horario laboral: de 8 a 20 h** (hora de Argentina). El horario lo controla el servidor con su reloj: lo que llega fuera de ese rango se descarta aunque el celular lo mande. El administrador lo cambia con **Cambiar el horario**.
 - **Cada técnico acepta un aviso** la primera vez que entra («Ubicación en horario laboral»): dice el horario, quién la ve y que se borra. Si dice «Ahora no», no se manda nada. Mientras comparte, ve el cartel **Ubicación activa** arriba.
