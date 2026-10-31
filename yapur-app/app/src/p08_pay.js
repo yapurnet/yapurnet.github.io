@@ -118,6 +118,12 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
+/* «Instalación» se cobra una sola vez, al cliente que todavía no está instalado; a uno ya instalado (una mudanza) se le cobra «Reinstalación».
+   Se aplica a quien cobra en la calle; el servidor lo controla igual. */
+const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
+function conceptosCobro(c,campo){
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+}
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
@@ -125,12 +131,12 @@ function openCobro(clientId,con1,pre){
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
   const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
-  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':'instalacion';
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
-    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
+    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:'')}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:true).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
-    ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
@@ -395,7 +401,7 @@ VIEWS.miscobros={
   },
   update(){
     const body=$('#mc-body');if(!body)return;
-    const mine=[...S.pagos.values()].filter(p=>p.por===S.uid).sort((a,b)=>(b.fecha+(b.hora||'')).localeCompare(a.fecha+(a.hora||'')));
+    const yo=(S.preview&&S.perfil&&S.perfil.id)||S.uid,mine=[...S.pagos.values()].filter(p=>p.por===yo).sort((a,b)=>(b.fecha+(b.hora||'')).localeCompare(a.fecha+(a.hora||'')));
     const today=todayStr(),days=[...new Set(mine.map(p=>p.fecha))].slice(0,7);
     const sum=(l,f)=>l.filter(p=>!p.anulado&&(!f||f(p))).reduce((t,p)=>t+(Number(p.monto)||0),0);
     const hoy=mine.filter(p=>p.fecha===today);

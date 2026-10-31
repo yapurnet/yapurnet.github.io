@@ -307,7 +307,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reinstalacion:'Reinstalación (mudanza)',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -349,6 +349,8 @@ const PERM_DEF={
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */
 const soloCampo=()=>!can('cobrar')&&can('cobrarCampo');
+/* Quien no maneja la facturación (el técnico) no ve si un cliente está activo o suspendido por falta de pago. Sí ve «Por instalar» y «Baja», que usa para trabajar. */
+const veEstado=()=>can('editarClientes')||can('cobrar')||can('caja');
 const isAdmin=()=>S.role==='admin'&&!S.preview;
 
 /* ===== almacenamiento por lotes (shards) ===== */
@@ -937,12 +939,15 @@ function searchClients(q,filter,limit){
   out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
   return limit?out.slice(0,limit):out;
 }
+/* el estado del cliente tal como lo puede ver esta persona: el técnico no ve «Activo» ni «Suspendido» (por falta de pago) */
+const estLabel=c=>{if(!c||!c.estado)return '';if(!veEstado()&&(c.estado==='activo'||c.estado==='suspendido'))return '';return ESTADOS[c.estado]||c.estado;};
+const estChip=c=>{const l=estLabel(c);return l?`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(l)}</span>`:'';};
 function clientRow(c){
   const pl=S.planes.get(c.planId);
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
-    <div class="side">${c.estado==='activo'?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`}</div>
+    <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasOf(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasOf(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
     ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
@@ -1054,7 +1059,7 @@ function openClient(id){
   const owes=b.aplica&&b.periods.some(p=>p.per<=todayStr().slice(0,7)&&p.rest>0);
   const ords=[...S.ordenes.values()].filter(o=>o.clientId===c.id).sort((a,b2)=>(b2.creado||'').localeCompare(a.creado||'')).slice(0,4);
   const html=`
-    <div class="head-row"><div><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span> ${billChip(c)}</div>
+    <div class="head-row"><div>${estChip(c)} ${billChip(c)}</div>
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
@@ -1063,7 +1068,7 @@ function openClient(id){
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?'<button class="btn primary" type="button" data-act="cobrar">Cobrar instalación o reclamo</button>':''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td></tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -1296,7 +1301,7 @@ VIEWS.clientes={
   },
   update(){
     const seg=$('#cl-seg');if(!seg)return;
-    const fs=[['todos','Todos'],['activo','Activos'],['suspendido','Suspendidos'],['pendiente','Por instalar'],['nogeo','Sin ubicación']];
+    const fs=[['todos','Todos'],...(veEstado()?[['activo','Activos'],['suspendido','Suspendidos']]:[]),['pendiente','Por instalar'],['nogeo','Sin ubicación']];
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
@@ -1496,7 +1501,7 @@ function portGridHTML(p,m,o){
     if(!l.length)return o.pick
       ?`<button class="port free${o.sel===i?' sel':''}" type="button" data-pick="${i}" aria-pressed="${o.sel===i}">${lbl}<span class="w">Libre</span></button>`
       :`<div class="port free">${lbl}<span class="w">Libre</span></div>`;
-    const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado&&c.estado!=='activo'?' · '+(ESTADOS[c.estado]||c.estado):'';
+    const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado!=='activo'&&estLabel(c)?' · '+estLabel(c):'';
     const body=l.length>1?'<span class="w">Repetido</span><span class="s">'+l.length+' clientes en este puerto</span>'
       :`<span class="w">${esc(c.nombre)}</span><span class="s">${esc(callePuerto(c)||'Sin domicilio')}${esc(est)}</span>`;
     if(o.pick)return `<div class="port ${mine?'self':l.length>1?'dup':'used'}">${lbl}${mine?'<span class="w">Acá está hoy</span>':body}</div>`;
@@ -1537,7 +1542,7 @@ function openRed(id){
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(p)}${can('red')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(p)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${kids.length?`<div><h3>De acá salen</h3><div class="list" style="margin-top:8px">${kids.sort(redCmp).map(k=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div></div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
     ${grid?portsSectionHTML(p,m):''}
-    ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
+    ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${estChip(c)}</div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
       ${cl.length>vis.length&&vis.length?`<div class="hint">Y ${cl.length-vis.length} más que tu perfil no puede ver.</div>`:''}</div>`:''}`;
   openModal({title:RED_TIPO[p.tipo]||'Red',html,onMount(el){
     el.addEventListener('click',e=>{
@@ -1555,7 +1560,7 @@ function openNapClient(napId,cid){
   const p=S.red.get(napId),c=S.clientes.get(cid);
   if(!p||!c)return openRed(napId);
   const vis=clientVisible(c),kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
-  const html=`<div class="head-row"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
+  const html=`<div class="head-row">${estChip(c)}</div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}</h2>
     <dl class="kv">${kv('Caja',esc(p.nombre))}${kv('Puerto',c.napPuerto?esc(c.napPuerto):'Sin puerto cargado')}${kv('Domicilio',esc(callePuerto(c)))}${vis&&can('telefono')&&c.tel?kv('Teléfono',esc(c.tel)):''}</dl>
     <div class="actions">${vis?'<button class="btn" type="button" data-act="ficha">Ver ficha del cliente</button>':''}${canMoverNap()?'<button class="btn primary" type="button" data-act="mover">Mover a otra caja o puerto</button>':''}<button class="btn ghost" type="button" data-act="volver">Volver a la caja</button></div>`;
@@ -2876,12 +2881,15 @@ function openOrderForm({id,clientId}){
 /* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reconexión, reclamo) */
 const CONC_ORD={instalacion:'instalacion',reconexion:'reconexion',falla:'reclamo',visita:'reclamo'};
 const puedeCobrarOrden=c=>!!c&&(can('cobrar')||can('cobrarCampo'));
-function cobroOrdenHTML(o){
-  const con0=CONC_ORD[o.tipo]||'otro';
+function cobroOrdenHTML(o,c){
+  const lista=conceptosCobro(c,soloCampo());
+  let con0=CONC_ORD[o.tipo]||'otro';
+  if(con0==='instalacion'&&instalado(c))con0='reinstalacion';   /* una instalación sobre un cliente ya instalado es una mudanza */
+  if(!lista.includes(con0))con0=lista.includes('otro')?'otro':lista[0];
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
     <div id="ff-cobro-box" hidden>
-      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad'&&k!=='deuda_anterior').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>lista.includes(k)).map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
     </div></div>`;
@@ -2893,7 +2901,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c)?cobroOrdenHTML(o):''}
+    ${puedeCobrarOrden(c)?cobroOrdenHTML(o,c):''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
@@ -3262,6 +3270,12 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
+/* «Instalación» se cobra una sola vez, al cliente que todavía no está instalado; a uno ya instalado (una mudanza) se le cobra «Reinstalación».
+   Se aplica a quien cobra en la calle; el servidor lo controla igual. */
+const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
+function conceptosCobro(c,campo){
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+}
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
@@ -3269,12 +3283,12 @@ function openCobro(clientId,con1,pre){
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
   const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
-  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':'instalacion';
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
-    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
+    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:'')}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:true).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
-    ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
@@ -3539,7 +3553,7 @@ VIEWS.miscobros={
   },
   update(){
     const body=$('#mc-body');if(!body)return;
-    const mine=[...S.pagos.values()].filter(p=>p.por===S.uid).sort((a,b)=>(b.fecha+(b.hora||'')).localeCompare(a.fecha+(a.hora||'')));
+    const yo=(S.preview&&S.perfil&&S.perfil.id)||S.uid,mine=[...S.pagos.values()].filter(p=>p.por===yo).sort((a,b)=>(b.fecha+(b.hora||'')).localeCompare(a.fecha+(a.hora||'')));
     const today=todayStr(),days=[...new Set(mine.map(p=>p.fecha))].slice(0,7);
     const sum=(l,f)=>l.filter(p=>!p.anulado&&(!f||f(p))).reduce((t,p)=>t+(Number(p.monto)||0),0);
     const hoy=mine.filter(p=>p.fecha===today);
@@ -3676,7 +3690,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='8e61dc125a';
+const BUILD='b632b1b06b';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

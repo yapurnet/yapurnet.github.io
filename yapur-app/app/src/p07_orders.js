@@ -77,12 +77,15 @@ function openOrderForm({id,clientId}){
 /* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reconexión, reclamo) */
 const CONC_ORD={instalacion:'instalacion',reconexion:'reconexion',falla:'reclamo',visita:'reclamo'};
 const puedeCobrarOrden=c=>!!c&&(can('cobrar')||can('cobrarCampo'));
-function cobroOrdenHTML(o){
-  const con0=CONC_ORD[o.tipo]||'otro';
+function cobroOrdenHTML(o,c){
+  const lista=conceptosCobro(c,soloCampo());
+  let con0=CONC_ORD[o.tipo]||'otro';
+  if(con0==='instalacion'&&instalado(c))con0='reinstalacion';   /* una instalación sobre un cliente ya instalado es una mudanza */
+  if(!lista.includes(con0))con0=lista.includes('otro')?'otro':lista[0];
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
     <div id="ff-cobro-box" hidden>
-      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad'&&k!=='deuda_anterior').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>lista.includes(k)).map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
     </div></div>`;
@@ -94,7 +97,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c)?cobroOrdenHTML(o):''}
+    ${puedeCobrarOrden(c)?cobroOrdenHTML(o,c):''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){

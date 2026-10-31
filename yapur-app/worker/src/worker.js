@@ -115,11 +115,11 @@ function canWrite(u, p, coll, op) {
 }
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
-const CAMPO_CONCEPTOS = ['instalacion', 'reconexion', 'reclamo', 'otro'];
+const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reconexion', 'reclamo', 'otro'];
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
-function guard(u, p, coll, existing, patch) {
+function guard(u, p, coll, existing, patch, ctx) {
   if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red') return null;
   const items = isPlain(patch.items) ? patch.items : null;
   if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' ? 'Formato inválido.' : null;
@@ -147,6 +147,11 @@ function guard(u, p, coll, existing, patch) {
           if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
           if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
           if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
+          /* «Instalación» solo a quien todavía no está instalado; a un cliente ya instalado (una mudanza) se le cobra «Reinstalación». No se mira lo cobrado: el técnico no ve los pagos */
+          const cl = ctx ? ctx.clienteDe(nw.c) : null;
+          if (nw.concepto === 'instalacion') {
+            if (cl && cl.estado && cl.estado !== 'pendiente') return 'Ese cliente ya está instalado. Si se mudó, cobrá «Reinstalación (mudanza)».';
+          } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
         nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();
         continue;
@@ -360,9 +365,26 @@ export class YapurDB extends DurableObject {
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
       if (!p.telefono) drop.push('tel', 'tel2');
-      return drop.length ? strip(data, drop) : data;
+      const out = drop.length ? strip(data, drop) : data;
+      return p.cobrar || p.caja || p.editarClientes ? out : this.sinEstadoDePago(out);
     }
     return data;
+  }
+  /* Quien no ve la facturación (el técnico) no tiene que enterarse de si un cliente está activo o suspendido por falta de pago:
+     se le saca el estado «activo» o «suspendido» (queda «por instalar» y «baja», que usa para trabajar) y todo lo que delata un corte o una deuda.
+     Al faltar el campo, lo que él guarda de vuelta no pisa el estado real. */
+  sinEstadoDePago(data) {
+    if (!isPlain(data) || !isPlain(data.items)) return data;
+    const items = {};
+    for (const id of Object.keys(data.items)) {
+      const it = data.items[id];
+      if (!isPlain(it)) { items[id] = it; continue; }
+      const c = Object.assign({}, it);
+      if (c.estado === 'activo' || c.estado === 'suspendido') delete c.estado;
+      delete c.corteMora; delete c.reconectado; delete c.promesas;
+      items[id] = c;
+    }
+    return Object.assign({}, data, { items });
   }
   /* no se puede borrar una caja o empalme que todavía tiene clientes conectados, ni un empalme del que sale otra caja */
   redInUse(existing, items) {
@@ -396,7 +418,7 @@ export class YapurDB extends DurableObject {
     this.tx(() => {
       const existing = this.readDoc(coll, id);
       if (coll === 'ajustes') { data = Object.assign({}, data); delete data.perfiles; }
-      const why = guard(u, p, coll, existing, data);
+      const why = guard(u, p, coll, existing, data, this);
       if (why) throw httpErr(403, why, 'permission_denied');
       if (coll === 'red') { const inUse = this.redInUse(existing, data.items); if (inUse) throw httpErr(409, inUse, 'failed_precondition'); }
       const next = op === 'set' || !existing ? data : deepMerge(existing, data);
@@ -471,6 +493,16 @@ export class YapurDB extends DurableObject {
     return '{"seq":' + this.SEQ + ',"cols":{' + cols.join(',') + '}}';
   }
 
+  /* el cliente tal como está guardado (los clientes viven repartidos en varios documentos) */
+  clienteDe(cid) {
+    const key = JSON.stringify(cid);
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      if (!r.data.includes(key)) continue;
+      const it = (JSON.parse(r.data).items || {})[cid];
+      if (isPlain(it)) return it;
+    }
+    return null;
+  }
   /* los cobros que registró esta persona en los últimos días (quien cobra en la calle no lee la caja entera) */
   misCobros(u, dias) {
     const hoy = ymd(), desde = ymd(Date.now() - (dias - 1) * 864e5), docs = [];

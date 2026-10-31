@@ -1,6 +1,6 @@
 # Red: cajas NAP y botellas de empalme con GPS, conexión de cada cliente a su caja, cercanía y permisos.
 # Chromium real con ubicación simulada (Playwright), igual que lo haría el WebView del celular.
-import asyncio, json, os, sys, time, urllib.request, urllib.error
+import asyncio, json, os, sys, time, urllib.request, urllib.error, re
 from playwright.async_api import async_playwright
 
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
@@ -28,6 +28,7 @@ def shard(cid):   # igual que clientShard() de la app
     return 'c%02d' % (h % 16)
 
 ERR = []
+ESTADO_PAGO = re.compile(r'\b(activo|suspendido)\b', re.I)   # lo que el técnico no debe ver de un cliente
 async def login(ctx, user, clave):
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: ERR.append('PAGEERROR ' + str(e)))
@@ -264,6 +265,9 @@ async def main():
         await pg.wait_for_selector('.sheet [data-cl="a"]')
         sh = await pg.inner_text('.sheet')
         check('el técnico queda en la ficha de la caja de destino con Ana en el 2 y 7 libres', 'NAP-02' in sh and 'Ana Cerca' in await pg.inner_text('.sheet [data-cl="a"]') and 'Quedan 7 puertos libres' in sh, sh[:500])
+        check('en la caja el técnico no ve si el cliente está activo o suspendido', not ESTADO_PAGO.search(sh), sh[:500])
+        await pg.click('.sheet [data-cl="a"]'); await pg.wait_for_selector('.sheet [data-act=mover]')
+        check('ni en la ficha del cliente dentro de la caja', not ESTADO_PAGO.search(await pg.inner_text('.sheet')), await pg.inner_text('.sheet'))
         await pg.evaluate(f"openRed('{nap1}')")
         await pg.wait_for_selector('.sheet .ports')
         sh = await pg.inner_text('.sheet')

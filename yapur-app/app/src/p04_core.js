@@ -40,7 +40,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reinstalacion:'Reinstalación (mudanza)',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -82,6 +82,8 @@ const PERM_DEF={
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */
 const soloCampo=()=>!can('cobrar')&&can('cobrarCampo');
+/* Quien no maneja la facturación (el técnico) no ve si un cliente está activo o suspendido por falta de pago. Sí ve «Por instalar» y «Baja», que usa para trabajar. */
+const veEstado=()=>can('editarClientes')||can('cobrar')||can('caja');
 const isAdmin=()=>S.role==='admin'&&!S.preview;
 
 /* ===== almacenamiento por lotes (shards) ===== */
