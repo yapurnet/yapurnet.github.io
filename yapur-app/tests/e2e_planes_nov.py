@@ -62,6 +62,7 @@ async def main():
         check('velocidad simétrica y tecnología fibra y wireless', pl['Plan 25 Mbps']['bajada'] == 25 and pl['Plan 25 Mbps']['subida'] == 25 and pl['Plan 25 Mbps']['tecnologia'] == 'ambas')
         q = await pg.evaluate("queueText([...S.planes.values()].find(p=>p.nombre==='Plan 25 Mbps'))")
         check('la cola sale como la de los routers (25M, ráfaga 35M, umbral 8M, 22s, garantizada 256k/1M)', q == 'max-limit=25M/25M burst-limit=35M/35M burst-threshold=8M/8M burst-time=22s/22s limit-at=256k/1M', q)
+        await pg.wait_for_function("!document.querySelector('[data-nov=cargar]')", timeout=8000)
         check('el aviso desaparece al estar todos', await pg.evaluate("document.querySelector('[data-nov=cargar]')") is None)
         # ahora hay clientes: uno usa «Plan 5 Mbps», nadie usa «Plan 2.5»
         api('PATCH', '/api/doc/clientes/' + shard('ana'), {'data': {'items': {'ana': {**base, 'nombre': 'Ana Alda', 'planId': 'viejo5'}}}}, TA)
