@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <!-- Android 13+: para poder mostrar la notificación «ubicación activa» -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Para que la app pueda pedirle al técnico, con el cuadro del propio Android, que la deje «sin restricción de batería»:
+         sin eso, muchos celulares (Xiaomi, Samsung, Motorola…) duermen o cierran la app con la pantalla apagada y la ubicación se corta. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-feature android:name="android.hardware.location" android:required="false"/>
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <application

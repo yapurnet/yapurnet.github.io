@@ -3033,7 +3033,7 @@ function ubicAviso(st){
   return new Promise(res=>{
     let done=false;const fin=v=>{if(!done){done=true;res(v);}};
     openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>de ${st.desde} a ${st.hasta} h</b> mientras la app esté abierta o activa en tu celular.</p>
-      <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li></ul>
+      <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li></ul>
       <div class="actions"><button class="btn ghost" type="button" data-act="no">Ahora no</button><button class="btn primary" type="button" data-act="si">Entendido, aceptar</button></div>`,
       onMount(el){el.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;fin(b.dataset.act==='si');closeModal();});},
       onClose:()=>fin(false)});
@@ -3794,7 +3794,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='534b978385';
+const BUILD='81da60a1d2';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

@@ -45,7 +45,11 @@ public class UbicacionService extends Service implements LocationListener {
     private static final int POR_ENVIO = 30;
 
     /* La sesión vive solo en memoria: si el sistema mata la aplicación, el servicio no vuelve a arrancar solo
-       (START_NOT_STICKY) y el técnico lo reactiva al abrir la app. */
+       (START_NOT_STICKY) y el técnico lo reactiva al abrir la app.
+       Reiniciarlo solo tampoco serviría: desde Android 12 un servicio de ubicación que arranca con la app en segundo plano no puede
+       leer la posición (ni arrancar siquiera en Android 14) a menos que la app tenga el permiso de ubicación «todo el tiempo»
+       (ACCESS_BACKGROUND_LOCATION), que a propósito NO se pide. Lo que sí ayuda es que Android no la mate: ver
+       MainActivity.pedirSinRestriccionBateria. Y la oficina ve en la pestaña Técnicos cuándo se cortó. */
     static volatile String token = "";
     static volatile boolean running = false;
 
