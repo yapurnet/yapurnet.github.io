@@ -232,6 +232,25 @@ async function openStream(token) {
     t('estado: el técnico guarda la ubicación de un suspendido', r.s === 200 && !('estado' in r.j.data.items.csus), r);
     r = await call('GET', '/api/doc/clientes/c01', undefined, A);
     t('estado: lo que guarda el técnico no pisa el estado real (sigue suspendido, con su corte)', r.j.data.items.csus.estado === 'suspendido' && r.j.data.items.csus.corteMora === '2026-10-20' && r.j.data.items.csus.dir === 'Calle 9 bis', r.j.data.items.csus);
+    /* servicios adicionales (Multimedia, Multimedia Net): son de facturación, el técnico no tiene que verlos */
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cmm: { nombre: 'Mabel Multimedia', estado: 'activo', extras: ['multimedia', 'multimedia_net'], dir: 'Calle 7' } } } }, O);
+    t('servicios: la oficina carga un cliente con Multimedia y Multimedia Net', r.s === 200 && r.j.data.items.cmm.extras.length === 2, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T2);
+    t('servicios: al técnico no le llegan los servicios del cliente (sí el resto de sus datos)', r.s === 200 && r.j.data.items.cmm && !('extras' in r.j.data.items.cmm) && r.j.data.items.cmm.dir === 'Calle 7', r.j.data.items.cmm);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T);
+    t('servicios: tampoco al técnico sin permiso de cobro', r.s === 200 && !('extras' in r.j.data.items.cmm), r.j.data.items.cmm);
+    r = await call('GET', '/api/sync', undefined, T2);
+    t('servicios: ni en la sincronización', !r.j.cols.clientes.some(d => Object.values(d.data.items || {}).some(c => 'extras' in c)), r.j.cols.clientes.length);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, O);
+    t('servicios: la oficina los sigue viendo', r.j.data.items.cmm.extras.join() === 'multimedia,multimedia_net', r.j.data.items.cmm);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('servicios: y el administrador', r.j.data.items.cmm.extras.length === 2, r.j.data.items.cmm);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cmm: { nombre: 'Mabel Multimedia', dir: 'Calle 7 bis', lat: -28.4, lng: -62.8 } } } }, T2);
+    t('servicios: el técnico guarda la ubicación sin tocar los servicios', r.s === 200 && !('extras' in r.j.data.items.cmm), r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('servicios: lo que guarda el técnico no los borra', r.j.data.items.cmm.extras.join() === 'multimedia,multimedia_net' && r.j.data.items.cmm.dir === 'Calle 7 bis', r.j.data.items.cmm);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cmm: { extras: [] } } } }, T2);
+    t('servicios: y no puede quitárselos', r.s === 403, r);
     const sT2 = await openStream(T2);
     await sleep(200);
     await call('PATCH', '/api/doc/clientes/c01', { data: { items: { csus: { estado: 'activo', corteMora: null } } } }, O);
