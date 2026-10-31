@@ -122,6 +122,26 @@ Cómo funciona, para que sea claro y justo con quien trabaja en la calle:
 - **Lo que no se puede arreglar sin pedir más permisos:** si el técnico **cierra la app deslizándola desde las recientes** o el celular la mata, el servicio se corta y **no puede reiniciarse solo**: Android no deja que un servicio de ubicación arranque desde el segundo plano si la app no tiene el permiso de ubicación «todo el tiempo» (`ACCESS_BACKGROUND_LOCATION`). Ese permiso **a propósito no se pide**: implicaría poder seguir a la persona aun sin usar la app. Por eso hay que abrir la app una vez por día y, si se corta, la pestaña **Técnicos** lo muestra («Sin señal») y se le avisa por WhatsApp.
 - Si el técnico no dio el permiso de ubicación del celular, ve «Ubicación sin permiso» y en la pestaña figura «Todavía no mandó su posición».
 
+## Control de ingreso y fin del día (jornada)
+
+Anota **solo**, sin que el técnico toque nada, a qué hora empezó y a qué hora terminó el día, mirando si el celular está en la base (donde guardan los vehículos). No hace falta APK nuevo. **Viene apagado:** mientras no se cargue la base no se anota nada, no hay alarmas ni barra en el celular del técnico.
+
+**Cómo se arma** (administrador): pestaña **Técnicos → Base y jornada**. Estando en la base, tocá **«Usar mi ubicación actual (GPS)»** y guardá. Se ajustan el **radio** (150 m por defecto), la **tolerancia** para llegar (10 min) y los **días de trabajo** (lunes a sábado; los demás días no cuentan como falta). La hora esperada de ingreso es el **«Desde»** del horario de ubicación (por defecto las 8).
+- **Ingreso:** la primera posición del día dentro del radio de la base. La hora es la de esa posición (el servidor no acepta horas de más de 15 minutos atrás).
+- **Fin:** cada vez que el celular sale de la base y vuelve a entrar se anota un **regreso**; el **último regreso del día** es el fin. Si vuelve a salir, deja de figurar como terminada hasta que regrese. Para que un punto de GPS pegado al borde no cuente como entrar y salir, se «sale» recién a 1,5 veces el radio.
+- **Ingreso a mano:** si un técnico arranca sin pasar por la base, toca **«Iniciar jornada»** en la barra de arriba. Queda marcado como **manual**, con la distancia a la base, para que se vea.
+
+**Qué ve el técnico:** una barra arriba, siempre visible: «Tu jornada laboral comenzó a las 08:47 · en la base» y, al volver, «…y terminó a las 18:05 al volver a la base (9 h 18 min)». La primera vez muestra un aviso con **«Más info»** y **«Entendido»** (queda constancia de que lo vio; el registro funciona igual aunque no lo toque).
+
+**Qué ve la oficina** (Técnicos, con el selector de día): *Ingresó 08:47 · 47 min tarde* (pasada la tolerancia, en amarillo), *Terminó 18:05 · jornada de 9 h 18 min*, *Sin ingreso* en rojo, un **cartel arriba con quiénes no ingresaron hoy** (esos técnicos suben al principio de la lista) y, en días anteriores, *No volvió a la base*. El atraso se mide contra el «Desde» del horario.
+
+**Límites, para no esperar de más:**
+- **La app tiene que estar abierta** (al menos una vez en el día) para que el celular mande su posición: sin eso no hay dato y figura «Sin ingreso». Es lo mismo que en «Dónde están los técnicos».
+- Registra **dónde está el celular**, no si la persona trabajó: un celular olvidado en la base seguiría figurando en la base.
+- Las posiciones con precisión peor de 300 m se ignoran (adentro de un galpón el GPS puede dar mal).
+- **Después de volver a la base la ubicación se sigue compartiendo hasta el final del horario** (hoy hasta las 20 h); no se corta sola al terminar. Si no querés ver el camino a casa del técnico, bajá el «Hasta» del horario.
+- Se guardan **90 días**, y solo la hora, el origen (base o manual) y la distancia a la base: **no se guardan coordenadas** en este registro. No entra en las copias de seguridad, igual que la ubicación.
+
 ## Cliente nuevo desde el reporte del técnico
 
 En **Clientes → Nuevo cliente**, arriba, está **Completar con el reporte del técnico**: pegás el texto que manda el técnico por WhatsApp y toca **Completar los datos**.

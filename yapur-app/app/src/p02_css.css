@@ -135,6 +135,16 @@ tr:last-child td{border-bottom:0}
 /* ---------- cuenta, conexión ---------- */
 button.chip{font-family:inherit;cursor:pointer}
 button.chip[hidden],.netbar[hidden]{display:none}
+.jrbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-inline:-16px;padding:8px 16px;font-size:14px;line-height:1.35;background:var(--ok-soft);color:var(--ok);border-bottom:1px solid var(--line)}
+.jrbar[hidden]{display:none}
+.jrbar b{font-weight:700}
+.jrbar.warn{background:var(--warn-soft);color:var(--warn)}
+.jrbar.quiet{background:var(--surface-2);color:var(--muted)}
+.jrbar .btn{flex:none}
+.jr-btns{display:flex;gap:6px;flex:none}
+.tjor{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0}
+.dias{display:flex;flex-wrap:wrap;gap:6px}
+.dias label{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--line);border-radius:99px;background:var(--surface);font-size:14px;cursor:pointer}
 .netbar{margin-inline:-16px;padding:6px 16px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid var(--line)}
 [hidden]{display:none!important}
 /* ---------- aviso de actualización ---------- */
