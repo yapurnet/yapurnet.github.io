@@ -91,6 +91,22 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Clientes sin plan:** si al importar avisa «Velocidades sin plan», creá esos planes en *Planes* (la velocidad de bajada tiene que coincidir) y volvé a importar el mismo CSV con **Completar** tildado: les asigna el plan, y si su precio especial es igual al del plan, lo saca.
 - **Datos del recibo:** *Ajustes → Datos del recibo* (nombre comercial, razón social, CUIT, Ingresos Brutos, domicilio, teléfonos, web, punto de venta y alias de pago). Se cargan una vez y salen en todos los recibos, como en el recibo de papel: ORIGINAL · NO VÁLIDO COMO FACTURA, punto de venta y número, cliente, condición de venta, período facturado y vencimiento, tabla con el servicio, importe total y alias. Se puede copiar, mandar por WhatsApp (mismo contenido en texto) o **imprimir** (desde la computadora). El número del recibo sigue siendo el código de la app (fecha + letras).
 
+## Cliente nuevo desde el reporte del técnico
+
+En **Clientes → Nuevo cliente**, arriba, está **Completar con el reporte del técnico**: pegás el texto que manda el técnico por WhatsApp y toca **Completar los datos**.
+
+```
+NOMBRE: Ana Ester Paz
+DNI: 28354900
+IP: 10.20.43.9
+PAGO: (Efectivo) 65mil pesos que es el costo de instalación
+```
+
+- Lee `NOMBRE`, `DNI`, `IP` y `PAGO`; también `TELÉFONO`, `DIRECCIÓN`, `LOCALIDAD` y `PLAN` si vienen. Ignora los emojis y los renglones en blanco.
+- Deja al cliente **activo** y con «cobrar desde» el **mes siguiente** (se puede cambiar). Avisa qué falta completar (el teléfono y la calle son obligatorios) y si ya hay otro cliente con ese DNI o esa IP.
+- Si trae un pago («65mil», «65 mil pesos», «$65.000»…), al guardar se abre **Cobrar** ya completado: concepto (instalación, reconexión o reclamo según el texto), medio (efectivo, transferencia o Mercado Pago) y monto. Hay que confirmarlo con «Registrar cobro».
+- El cobro queda a nombre de quien lo registra. Si la plata la tiene el técnico y tiene que figurar en su caja, que lo cargue él desde su celular con «Cobrar instalación o reclamo».
+
 ## Planes de noviembre (un solo botón)
 
 En **Planes**, si faltan, aparece el aviso **Cargar planes de noviembre**: crea de una vez **Plan 100** ($18.000) y **Plan 200** ($19.000) de 15 Mbps, y **Plan 20 Mbps** ($23.000), **Plan 25 Mbps** ($24.000) y **Plan 30 Mbps** ($35.000). Las velocidades y la ráfaga salen de las colas de los routers (ráfaga = velocidad + 10M, umbral 8M, 22 s, garantizada 256k de subida y 1M de bajada). Si ya existe un plan con ese nombre, no se duplica ni se toca. Después se editan como cualquier plan (el precio con «rige desde»).

@@ -118,7 +118,7 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
-function openCobro(clientId,con1){
+function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
   const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reclamos, reconexiones y otros */
@@ -161,6 +161,11 @@ function openCobro(clientId,con1){
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
     if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
     sum();
+    if(pre){   /* cobro ya completado (por ejemplo desde el reporte del técnico) */
+      const bt=$('[data-con="'+pre.concepto+'"]',el);if(bt)bt.click();
+      if(METODOS[pre.metodo])$('#cb-met',el).value=pre.metodo;
+      if(pre.monto)$('#cb-monto',el).value=pre.monto;if(pre.nota)$('#cb-nota-o',el).value=pre.nota;sum();
+    }
     $('#cb-go',el).addEventListener('click',async()=>{
       const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
       const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
