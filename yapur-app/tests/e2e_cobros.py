@@ -58,7 +58,7 @@ async def main():
     for cid, c in {
         'a': {'nombre': 'Ana Activa', 'estado': 'activo', 'planId': 'p1', 'dir': 'Calle 1', 'tel': '3844000001', 'desde': cur},
         'd': {'nombre': 'Darío Instalar', 'estado': 'pendiente', 'planId': 'p1', 'dir': 'Calle 4', 'tel': '3844000004'},
-        'e': {'nombre': 'Elena Suspendida', 'estado': 'suspendido', 'corteMora': '2026-10-20', 'planId': 'p1', 'dir': 'Calle 5', 'tel': '3844000005', 'desde': cur}}.items():
+        'e': {'nombre': 'Elena Suspendida', 'estado': 'suspendido', 'corteMora': '2026-10-20', 'extras': ['multimedia', 'multimedia_net'], 'planId': 'p1', 'dir': 'Calle 5', 'tel': '3844000005', 'desde': cur}}.items():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
     for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id']), ('o5', 'e', pedro['id']), ('o6', 'a', pedro['id'])):
         api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid in ('o1', 'o6') else ('visita' if oid == 'o4' else 'falla'), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
@@ -151,6 +151,7 @@ async def main():
         await pg.wait_for_selector('.sheet [data-act=cobrar]')
         sh = await pg.inner_text('.sheet')
         check('la ficha de un cliente suspendido no lo dice ni avisa del corte por falta de pago', not ESTADO_PAGO.search(sh) and 'falta de pago' not in sh and '20/10/2026' not in sh and await pg.query_selector('.sheet .notice.bad') is None, sh[:400])
+        check('ni los servicios adicionales (Multimedia, Multimedia Net) de ese cliente', not re.search(r'multimedia|servicios adicionales', sh, re.I), sh[:400])
         await pg.click('.sheet [data-close]')
         chips = await pg.evaluate("['a','e','d'].map(id => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get(id)); return d.textContent; })")
         check('en la lista no aparece Activo ni Suspendido, pero sí «Por instalar»', not ESTADO_PAGO.search(chips[0]) and not ESTADO_PAGO.search(chips[1]) and 'Por instalar' in chips[2], chips)
@@ -159,6 +160,9 @@ async def main():
         await pg.click('#tabs [data-tab=clientes]')
         await pg.wait_for_selector('button[data-f]', timeout=5000)
         filtros = await pg.evaluate("[...document.querySelectorAll('button[data-f]')].map(b => b.textContent.trim())")
+        check('los filtros de clientes no ofrecen Multimedia ni Multimedia Net', not any('ultimedia' in f for f in filtros), filtros)
+        row_e = await pg.evaluate("(() => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get('e')); return d.textContent; })()")
+        check('y la lista de clientes tampoco los muestra', 'ultimedia' not in row_e and await pg.evaluate("S.clientes.get('e').extras === undefined"), row_e)
         check('los filtros de clientes no tienen «Activos» ni «Suspendidos»', filtros and 'Activos' not in filtros and 'Suspendidos' not in filtros and 'Por instalar' in filtros, filtros)
         # el servidor lo impide aunque lo intente por afuera
         st, j = api('PATCH', '/api/doc/pagos/' + hoy[:4] + '-s00', {'data': {'items': {'x1': {'c': 'a', 'concepto': 'mensualidad', 'per': cur, 'monto': 20000, 'metodo': 'efectivo', 'fecha': hoy, 'recibo': 'RX'}}}}, pedro_tok)
@@ -190,6 +194,8 @@ async def main():
         por = {f[0]: f for f in filas}
         check('la caja separa lo que cobró cada persona', set(por) == {'Pedro', 'Laura'}, filas)
         check('Pedro: 3 recibos (instalación 15.000, reclamo 3.500 y reinstalación 20.000): efectivo 35.000, otros medios 3.500, total 38.500', por['Pedro'][1] == '3' and '35.000' in por['Pedro'][2] and '3.500' in por['Pedro'][3] and '38.500' in por['Pedro'][4], por['Pedro'])
+        row_l = await pg3.evaluate("(() => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get('e')); return d.textContent; })()")
+        check('la oficina sí ve los servicios adicionales del cliente', 'Multimedia' in row_l and 'Multimedia Net' in row_l, row_l)
         check('la oficina sí ve si el cliente está activo o suspendido', await pg3.evaluate("S.clientes.get('a').estado === 'activo' && S.clientes.get('e').estado === 'suspendido'"))
         check('Laura: 1 recibo de 20.000 en efectivo', por['Laura'][1] == '1' and '20.000' in por['Laura'][2] and '20.000' in por['Laura'][4], por['Laura'])
         check('el total de la caja del día suma todo (58.500)', '58.500' in caja, caja[:200])
@@ -205,7 +211,7 @@ async def main():
         mc = await pg5.inner_text('#mc-body')
         check('en la vista como Pedro, «Mis cobros» suma solo lo de Pedro (38.500) y no lo de la oficina', '38.500' in mc and '58.500' not in mc and 'Laura' not in mc, mc[:300])
         chips5 = await pg5.evaluate("['a', 'e'].map(id => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get(id)); return d.textContent; })")
-        check('y en esa vista la lista de clientes no muestra Activo ni Suspendido', not any(ESTADO_PAGO.search(c) for c in chips5), chips5)
+        check('y en esa vista la lista de clientes no muestra Activo, Suspendido ni Multimedia', not any(ESTADO_PAGO.search(c) or 'ultimedia' in c for c in chips5), chips5)
         await ctx5.close()
 
         # 6) reabrir la app con la copia guardada en el celular (los cobros llegan después, de la sincronización)

@@ -84,6 +84,8 @@ const can=k=>!!S.perms[k];
 const soloCampo=()=>!can('cobrar')&&can('cobrarCampo');
 /* Quien no maneja la facturación (el técnico) no ve si un cliente está activo o suspendido por falta de pago. Sí ve «Por instalar» y «Baja», que usa para trabajar. */
 const veEstado=()=>can('editarClientes')||can('cobrar')||can('caja');
+/* los servicios adicionales (Multimedia…) los ve quien factura; el técnico no (el servidor tampoco se los manda) */
+const veServicios=()=>can('editarClientes')||can('cobrar')||can('caja')||can('precios');
 const isAdmin=()=>S.role==='admin'&&!S.preview;
 
 /* ===== almacenamiento por lotes (shards) ===== */
@@ -131,6 +133,7 @@ function rebuildDerived(){
 /* servicios adicionales (Multimedia, Multimedia Net…): se guardan en los ajustes; un cliente puede tener varios */
 const SERVICIOS_DEF=[{id:'multimedia',nombre:'Multimedia',precio:15000,activo:true},{id:'multimedia_net',nombre:'Multimedia Net',precio:5000,activo:true}];
 const serviciosList=()=>Array.isArray(S.ajustes.servicios)?S.ajustes.servicios:SERVICIOS_DEF;
+const extrasVis=c=>veServicios()?extrasOf(c):[];
 function extrasOf(c){
   const ids=c&&Array.isArray(c.extras)?c.extras:[];const l=serviciosList();
   return ids.map(id=>l.find(s=>s.id===id)).filter(Boolean);
@@ -178,7 +181,7 @@ function histWith(item,eff,price){
 /* "Hogar 50 + Multimedia + Multimedia Net" */
 function servicioTxt(c){
   const p=S.planes.get(c.planId);
-  return [p?p.nombre:null].concat(extrasOf(c).map(s=>s.nombre)).filter(Boolean).join(' + ')||'Sin plan';
+  return [p?p.nombre:null].concat(extrasVis(c).map(s=>s.nombre)).filter(Boolean).join(' + ')||'Sin plan';
 }
 /* ----- ciclos de cobro y feriados ----- */
 const CICLOS_DEF={1:{desde:1,hasta:10,corte:13},2:{desde:13,hasta:20,corte:23}};

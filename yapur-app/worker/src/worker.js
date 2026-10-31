@@ -364,6 +364,8 @@ export class YapurDB extends DurableObject {
       if (!p.precios) drop.push('precio', 'hp');
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
+      /* los servicios adicionales (Multimedia, Multimedia Net…) son de facturación: el técnico no tiene que enterarse de cuáles tiene cada cliente */
+      if (!(p.cobrar || p.caja || p.editarClientes || p.precios)) drop.push('extras');
       if (!p.telefono) drop.push('tel', 'tel2');
       const out = drop.length ? strip(data, drop) : data;
       return p.cobrar || p.caja || p.editarClientes ? out : this.sinEstadoDePago(out);
