@@ -58,6 +58,7 @@ public class MainActivity extends Activity {
     private GeolocationPermissions.Callback geoCb;
     private String geoOrigin;
     private boolean notifAsked;
+    private boolean bateriaAsked;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -253,6 +254,36 @@ public class MainActivity extends Activity {
         });
     }
 
+    /* Que el celular no duerma ni cierre la app con la pantalla apagada: es la causa más común de que la ubicación se corte.
+       Es el cuadro del propio Android («¿Permitir que Gestión YAPUR se ejecute siempre en segundo plano?»); el técnico elige.
+       Solo se muestra con la app abierta y a la vista (no encima de otro cuadro), una vez por sesión de la app y, si dice que no,
+       no se vuelve a preguntar hasta pasados 3 días. Si ya la dejó sin restricción, no hace nada. */
+    private static final long BATERIA_CADA_MS = 3L * 86400000L;
+
+    private void pedirSinRestriccionBateria() {
+        if (Build.VERSION.SDK_INT < 23 || bateriaAsked) return;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (bateriaAsked || !hasWindowFocus()) return;   // otro cuadro está en pantalla: se intenta de nuevo en el próximo minuto
+                    android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                    if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) { bateriaAsked = true; return; }
+                    android.content.SharedPreferences sp = getSharedPreferences("yapur", Context.MODE_PRIVATE);
+                    long ahora = System.currentTimeMillis(), ultima = sp.getLong("bateria_pedida", 0L);
+                    if (ultima <= ahora && ahora - ultima < BATERIA_CADA_MS) { bateriaAsked = true; return; }
+                    bateriaAsked = true;
+                    sp.edit().putLong("bateria_pedida", ahora).apply();
+                    try {
+                        startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+                    } catch (ActivityNotFoundException e) {
+                        startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));   // algunos celulares no traen el cuadro directo
+                    }
+                } catch (Throwable t) { /* el pedido es una ayuda: si falla, la ubicación sigue como antes */ }
+            }
+        });
+    }
+
     private boolean hasLocationPermission() {
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
             || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
@@ -412,6 +443,7 @@ public class MainActivity extends Activity {
                     startService(it);
                 }
                 pedirNotificaciones();
+                pedirSinRestriccionBateria();
                 return "ok";
             } catch (Throwable t) {
                 return "error";

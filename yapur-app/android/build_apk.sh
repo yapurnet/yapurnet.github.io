@@ -83,7 +83,7 @@ grep -aq "Lar/net/yapur/gestion/MainActivity;" "$WORK/check.dex" || { echo "ERRO
 grep -aq "Lar/net/yapur/gestion/UbicacionService;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "$SERVER_URL" "$WORK/check.dex" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }
 # El servicio de ubicación: declarado, no exportado y del tipo «location» (Android 14 no deja arrancarlo sin esto), con sus permisos
-for perm in ACCESS_FINE_LOCATION FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION POST_NOTIFICATIONS; do
+for perm in ACCESS_FINE_LOCATION FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION POST_NOTIFICATIONS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
   echo "$BADGE" | grep -q "^uses-permission: name='android.permission.$perm'" || { echo "ERROR: falta el permiso $perm en el manifiesto" >&2; rm -f "$OUT"; exit 1; }
 done
 echo "$BADGE" | grep -q "ACCESS_BACKGROUND_LOCATION" && { echo "ERROR: el manifiesto pide ubicación en segundo plano; no hace falta y no debe pedirse" >&2; rm -f "$OUT"; exit 1; }
