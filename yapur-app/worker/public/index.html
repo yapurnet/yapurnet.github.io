@@ -1110,10 +1110,17 @@ function parseMonto(t){
   else n=parseFloat(s.replace(',','.'));
   return isFinite(n)&&n>0?Math.round(n):null;
 }
+const metodoDe=n=>/transfer|cbu|alias/.test(n)?'transferencia':/mercado\s*pago/.test(n)?'mercadopago':'efectivo';
+const conceptoDe=n=>/reconex/.test(n)?'reconexion':/reclamo|visita/.test(n)?'reclamo':'instalacion';
 function parsePago(t){
   const n=norm(t),monto=parseMonto(t);if(!monto)return null;
-  return {monto,metodo:/transfer|cbu|alias/.test(n)?'transferencia':/mercado\s*pago/.test(n)?'mercadopago':'efectivo',
-    concepto:/reconex/.test(n)?'reconexion':/reclamo|visita/.test(n)?'reclamo':'instalacion',nota:String(t).trim().slice(0,160)};
+  return {monto,metodo:metodoDe(n),concepto:conceptoDe(n),nota:String(t).trim().slice(0,160)};
+}
+/* «PAGO: (Transferencia)» sin monto: se sabe que se cobró y cómo, pero no cuánto (si dice «no pagó» o «pendiente», no cuenta) */
+function pagoSinMonto(t){
+  const n=norm(t);
+  if(parseMonto(t)||!/transfer|cbu|alias|mercado\s*pago|efectivo/.test(n)||/\b(no|sin|pendiente|debe|despues)\b/.test(n))return null;
+  return {metodo:metodoDe(n),concepto:conceptoDe(n),texto:String(t).replace(/[()]/g,' ').replace(/\s+/g,' ').trim().slice(0,60)};
 }
 function parseReporte(txt){
   const out={};
@@ -1125,12 +1132,12 @@ function parseReporte(txt){
   });
   if(out.dni!=null)out.dni=out.dni.replace(/\D/g,'');
   if(out.ip!=null){const ip=out.ip.match(/\d{1,3}(?:\.\d{1,3}){3}/);out.ip=ip?ip[0]:'';}
-  if(out.pago!=null)out.pago=parsePago(out.pago);
+  if(out.pago!=null){const raw=out.pago;out.pago=parsePago(raw);if(!out.pago){const sm=pagoSinMonto(raw);if(sm)out.pagoSinMonto=sm;}}
   return out;
 }
 /* después de dar de alta con un reporte que traía pago: abre «Cobrar» ya completado (espera a que el cliente nuevo llegue a la lista) */
 async function cobrarTrasAlta(id,pre){
-  if(!can('cobrar')&&!can('cobrarCampo'))return toast('El reporte traía un pago de '+fmtMoney(pre.monto)+': que lo registre quien cobra','bad');
+  if(!can('cobrar')&&!can('cobrarCampo'))return toast('El reporte traía un pago'+(pre.monto?' de '+fmtMoney(pre.monto):' sin monto')+': que lo registre quien cobra','bad');
   for(let i=0;i<40&&!S.clientes.has(id);i++)await new Promise(r=>setTimeout(r,100));
   openCobro(id,null,pre);
 }
@@ -1191,7 +1198,7 @@ function openClientForm(id){
     const vig=()=>{const b=$('#cf-vig',el);if(b)b.hidden=!billChanged();};
     ['cf-plan','cf-precio'].forEach(i=>{const n=$('#'+i,el);if(n){n.addEventListener('input',upd);n.addEventListener('change',upd);n.addEventListener('input',vig);n.addEventListener('change',vig);}});
     $$('[data-extra]',el).forEach(i=>{i.addEventListener('change',upd);i.addEventListener('change',vig);});upd();vig();
-    let repPago=null;
+    let repPago=null,repSin=null;
     const repGo=$('#cf-rep-go',el);
     if(repGo)repGo.addEventListener('click',()=>{
       const r=parseReporte($('#cf-rep-txt',el).value),out=$('#cf-rep-out',el),got=[];
@@ -1199,7 +1206,7 @@ function openClientForm(id){
       put('cf-nombre',r.nombre,'nombre');put('cf-dni',r.dni,'DNI');put('cf-ip',r.ip,'IP');put('cf-tel',r.tel,'teléfono');put('cf-dir',r.dir,'domicilio');put('cf-loc',r.loc,'localidad');
       if(r.plan){const pn=norm(r.plan).trim(),pl=plans.find(x=>norm(x.nombre).trim()===pn)||plans.find(x=>norm(x.nombre).includes(pn));
         if(pl){const sel=$('#cf-plan',el);sel.value=pl.id;sel.dispatchEvent(new Event('change',{bubbles:true}));got.push('plan');}}
-      repPago=r.pago||null;
+      repPago=r.pago||null;repSin=repPago?null:(r.pagoSinMonto||null);
       if(!got.length&&!repPago){out.className='hint bad';out.textContent='No encontré datos. Pegá el texto con líneas como «NOMBRE: …», «DNI: …», «IP: …» y «PAGO: …».';return;}
       $('#cf-estado',el).value='activo';$('#cf-desde',el).value=addMonths(curMonth(),1);
       const falta=[['cf-tel','teléfono'],['cf-dir','calle y número']].filter(([i])=>!v(i)).map(x=>x[1]);
@@ -1207,6 +1214,7 @@ function openClientForm(id){
       out.className='hint'+(dup?' bad':'');
       out.textContent='Cargué: '+got.join(', ')+'. Quedó activo y empieza a cobrar en '+monthLabel(addMonths(curMonth(),1))+'.'
         +(repPago?' Pago detectado: '+(METODOS[repPago.metodo]||repPago.metodo).toLowerCase()+' '+fmtMoney(repPago.monto)+' ('+(CONCEPTOS[repPago.concepto]||repPago.concepto).toLowerCase()+'): al guardar se abre el cobro ya completado.':'')
+        +(repSin?' El pago ('+repSin.texto+') no trae monto: al guardar se abre «Cobrar» con '+(METODOS[repSin.metodo]||repSin.metodo).toLowerCase()+' elegido, para que pongas cuánto fue.':'')
         +(falta.length?' Falta completar: '+falta.join(' y ')+'.':'')
         +(dup?' Ojo: ya hay un cliente con ese '+(r.dni&&String(dup.dni||'').replace(/\D/g,'')===r.dni?'DNI':'IP')+' ('+dup.nombre+').':'');
     });
@@ -1254,7 +1262,7 @@ function openClientForm(id){
         if(old)await saveClient(old,patch);
         else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},patch));nuevo=nid;}
         toast('Cliente guardado');closeModal();
-        if(nuevo&&repPago)cobrarTrasAlta(nuevo,repPago);
+        if(nuevo&&(repPago||repSin))cobrarTrasAlta(nuevo,repPago||{concepto:repSin.concepto,metodo:repSin.metodo});
       }catch(err){dbError(err);}
     });
   }});
@@ -3531,7 +3539,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='966838052a';
+const BUILD='183aa2f2e7';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
