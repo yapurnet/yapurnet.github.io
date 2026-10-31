@@ -275,6 +275,68 @@ async function openStream(token) {
     r = await call('GET', '/api/mis-cobros', undefined, T2);
     t('cobros: el técnico ve que quedó anulado', r.j.docs[0].data.items.pt2.anulado === true, r);
 
+    /* ---- comprobante de las transferencias: quien cobra en la calle tiene que adjuntar la foto ---- */
+    const jpg = n => 'data:image/jpeg;base64,' + Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(n, 7)]).toString('base64');
+    const getImg = async (id, tok) => { const x = await fetch(BASE + '/api/comprobante/' + id, { headers: tok ? { authorization: 'Bearer ' + tok } : {} }); const b = Buffer.from(await x.arrayBuffer()); return { s: x.status, ct: x.headers.get('content-type'), n: b.length, magic: b.length > 2 ? b[0].toString(16) + b[1].toString(16) : '' }; };
+    r = await PAGO(T2, 'pc0', { c: 'cp1', concepto: 'reclamo', monto: 3000, metodo: 'transferencia' });
+    t('comprobante: una transferencia sin foto se rechaza y explica por qué', r.s === 403 && /foto del comprobante/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pc0', { c: 'cp1', concepto: 'reclamo', monto: 3000, metodo: 'transferencia', comp: 'aaaaaaaaaaaaaaaaaaaa' });
+    t('comprobante: con un número de foto que no existe, tampoco', r.s === 403 && /no sirve|ya se us/i.test(r.j.error), r);
+    r = await call('POST', '/api/comprobante', { img: jpg(1500) }, T);
+    t('comprobante: quien no puede cobrar no sube fotos', r.s === 403, r);
+    r = await call('POST', '/api/comprobante', { img: jpg(1500) });
+    t('comprobante: sin sesión no se sube nada', r.s === 401, r);
+    r = await call('POST', '/api/comprobante', { img: 'data:image/png;base64,iVBORw0KGgo=' }, T2);
+    t('comprobante: solo se aceptan JPEG (la app los reduce antes de subir)', r.s === 400, r);
+    r = await call('POST', '/api/comprobante', { img: 'data:image/jpeg;base64,' + Buffer.alloc(3000, 1).toString('base64') }, T2);
+    t('comprobante: un archivo que dice ser JPEG pero no lo es, se rechaza', r.s === 400, r);
+    r = await call('POST', '/api/comprobante', { img: jpg(470e3) }, T2);
+    t('comprobante: una foto enorme se rechaza (pide una más chica)', r.s === 413, r);
+    r = await call('POST', '/api/comprobante', { img: jpg(40e3) }, T2);
+    t('comprobante: el técnico sube la foto y recibe su número', r.s === 200 && /^[a-f0-9]{20}$/.test(r.j.id), r);
+    const C1 = r.j.id;
+    r = await PAGO(T2, 'pc1', { c: 'cp1', concepto: 'reclamo', monto: 3000, metodo: 'transferencia', comp: C1 });
+    t('comprobante: la transferencia con su foto se registra', r.s === 200, r);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, A);
+    t('comprobante: el cobro guarda el número de la foto y el medio', r.j.data.items.pc1.comp === C1 && r.j.data.items.pc1.metodo === 'transferencia', r.j.data.items.pc1);
+    r = await PAGO(T2, 'pc2', { c: 'cp1', concepto: 'reclamo', monto: 3000, metodo: 'transferencia', comp: C1 });
+    t('comprobante: la misma foto no sirve para otro cobro', r.s === 403 && /ya se us/i.test(r.j.error), r);
+    r = await call('POST', '/api/comprobante', { img: jpg(30e3) }, T2); const C2 = r.j.id;
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { pc3: { c: 'cp1', concepto: 'reclamo', monto: 100, fecha: HOY, hora: '12:00', recibo: 'RTpc3', metodo: 'transferencia', comp: C2 }, pc4: { c: 'cp1', concepto: 'reclamo', monto: 100, fecha: HOY, hora: '12:01', recibo: 'RTpc4', metodo: 'transferencia', comp: C2 } } } }, T2);
+    t('comprobante: ni dos cobros del mismo lote con una sola foto', r.s === 403, r);
+    r = await call('POST', '/api/comprobante', { img: jpg(30e3) }, T2); const C3 = r.j.id;
+    r = await PAGO(T2, 'pc5', { c: 'cp1', concepto: 'reclamo', monto: 2500, metodo: 'efectivo', comp: C3 });
+    t('comprobante: en efectivo no hace falta foto (y si la mandan, se descarta)', r.s === 200, r);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, A);
+    t('comprobante: el cobro en efectivo no guarda la foto', !('comp' in r.j.data.items.pc5), r.j.data.items.pc5);
+    r = await PAGO(T2, 'pc6', { c: 'cp1', concepto: 'reclamo', monto: 2500, metodo: 'cheque' });
+    t('comprobante: un medio de pago inventado no sirve para esquivar la foto', r.s === 403 && /medio de pago/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pc7', { c: 'cp1', concepto: 'reclamo', monto: 2500, metodo: undefined });
+    t('comprobante: tampoco dejarlo sin medio de pago', r.s === 403, r);
+    r = await PAGO(T2, 'pc8', { c: 'cp1', concepto: 'reclamo', monto: 3000, metodo: 'transferencia', comp: C3 });
+    t('comprobante: una foto subida y sin usar puede usarse en una transferencia', r.s === 200, r);
+    let g = await getImg(C1, T2);
+    t('comprobante: quien lo cobró ve su foto (imagen JPEG)', g.s === 200 && g.ct === 'image/jpeg' && g.magic === 'ffd8' && g.n > 40e3, g);
+    g = await getImg(C1, O);
+    t('comprobante: la oficina la ve', g.s === 200 && g.ct === 'image/jpeg', g);
+    g = await getImg(C1, A);
+    t('comprobante: el administrador la ve', g.s === 200, g);
+    g = await getImg(C1, T);
+    t('comprobante: otro técnico no puede verla', g.s === 403, g);
+    g = await getImg(C1, '');
+    t('comprobante: sin sesión no se ve', g.s === 401, g);
+    g = await getImg('0123456789abcdef0123', O);
+    t('comprobante: un número que no existe da «no encontrado»', g.s === 404, g);
+    r = await call('GET', '/api/mis-cobros', undefined, T2);
+    t('comprobante: «mis cobros» del técnico trae el número de su foto', r.j.docs.some(d => d.data.items.pc1 && d.data.items.pc1.comp === C1), r.j.docs.length);
+    r = await PATCH_PAGO(O, 'pc9', { c: 'cinst', concepto: 'otro', monto: 1000, fecha: HOY, hora: '12:30', recibo: 'ROpc9', metodo: 'transferencia' });
+    t('comprobante: a la oficina no se le exige la foto (ve el banco)', r.s === 200, r);
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { pc1: { comp: 'bbbbbbbbbbbbbbbbbbbb' } } } }, T2);
+    t('comprobante: un cobro ya registrado no admite cambiar la foto', r.s === 403, r);
+    let tope = null;
+    for (let i = 0; i < 25 && !tope; i++) { const q = await call('POST', '/api/comprobante', { img: jpg(1500) }, T2); if (q.s !== 200) tope = q; }
+    t('comprobante: hay un tope de fotos subidas sin usar (no se llena el servidor)', tope && tope.s === 429, tope);
+
     /* ---- routers MikroTik: el router manda su lista, el sistema nunca se conecta ni corta ---- */
     const ING = (tok, q, body) => fetch(BASE + '/api/router/ingest?' + q, { method: 'POST', headers: Object.assign({ 'content-type': 'text/plain' }, tok ? { authorization: 'Bearer ' + tok } : {}), body }).then(async x => ({ s: x.status, j: await x.json().catch(() => null) }));
     r = await call('POST', '/api/routers', { nombre: 'ADMIN02', kinds: ['q', 'p', 'd', 'x'] }, O);

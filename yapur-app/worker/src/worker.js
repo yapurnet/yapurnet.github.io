@@ -116,6 +116,11 @@ function canWrite(u, p, coll, op) {
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
 const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reconexion', 'reclamo', 'otro'];
+const METODOS_PAGO = ['efectivo', 'transferencia', 'mercadopago', 'otro'];
+/* quien cobra en la calle y recibe una transferencia tiene que adjuntar la foto del comprobante */
+const COMP_METODOS = ['transferencia'];
+const COMP_ID_RE = /^[a-f0-9]{20}$/;
+const COMP_MAX = 450e3;   // bytes de la foto ya comprimida (la app la reduce antes de subirla)
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
@@ -136,6 +141,7 @@ function guard(u, p, coll, existing, patch, ctx) {
   } else if (coll === 'red') {
     return guardRed(u, p, old, items);
   } else if (coll === 'pagos') {
+    const usadas = new Set();   /* fotos de comprobante ya tomadas por un cobro de este mismo lote */
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
       if (!isPlain(nw)) return 'Formato inválido.';
@@ -147,12 +153,19 @@ function guard(u, p, coll, existing, patch, ctx) {
           if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
           if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
           if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
+          if (!METODOS_PAGO.includes(nw.metodo)) return 'El medio de pago no es válido.';
+          if (COMP_METODOS.includes(nw.metodo)) {
+            if (typeof nw.comp !== 'string' || !COMP_ID_RE.test(nw.comp)) return 'Las transferencias llevan la foto del comprobante: adjuntala antes de cobrar.';
+            if (usadas.has(nw.comp) || !ctx || !ctx.comprobanteLibre(nw.comp, u.id)) return 'La foto del comprobante no sirve o ya se usó en otro cobro. Sacá una nueva.';
+            usadas.add(nw.comp);
+          } else delete nw.comp;
           /* «Instalación» solo a quien todavía no está instalado; a un cliente ya instalado (una mudanza) se le cobra «Reinstalación». No se mira lo cobrado: el técnico no ve los pagos */
           const cl = ctx ? ctx.clienteDe(nw.c) : null;
           if (nw.concepto === 'instalacion') {
             if (cl && cl.estado && cl.estado !== 'pendiente') return 'Ese cliente ya está instalado. Si se mudó, cobrá «Reinstalación (mudanza)».';
           } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
+        if (u.role === 'admin' || p.cobrar) delete nw.comp;   /* el comprobante lo adjunta quien cobra en la calle */
         nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();
         continue;
       }
@@ -258,6 +271,7 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
       CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS comprobantes(id TEXT PRIMARY KEY, uid TEXT NOT NULL, ts INTEGER NOT NULL, pago TEXT, data BLOB NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
     `);
@@ -428,6 +442,12 @@ export class YapurDB extends DurableObject {
       /* la base de Cloudflare admite hasta 2 MB por fila: se mide en bytes, no en letras */
       if (s.length > 6e5 && bytesOf(s) > 1.9e6) throw httpErr(413, 'El documento es demasiado grande.', 'quota_exceeded');
       this.putDoc(coll, id, s);
+      if (coll === 'pagos') {   /* la foto del comprobante queda atada a este cobro: no se puede usar en otro */
+        for (const k of Object.keys(data.items)) {
+          const it = data.items[k];
+          if (isPlain(it) && typeof it.comp === 'string' && COMP_ID_RE.test(it.comp)) this.sql.exec('UPDATE comprobantes SET pago=? WHERE id=? AND pago IS NULL', id + '/' + k, it.comp);
+        }
+      }
       this.SEQ++;
       out = { seq: this.SEQ, next, patch: data };
     });
@@ -506,6 +526,33 @@ export class YapurDB extends DurableObject {
     return null;
   }
   /* los cobros que registró esta persona en los últimos días (quien cobra en la calle no lee la caja entera) */
+  /* ----- foto del comprobante de una transferencia (la sube quien cobra en la calle) ----- */
+  comprobanteLibre(id, uid) {
+    const r = this.q1('SELECT uid,pago FROM comprobantes WHERE id=?', id);
+    return !!r && r.uid === uid && !r.pago;
+  }
+  comprobanteGuardar(u, body) {
+    const p = effPerms(u);
+    if (u.role !== 'admin' && !p.cobrar && !p.cobrarCampo) throw httpErr(403, 'Tu usuario no puede registrar pagos.', 'permission_denied');
+    const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(body.img || ''));
+    if (!m) throw httpErr(400, 'La foto no es válida: tiene que ser una imagen JPEG.');
+    let bin;
+    try { bin = Uint8Array.from(atob(m[1]), ch => ch.charCodeAt(0)); } catch (e) { throw httpErr(400, 'La foto no es válida.'); }
+    if (bin.length > COMP_MAX) throw httpErr(413, 'La foto es demasiado grande.', 'quota_exceeded');
+    if (bin.length < 1000 || bin[0] !== 0xFF || bin[1] !== 0xD8 || bin[2] !== 0xFF) throw httpErr(400, 'La foto no es válida: tiene que ser una imagen JPEG.');
+    this.sql.exec('DELETE FROM comprobantes WHERE pago IS NULL AND ts<?', Date.now() - 2 * 864e5);   /* las que no se usaron en 2 días */
+    if (this.q1('SELECT COUNT(*) n FROM comprobantes WHERE uid=? AND pago IS NULL', u.id).n >= 20) throw httpErr(429, 'Tenés demasiadas fotos sin usar. Terminá primero los cobros que tenés en curso.', 'resource_exhausted');
+    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+    this.sql.exec('INSERT INTO comprobantes(id,uid,ts,data) VALUES(?,?,?,?)', id, u.id, Date.now(), bin);
+    return { id };
+  }
+  comprobanteLeer(u, id) {
+    const r = this.q1('SELECT uid,data FROM comprobantes WHERE id=?', id);
+    if (!r) throw httpErr(404, 'No se encontró el comprobante.');
+    if (r.uid !== u.id && !canReadPagos(u, effPerms(u))) throw httpErr(403, 'Tu usuario no puede ver este comprobante.', 'permission_denied');
+    return new Response(r.data, { status: 200, headers: Object.assign({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }, CORS) });
+  }
+
   misCobros(u, dias) {
     const hoy = ymd(), desde = ymd(Date.now() - (dias - 1) * 864e5), docs = [];
     for (const y of new Set([desde.slice(0, 4), hoy.slice(0, 4)])) {
@@ -892,6 +939,12 @@ export class YapurDB extends DurableObject {
       if (!u || !u.activo) return send(401, { error: 'usuario', code: 'unauthenticated' });
       return this.openStream(u);
     }
+    if (p === '/api/comprobante' && m === 'POST') {
+      const a = await this.needAuth(request);
+      return send(200, this.comprobanteGuardar(a.user, readBody(raw, 7e5)));
+    }
+    const mcomp = /^\/api\/comprobante\/([a-f0-9]{20})$/.exec(p);
+    if (mcomp && m === 'GET') return this.comprobanteLeer((await this.needAuth(request)).user, mcomp[1]);
     if (p === '/api/mis-cobros' && m === 'GET') {
       const a = await this.needAuth(request);
       return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));

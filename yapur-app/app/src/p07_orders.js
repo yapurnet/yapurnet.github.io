@@ -88,6 +88,7 @@ function cobroOrdenHTML(o,c){
       <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>lista.includes(k)).map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
+      ${soloCampo()?compHTML('ff'):''}
     </div></div>`;
 }
 function openFinishOrder(o){
@@ -104,6 +105,8 @@ function openFinishOrder(o){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
     const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
     const ckc=$('#ff-cobro',el);
+    const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>$('#ff-met',el).value):null;
+    if(comp){$('#ff-met',el).addEventListener('change',comp.sync);comp.sync();}
     if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
@@ -111,6 +114,7 @@ function openFinishOrder(o){
       const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
       const cobra=ckc&&ckc.checked,monto=cobra?num($('#ff-monto',el).value):0;
       if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
+      const sinFoto=cobra&&comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');   /* antes de cerrar la orden: si falta la foto no se cierra nada */
       try{
         await saveOrder(o,{estado:'hecha',resultado:$('#ff-res',el).value.trim(),cierre:todayStr()+' '+nowTime()});
         const cp={};
@@ -122,7 +126,7 @@ function openFinishOrder(o){
         let rec=null;
         if(cobra){
           /* la orden ya quedó cerrada: si el cobro falla se avisa claro y se carga a mano, sin repetir nada */
-          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:$('#ff-met',el).value,nota:TIPOS_ORD[o.tipo]||''});}
+          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:$('#ff-met',el).value,nota:TIPOS_ORD[o.tipo]||'',comp:comp?comp.id():null});}
           catch(err2){toast('La orden se cerró, pero el cobro NO se registró. Cargalo con «Cobrar».','bad');}
         }
         toast(rec?'Orden cerrada y cobro registrado':'Orden cerrada');closeModal();
