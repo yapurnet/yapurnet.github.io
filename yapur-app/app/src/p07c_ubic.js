@@ -16,7 +16,7 @@ function ubicAviso(st){
   return new Promise(res=>{
     let done=false;const fin=v=>{if(!done){done=true;res(v);}};
     openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>de ${st.desde} a ${st.hasta} h</b> mientras la app esté abierta o activa en tu celular.</p>
-      <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li></ul>
+      <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li></ul>
       <div class="actions"><button class="btn ghost" type="button" data-act="no">Ahora no</button><button class="btn primary" type="button" data-act="si">Entendido, aceptar</button></div>`,
       onMount(el){el.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;fin(b.dataset.act==='si');closeModal();});},
       onClose:()=>fin(false)});
@@ -68,7 +68,8 @@ function ubicLoop(){
     if(b&&typeof b.startLocation==='function'){   /* en el APK, un servicio sigue enviando con la pantalla apagada */
       try{UB.nat=String(b.startLocation(NET.token,UB.st.desde,UB.st.hasta)||'')==='ok';}catch(e){UB.nat=false;}
     }
-    if(!UB.nat)ubicWatch();
+    if(UB.nat){if(UB.watch!=null&&navigator.geolocation)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;}   /* ya manda el servicio: que no mande también la página */
+    else ubicWatch();
     ubicFlush();
   }else ubicStop();
   ubicChip();

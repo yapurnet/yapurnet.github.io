@@ -7,7 +7,9 @@
 # Opcionales:
 #   SERVER_URL            dirección https del sistema (si no, la primera línea que no sea comentario de server-url.txt)
 #   EXPECTED_CERT_SHA256  huella esperada de la clave (por defecto, la de FAVL); ALLOW_ANY_CERT=1 solo para pruebas con una clave de prueba
-#   ANDROID_JAR, DX       rutas de android.jar (API 23) y de dx
+#   ANDROID_JAR, DX       rutas de android.jar (API 23: con él se compila, para no usar por error nada más nuevo que Android 6) y de dx
+#   AAPT, AAPT_JAR        el aapt y el android.jar con que se arma el manifiesto. El servicio de ubicación usa «foregroundServiceType»,
+#                         que existe desde Android 10: AAPT_JAR tiene que ser de API 29 o más (en GitHub, elegir_sdk.sh lo busca solo)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -16,6 +18,8 @@ OUT="$(realpath -m "${1:?Falta el nombre del APK de salida}")"
 EXPECTED_CERT_SHA256="${EXPECTED_CERT_SHA256:-35543672e437a9400b0b27066f4cca0c3848e4565c6088b84b53a8b169c67c2c}"
 ANDROID_JAR="${ANDROID_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}"
 DX="${DX:-$(command -v dx || echo /usr/lib/android-sdk/build-tools/debian/dx)}"
+AAPT="${AAPT:-aapt}"
+AAPT_JAR="${AAPT_JAR:-$ANDROID_JAR}"
 export KEYSTORE_PASSWORD KEY_PASSWORD
 PKG="ar.net.yapur.gestion"
 
@@ -45,7 +49,8 @@ echo "==> 3/6 Manifiesto (versión $VERSION_NAME / código $VERSION_CODE)"
 sed -e "s/__VERSION_CODE__/$VERSION_CODE/" -e "s/__VERSION_NAME__/$VERSION_NAME/" "$ROOT/AndroidManifest.xml" > "$WORK/AndroidManifest.xml"
 
 echo "==> 4/6 Empaquetado"
-aapt package -f -M "$WORK/AndroidManifest.xml" -S "$ROOT/res" -A "$ROOT/assets" -I "$ANDROID_JAR" -0 arsc -F "$WORK/base.apk"
+"$AAPT" package -f -M "$WORK/AndroidManifest.xml" -S "$ROOT/res" -A "$ROOT/assets" -I "$AAPT_JAR" -0 arsc -F "$WORK/base.apk" \
+  || { echo "ERROR: no se pudo armar el manifiesto. Si dice «No resource identifier found for attribute 'foregroundServiceType'», AAPT_JAR ($AAPT_JAR) es de una versión de Android anterior a la 10: usá el android.jar de platforms/android-34." >&2; exit 1; }
 (cd "$WORK" && zip -X -q base.apk classes.dex)
 zipalign -f -p 4 "$WORK/base.apk" "$WORK/aligned.apk"
 
@@ -65,7 +70,7 @@ if [ "${ALLOW_ANY_CERT:-}" != "1" ] && [ "$CERT" != "$EXPECTED_CERT_SHA256" ]; t
   exit 1
 fi
 zipalign -c -p 4 "$OUT"
-BADGE="$(aapt dump badging "$OUT")"
+BADGE="$("$AAPT" dump badging "$OUT")"
 echo "$BADGE" | grep -q "^package: name='$PKG' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'" \
   || { echo "ERROR: el APK no tiene el paquete/versión esperados" >&2; rm -f "$OUT"; exit 1; }
 echo "$BADGE" | grep -q "^launchable-activity: name='$PKG.MainActivity'" || { echo "ERROR: falta la actividad principal" >&2; rm -f "$OUT"; exit 1; }
@@ -73,8 +78,20 @@ LISTA="$(unzip -Z1 "$OUT")"
 for f in AndroidManifest.xml classes.dex resources.arsc assets/offline.html res/drawable/ic_launcher.png; do
   printf '%s\n' "$LISTA" | grep -qxF "$f" || { echo "ERROR: falta $f dentro del APK" >&2; rm -f "$OUT"; exit 1; }
 done
-unzip -p "$OUT" classes.dex | grep -aq "Lar/net/yapur/gestion/MainActivity;" || { echo "ERROR: classes.dex no trae MainActivity" >&2; rm -f "$OUT"; exit 1; }
-unzip -p "$OUT" classes.dex | grep -aq "$SERVER_URL" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }
+unzip -p "$OUT" classes.dex > "$WORK/check.dex"
+grep -aq "Lar/net/yapur/gestion/MainActivity;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae MainActivity" >&2; rm -f "$OUT"; exit 1; }
+grep -aq "Lar/net/yapur/gestion/UbicacionService;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
+grep -aq "$SERVER_URL" "$WORK/check.dex" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }
+# El servicio de ubicación: declarado, no exportado y del tipo «location» (Android 14 no deja arrancarlo sin esto), con sus permisos
+for perm in ACCESS_FINE_LOCATION FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION POST_NOTIFICATIONS; do
+  echo "$BADGE" | grep -q "^uses-permission: name='android.permission.$perm'" || { echo "ERROR: falta el permiso $perm en el manifiesto" >&2; rm -f "$OUT"; exit 1; }
+done
+echo "$BADGE" | grep -q "ACCESS_BACKGROUND_LOCATION" && { echo "ERROR: el manifiesto pide ubicación en segundo plano; no hace falta y no debe pedirse" >&2; rm -f "$OUT"; exit 1; }
+XML="$("$AAPT" dump xmltree "$OUT" AndroidManifest.xml)"
+SVC="$(printf '%s\n' "$XML" | awk '/E: service/ {f=1} f {print} /E: activity|E: receiver|E: provider/ && f {exit}')"
+printf '%s\n' "$SVC" | grep -q 'ar.net.yapur.gestion.UbicacionService' || { echo "ERROR: el manifiesto no declara el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$SVC" | grep -Eq 'foregroundServiceType\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x8$' || { echo "ERROR: el servicio de ubicación no es del tipo «location»" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$SVC" | grep -Eq 'android:exported\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x0$' || { echo "ERROR: el servicio de ubicación no debe estar exportado" >&2; rm -f "$OUT"; exit 1; }
 if ! unzip -Zv "$OUT" resources.arsc | grep -q "compression method:.*stored"; then
   echo "ERROR: resources.arsc debe ir sin comprimir (Android 11+ lo exige)" >&2; rm -f "$OUT"; exit 1
 fi

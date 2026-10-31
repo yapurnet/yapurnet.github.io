@@ -31,6 +31,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq aapt apksigner zipalign android-sdk-platform-23 dalvik-exchange zip unzip
 
+      - name: Elegir el Android SDK de la máquina (el servicio de ubicación necesita el manifiesto de Android 10 o más)
+        run: bash yapur-app/android/elegir_sdk.sh >> "$GITHUB_ENV"
+
       - name: Compilar y firmar con la clave de FAVL
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}

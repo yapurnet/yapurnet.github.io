@@ -43,7 +43,7 @@ Un precio cambia **desde un mes**; los meses anteriores conservan lo que valían
 
 En la ficha del cliente, en «Cargar ubicación» y al terminar una orden de instalación hay un botón **«Usar mi ubicación actual (GPS)»**. Estando en el domicilio, el técnico lo toca, el celular toma lecturas unos segundos, se queda con la más precisa y completa las coordenadas (se ve la precisión, por ejemplo ±6 m); después toca Guardar. Si la lectura es floja (más de ±25 m) avisa que conviene repetir al aire libre.
 
-- El GPS se lee **solo cuando se toca el botón**: no hay seguimiento ni ubicación en segundo plano.
+- Este botón lee el GPS **solo cuando se toca**. (La ubicación de los técnicos en horario laboral es otra cosa, con su aviso y su horario: ver «Dónde están los técnicos».)
 - Hace falta la versión del APK que trae el permiso de ubicación (2.2 o posterior). La primera vez Android pide el permiso: elegir **«Mientras se usa la app»** y dejar activada la ubicación precisa. Si el APK es anterior, el botón avisa que falta actualizar.
 - En Chrome (sin APK) también funciona, con el permiso de ubicación del sitio.
 - Al terminar una instalación, el técnico ya no ve la opción de «activar al cliente»: eso cambia la facturación y solo lo puede hacer quien edita clientes (antes la opción aparecía igual y fallaba, y con ella se perdía la ubicación).
@@ -100,7 +100,9 @@ Cómo funciona, para que sea claro y justo con quien trabaja en la calle:
 - **Cada técnico acepta un aviso** la primera vez que entra («Ubicación en horario laboral»): dice el horario, quién la ve y que se borra. Si dice «Ahora no», no se manda nada. Mientras comparte, ve el cartel **Ubicación activa** arriba.
 - **Un punto por minuto** como máximo (el servidor no guarda más de uno cada 20 segundos) y **se borra a los 14 días**. No entra en las copias de seguridad.
 - Solo los usuarios de tipo **Técnico** comparten ubicación. La oficina y el administrador no.
-- En Chrome o en la app, la posición se manda **mientras la app está abierta**. Para que siga con la pantalla apagada hace falta la versión del APK con el servicio de ubicación.
+- **En Chrome** la posición se manda **mientras la página está abierta**. **En el APK (versión 2.4 o posterior)** un servicio propio la manda también **con la pantalla apagada**, hasta las 20 h; se ve una notificación fija «Gestión YAPUR: ubicación activa» mientras dura, y se detiene solo al terminar el horario, al cerrar sesión o si el servidor lo indica. Con un APK anterior sigue valiendo lo de Chrome.
+- Al instalar el APK nuevo, Android pide al técnico el permiso de ubicación (**«Mientras se usa la app»**, ubicación precisa) y, en Android 13 o posterior, el de notificaciones. No se pide ubicación «en segundo plano» ni se usa fuera del horario.
+- **Batería:** el GPS cada minuto durante el día gasta más batería. En algunos celulares (Xiaomi, Samsung, Motorola…) conviene poner la app en **«Sin restricciones»** en Ajustes → Aplicaciones → Gestión YAPUR → Batería; si no, el sistema puede dormirla y la posición llega con huecos. En Android 14 o posterior el técnico puede quitar la notificación deslizándola; el servicio sigue, y el cartel «Ubicación activa» de la app lo confirma.
 - Si el técnico no dio el permiso de ubicación del celular, ve «Ubicación sin permiso» y en la pestaña figura «Todavía no mandó su posición».
 
 ## Cliente nuevo desde el reporte del técnico
@@ -176,7 +178,7 @@ La misma app funciona como página: abrir la dirección en Chrome del celular �
 
 Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y los avisos de actualización y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación) y la red (alta de cajas y empalmes con el GPS, orden por cercanía, conexión del cliente a su caja y puerto, permisos y borrados bloqueados).
 
-**No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso y la lectura real del GPS) (se verificó que el APK se arma, firma y alinea bien, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
+**No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso, la lectura real del GPS y el servicio de ubicación con la pantalla apagada, que depende de cada marca y versión de Android) (se verificó que el APK se arma, firma y alinea bien y que el manifiesto declara el servicio como corresponde, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
 
 Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test` (GitHub también las corre en cada pedido de cambios, con `probar-yapur.yml`).
 

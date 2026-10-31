@@ -7,9 +7,17 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Solo para guardar copias y listados en Descargas en Android 9 o anterior; en Android 10+ no hace falta ningún permiso -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
-    <!-- GPS: solo se usa cuando el técnico toca «Usar mi ubicación actual» para cargar las coordenadas de la casa de un cliente. No hay seguimiento ni ubicación en segundo plano -->
+    <!-- Ubicación, para dos cosas:
+         1) cuando el técnico toca «Usar mi ubicación actual» para cargar las coordenadas de la casa de un cliente;
+         2) solo para los técnicos que aceptaron el aviso y solo dentro del horario laboral (8 a 20 h): un servicio en primer plano, con una notificación
+            «ubicación activa» a la vista, le manda su posición a la oficina aunque la pantalla esté apagada.
+         Fuera del horario no hay ningún seguimiento. No se pide ubicación «en segundo plano» (ACCESS_BACKGROUND_LOCATION): alcanza con el servicio en primer plano. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Android 13+: para poder mostrar la notificación «ubicación activa» -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-feature android:name="android.hardware.location" android:required="false"/>
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <application
@@ -30,5 +38,9 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name="ar.net.yapur.gestion.UbicacionService"
+            android:exported="false"
+            android:foregroundServiceType="location"/>
     </application>
 </manifest>

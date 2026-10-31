@@ -103,6 +103,39 @@ async def main():
         check('la oficina con permiso no puede cambiar el horario (no hay botón)', await op.evaluate("!document.querySelector('#tu-hz')"))
         # --- los técnicos no ven la pestaña
         check('el técnico no tiene la pestaña «Técnicos»', 'Técnicos' not in await pp.inner_text('#tabs'), await pp.inner_text('#tabs'))
+        # --- en el APK: un servicio nativo (YapurApp) manda la ubicación aun con la pantalla apagada; la página no debe mandar también
+        api('POST', '/api/ubicacion/horario', {'desde': 0, 'hasta': 24}, TA)
+        INIT = '''
+          window.__nat = {calls: [], stops: 0, ret: '__RET__'};
+          window.YapurApp = {startLocation: (t, d, h) => { window.__nat.calls.push([t, d, h]); return window.__nat.ret; }, stopLocation: () => { window.__nat.stops++; }};
+          window.__watch = {n: 0, cleared: 0};
+          const gl = navigator.geolocation, w = gl.watchPosition.bind(gl), c = gl.clearWatch.bind(gl);
+          gl.watchPosition = (...a) => { window.__watch.n++; return w(...a); };
+          gl.clearWatch = (...a) => { window.__watch.cleared++; return c(...a); };
+        '''
+        nctx = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation=geo, permissions=['geolocation'])
+        await nctx.route('**/fonts.g*/**', lambda r: r.abort())
+        await nctx.add_init_script(INIT.replace('__RET__', 'ok'))
+        np_ = await login(nctx, 'pedro', 'pedro1')
+        await np_.wait_for_function('window.__nat.calls.length >= 1', timeout=8000)
+        call = await np_.evaluate('[window.__nat.calls[0], NET.token]')
+        check('en el APK la página le pasa al servicio la sesión y el horario', call[0][0] == call[1] and call[0][1] == 0 and call[0][2] == 24, call)
+        await np_.wait_for_timeout(1500)
+        check('si el servicio arrancó («ok»), la página no usa el GPS de la ventana', await np_.evaluate('window.__watch.n') == 0 and await np_.evaluate('UB.nat') is True)
+        check('con el servicio andando sigue el cartel «Ubicación activa»', 'Ubicación activa' in await np_.inner_text('#ubChip'))
+        await np_.evaluate('NET.logout()')
+        await np_.wait_for_function('window.__nat.stops >= 1', timeout=5000)
+        check('al cerrar la sesión se detiene el servicio', True)
+        # sin el permiso del celular el servicio no arranca: la página sigue con el GPS de la ventana (que lo pide) y, cuando el servicio arranca, lo apaga
+        pctx = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation=geo, permissions=['geolocation'])
+        await pctx.route('**/fonts.g*/**', lambda r: r.abort())
+        await pctx.add_init_script(INIT.replace('__RET__', 'permiso'))
+        pg_ = await login(pctx, 'pedro', 'pedro1')
+        await pg_.wait_for_function('window.__watch.n >= 1', timeout=8000)
+        check('sin permiso para el servicio, la página usa el GPS de la ventana', await pg_.evaluate('UB.nat') is False)
+        await pg_.evaluate("window.__nat.ret = 'ok'; ubicLoop()")
+        await pg_.wait_for_function('window.__watch.cleared >= 1 && UB.nat === true && UB.watch === null', timeout=5000)
+        check('cuando el servicio arranca, la página apaga su propio GPS (no mandan los dos)', True)
         await br.close()
     print('\nERRORES:', 'ninguno' if not ERR else ERR)
     print(f'{sum(res)} ok, {len(res) - sum(res)} con fallas')
