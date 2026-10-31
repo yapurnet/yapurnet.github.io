@@ -247,6 +247,14 @@ export default {
    El horario lo controla el servidor con su propio reloj: no importa lo que diga el celular. Argentina no tiene horario de verano: siempre UTC-3. */
 const UBIC_DIAS = 14;
 const UBIC_MIN_MS = 20e3;            // no se guarda más de un punto cada 20 segundos por técnico
+const JORNADA_DIAS = 90;             // las horas de ingreso y fin se guardan 90 días (sin coordenadas: solo la distancia a la base)
+const JORNADA_TOL = 10;              // minutos de tolerancia para llegar tarde, si no se cambia
+/* distancia en metros entre dos puntos (fórmula de Haversine) */
+const distM = (a1, o1, a2, o2) => {
+  const r = Math.PI / 180, dA = (a2 - a1) * r, dO = (o2 - o1) * r;
+  const h = Math.sin(dA / 2) ** 2 + Math.cos(a1 * r) * Math.cos(a2 * r) * Math.sin(dO / 2) ** 2;
+  return Math.round(2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h))));
+};
 const UBIC_HUECO_MS = 10 * 60e3;     // más de 10 minutos sin recibir nada = «sin señal»
 /* Tramos sin señal dentro de la ventana [ws, we]: el celular manda un punto por minuto, así que un silencio largo es
    un celular apagado, sin datos o con la app cerrada. `tss` viene ordenado. Sin ningún punto no se inventa un hueco
@@ -289,11 +297,13 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS comprobantes(id TEXT PRIMARY KEY, uid TEXT NOT NULL, ts INTEGER NOT NULL, pago TEXT, data BLOB NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS jornada(uid TEXT NOT NULL, dia TEXT NOT NULL, ingreso INTEGER NOT NULL, origen TEXT NOT NULL, dist INTEGER, regreso INTEGER, en_base INTEGER NOT NULL DEFAULT 1, ult INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(uid,dia)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
     `);
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
     this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
     this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
+    this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
     this.loadUsers();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
@@ -846,15 +856,16 @@ export class YapurDB extends DurableObject {
       const acc = Number(x.acc);
       this.sql.exec('INSERT OR REPLACE INTO ubic(uid,ts,lat,lng,acc) VALUES(?,?,?,?,?)', u.id, x._ts, Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6, isFinite(acc) && acc >= 0 ? Math.min(Math.round(acc), 99999) : null);
       n++;
+      this.jornadaAuto(u, x._ts, lat, lng, Number(x.acc));
     }
-    if (Math.random() < 0.01) this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5);
+    if (Math.random() < 0.01) { this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5); this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(now - JORNADA_DIAS * 864e5).fecha); }
     return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, desde: h.desde, hasta: h.hasta };
   }
   ubicLista(dia) {
     const h = this.ubicHorario(), ahora = Date.now(), hoy = arTime(ahora).fecha;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(arDayStart(dia))) dia = hoy;
     const t0 = arDayStart(dia), t1 = t0 + 864e5;
-    const esHoy = dia === hoy, dentro = this.ubicDentro(ahora, h);
+    const esHoy = dia === hoy, dentro = this.ubicDentro(ahora, h), jc = this.jornadaBase(), laborable = jc.dias.includes(new Date(arDayStart(dia) + 12 * 3600e3).getUTCDay());
     const ws = t0 + h.desde * 3600e3, wend = t0 + h.hasta * 3600e3, we = esHoy ? Math.min(ahora, wend) : wend, abierta = esHoy && ahora < wend;
     const tecnicos = [...this.USERS.values()].filter(u => u.role === 'tecnico' && u.activo).map(u => {
       const ultima = this.q1('SELECT ts,lat,lng,acc FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts DESC LIMIT 1', u.id, t0, t1) || null;
@@ -868,9 +879,80 @@ export class YapurDB extends DurableObject {
       else if (esHoy) estado = !dentro ? 'fuera_horario' : !ultima ? 'sin_datos' : ahora - ultima.ts <= UBIC_HUECO_MS ? 'en_linea' : 'sin_senal';
       const huecos = acepto ? ubicHuecos(todos.map(r => r.ts), ws, we, abierta) : [];
       const sinSenalMin = Math.round(huecos.reduce((s, g) => s + (g.hasta - g.desde), 0) / 60000);
-      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin };
+      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin, jornada: this.jornadaDia(u, dia, hoy, ahora, ws, jc, laborable) };
     });
-    return { dia, hoy, ahora, horario: h, dias: UBIC_DIAS, tecnicos };
+    return { dia, hoy, ahora, horario: h, dias: UBIC_DIAS, tecnicos, jornada: { base: jc.base, radio: jc.radio, tol: jc.tol, dias: jc.dias } };
+  }
+
+  /* ================= Jornada laboral: ingreso y regreso a la base de los técnicos =================
+     Todo sale solo de las posiciones que manda el celular (con la app abierta), comparadas con la base:
+       · INGRESO: la primera posición del día dentro del radio de la base.
+       · REGRESO: cada vez que, después de haber salido, vuelve a entrar al radio. El último regreso del día es el fin de la jornada
+         (los técnicos vuelven a la base a guardar los vehículos); si sale otra vez, ese regreso deja de ser el último.
+     Para que una posición pegada al borde del radio no cuente como entrar y salir, se «sale» recién a 1,5 veces el radio.
+     La hora es la del servidor (o la de la posición, que el servidor limita a los últimos 15 minutos). Si el técnico nunca pasa por la base, puede
+     tocar «Iniciar jornada» (queda marcado como manual, con la distancia a la base). Solo se guardan horas y distancias, nunca coordenadas.
+     El técnico ve un aviso en su pantalla hasta que toca «Entendido» (queda anotado), pero el registro no depende de eso. */
+  jornadaBase() {
+    const r = this.q1("SELECT v FROM meta WHERE k='jornada_base'");
+    let b = null;
+    try { b = r && JSON.parse(r.v); } catch (e) { b = null; }
+    if (!isPlain(b)) b = {};
+    const lat = Number(b.lat), lng = Number(b.lng);
+    const base = b.lat != null && b.lng != null && isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+    const radio = Number.isInteger(b.radio) && b.radio >= 30 && b.radio <= 2000 ? b.radio : 150;
+    const tol = Number.isInteger(b.tol) && b.tol >= 0 && b.tol <= 120 ? b.tol : JORNADA_TOL;
+    const dias = Array.isArray(b.dias) ? [...new Set(b.dias.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [1, 2, 3, 4, 5, 6];   // 0 = domingo
+    return { base, radio, tol, dias };
+  }
+  jornadaFila(uid, dia) { return this.q1('SELECT ingreso, origen, dist, regreso, en_base, ult FROM jornada WHERE uid=? AND dia=?', uid, dia) || null; }
+  jornadaEnterado(uid) { return !!this.q1('SELECT 1 x FROM meta WHERE k=?', 'jornadaok:' + uid); }
+  jornadaPos(b) {
+    const lat = Number(b && b.lat), lng = Number(b && b.lng);
+    return b && b.lat != null && b.lng != null && isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0) ? { lat, lng } : null;
+  }
+  jornadaVista(f) { return f ? { ingreso: f.ingreso, origen: f.origen, dist: f.dist == null ? null : f.dist, regreso: f.regreso || null, enBase: !!f.en_base } : null; }
+  /* lo que ve el propio técnico */
+  jornadaEstado(u) {
+    const ahora = Date.now(), dia = arTime(ahora).fecha, c = this.jornadaBase();
+    return { aplica: u.role === 'tecnico', enterado: this.jornadaEnterado(u.id), dia, ahora, horario: this.ubicHorario(), hayBase: !!c.base, fila: this.jornadaVista(this.jornadaFila(u.id, dia)) };
+  }
+  jornadaSoloTecnico(u) { if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos registran su jornada.'); }
+  /* se llama con cada posición guardada, en orden */
+  jornadaAuto(u, ts, lat, lng, acc) {
+    const c = this.jornadaBase();
+    if (!c.base || (isFinite(acc) && acc > 300)) return;   // sin base, o una posición demasiado imprecisa para decir si está adentro o afuera
+    const dia = arTime(ts).fecha, d = distM(lat, lng, c.base.lat, c.base.lng), f = this.jornadaFila(u.id, dia), now = Date.now();
+    if (!f) {
+      if (d <= c.radio) this.sql.exec('INSERT OR IGNORE INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult) VALUES(?,?,?,?,?,1,?)', u.id, dia, Math.min(ts, now), 'base', d, ts);
+      return;
+    }
+    if (ts <= f.ult) return;   // una posición atrasada que llegó después de otras más nuevas no cambia nada
+    if (d <= c.radio && !f.en_base) this.sql.exec('UPDATE jornada SET regreso=?, en_base=1, ult=? WHERE uid=? AND dia=?', Math.min(ts, now), ts, u.id, dia);
+    else if (d > c.radio * 1.5 && f.en_base) this.sql.exec('UPDATE jornada SET en_base=0, ult=? WHERE uid=? AND dia=?', ts, u.id, dia);
+    else this.sql.exec('UPDATE jornada SET ult=? WHERE uid=? AND dia=?', ts, u.id, dia);
+  }
+  /* «Iniciar jornada» a mano: para quien arranca sin pasar por la base */
+  jornadaIngreso(u, b) {
+    this.jornadaSoloTecnico(u);
+    const now = Date.now(), dia = arTime(now).fecha;
+    if (this.jornadaFila(u.id, dia)) return this.jornadaEstado(u);   // ya empezó: la hora no se pisa
+    const c = this.jornadaBase(), pos = this.jornadaPos(b), dist = pos && c.base ? distM(pos.lat, pos.lng, c.base.lat, c.base.lng) : null;
+    const enBase = dist !== null && dist <= c.radio;
+    this.sql.exec('INSERT INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult) VALUES(?,?,?,?,?,?,?)', u.id, dia, now, enBase ? 'base' : 'manual', dist, enBase ? 1 : 0, now);
+    return this.jornadaEstado(u);
+  }
+  /* lo que ve la oficina de un técnico en un día: estado, horas y minutos de atraso respecto del inicio del horario */
+  jornadaDia(u, dia, hoy, ahora, ws, jc, laborable) {
+    const v = this.jornadaVista(this.jornadaFila(u.id, dia)), esHoy = dia === hoy;
+    const atraso = v ? Math.max(0, Math.round((v.ingreso - ws) / 60000)) : 0;
+    let estado;
+    if (v) estado = v.regreso && v.enBase ? 'termino' : esHoy ? 'trabajando' : 'sin_cierre';
+    else if (!jc.base) estado = 'sin_base';   // la jornada está apagada hasta que se carga la base: nada de alarmas
+    else if (!laborable) estado = 'no_laborable';
+    else if (dia > hoy) estado = 'esperando';
+    else estado = esHoy && ahora <= ws + jc.tol * 60e3 ? 'esperando' : 'sin_ingreso';
+    return { estado, enterado: this.jornadaEnterado(u.id), ingreso: v ? v.ingreso : null, origen: v ? v.origen : null, dist: v ? v.dist : null, regreso: v ? v.regreso : null, enBase: v ? v.enBase : false, atrasoMin: atraso, tarde: atraso > jc.tol };
   }
 
   /* ================= HTTP ================= */
@@ -986,6 +1068,25 @@ export class YapurDB extends DurableObject {
       const a = await this.needAuth(request);
       if (!effPerms(a.user).verTecnicos) throw httpErr(403, 'No tenés permiso para ver la ubicación de los técnicos.');
       return send(200, this.ubicLista(url.searchParams.get('dia') || ''));
+    }
+    if (p === '/api/jornada' && m === 'GET') return send(200, this.jornadaEstado((await this.needAuth(request)).user));
+    if (p === '/api/jornada/acepto' && m === 'POST') {
+      const a = await this.needAuth(request);
+      this.jornadaSoloTecnico(a.user);
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'jornadaok:' + a.user.id, String(Date.now()));
+      return send(200, this.jornadaEstado(a.user));
+    }
+    if (p === '/api/jornada/ingreso' && m === 'POST') return send(200, this.jornadaIngreso((await this.needAuth(request)).user, readBody(raw, 2e3)));
+    if (p === '/api/jornada/base' && m === 'POST') {
+      await this.needAdmin(request);
+      const b = readBody(raw, 2e3), pos = this.jornadaPos(b), radio = Number(b.radio), tol = Number(b.tol);
+      if (b.lat != null && b.lng != null && !pos) throw httpErr(400, 'La ubicación de la base no es válida.');
+      if (!Number.isInteger(radio) || radio < 30 || radio > 2000) throw httpErr(400, 'El radio tiene que estar entre 30 y 2000 metros.');
+      if (!Number.isInteger(tol) || tol < 0 || tol > 120) throw httpErr(400, 'La tolerancia tiene que estar entre 0 y 120 minutos.');
+      if (!Array.isArray(b.dias) || b.dias.some(d => !Number.isInteger(d) || d < 0 || d > 6)) throw httpErr(400, 'Los días de trabajo no son válidos.');
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'jornada_base', JSON.stringify({ lat: pos ? Math.round(pos.lat * 1e6) / 1e6 : null, lng: pos ? Math.round(pos.lng * 1e6) / 1e6 : null, radio, tol, dias: [...new Set(b.dias)].sort() }));
+      const c = this.jornadaBase();
+      return send(200, { base: c.base, radio: c.radio, tol: c.tol, dias: c.dias });
     }
     if (p === '/api/ubicacion/horario' && m === 'POST') {
       await this.needAdmin(request);

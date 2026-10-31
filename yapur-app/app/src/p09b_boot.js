@@ -229,7 +229,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
   S.ready=true;refreshAll();updateNetBar();
-  ubicInit();
+  ubicInit().then(jornadaInit,jornadaInit);
 })();
 
 startUpdateWatch();
