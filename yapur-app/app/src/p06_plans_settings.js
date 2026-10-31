@@ -36,6 +36,22 @@ function clientQueueCmd(c){
   if(!p||!ip)return null;
   return '/queue simple add name="'+String(c.nombre||'').replace(/["\\$]/g,'')+'" target='+ip+' '+queueText(p);
 }
+/* ----- planes de noviembre: velocidades y ráfaga salen de las colas reales de los routers (ráfaga = velocidad + 10M, umbral 8M, 22 s, garantizada 256k subida / 1M bajada) ----- */
+const PLANES_NOV=[['Plan 100',15,18000],['Plan 200',15,19000],['Plan 20 Mbps',20,23000],['Plan 25 Mbps',25,24000],['Plan 30 Mbps',30,35000]];
+const planNovObj=([nombre,v,precio])=>({nombre,bajada:v,subida:v,precio,tecnologia:'ambas',perfil:'',q:{burstB:(v+10)+'M',burstS:(v+10)+'M',thrB:'8M',thrS:'8M',timeB:'22',timeS:'22',limitB:'1M',limitS:'256k'},activo:true,mod:Date.now()});
+const planesNovFaltan=()=>{const have=new Set([...S.planes.values()].map(p=>norm(p.nombre)));return PLANES_NOV.filter(x=>!have.has(norm(x[0])));};
+/* planes que ya no se usan: activos, que no son de noviembre y sin clientes activos (solo se ofrecen cuando los de noviembre ya están cargados y hay clientes) */
+const planesViejos=()=>!S.clientes.size||planesNovFaltan().length?[]:[...S.planes.values()].filter(p=>p.activo!==false&&!PLANES_NOV.some(x=>norm(x[0])===norm(p.nombre))&&planClientCount(p.id)===0);
+async function cargarPlanesNov(){
+  const falta=planesNovFaltan();if(!falta.length)return toast('Los planes de noviembre ya están cargados');
+  if(!await askConfirm(`Se crean ${falta.length} planes: ${falta.map(x=>x[0]+' ('+fmtMoney(x[2])+')').join(', ')}. Después podés editar el precio, la ráfaga o cualquier dato. ¿Los cargo?`,'Cargar planes'))return;
+  try{for(const x of falta)await S.db.collection('planes').doc(newId()).set(planNovObj(x));toast(falta.length+' planes cargados');}catch(err){dbError(err);}
+}
+async function desactivarPlanesViejos(){
+  const v=planesViejos();if(!v.length)return;
+  if(!await askConfirm(`Se desactivan ${v.length} planes sin clientes: ${v.map(p=>p.nombre).join(', ')}. Dejan de ofrecerse a clientes nuevos y no se borran: se pueden volver a activar desde «Editar».`,'Desactivar planes'))return;
+  try{for(const p of v){const o=Object.assign({},p);delete o.id;o.activo=false;o.mod=Date.now();await S.db.collection('planes').doc(p.id).set(o);}toast(v.length+' planes desactivados');}catch(err){dbError(err);}
+}
 function planClientCount(id){let n=0;for(const c of S.clientes.values())if(c.planId===id&&c.estado==='activo')n++;return n;}
 /* ----- precios con vigencia: aviso del cambio programado y bloque «rige desde» de los formularios ----- */
 function nextChangeHTML(item){
@@ -182,17 +198,24 @@ function openServicioForm(id){
 VIEWS.planes={
   mount(el){
     el.innerHTML=`<div class="head-row"><h2>Planes de velocidad</h2>${isAdmin()?'<button class="btn primary" type="button" id="pl-new">Nuevo plan</button>':''}</div>
-      ${isAdmin()?'':'<div class="notice info">Solo el administrador puede crear o cambiar planes.</div>'}<div class="plans" id="pl-list"></div>
+      ${isAdmin()?'':'<div class="notice info">Solo el administrador puede crear o cambiar planes.</div>'}<div id="pl-nov"></div><div class="plans" id="pl-list"></div>
       <div class="head-row" style="margin-top:20px"><h2>Servicios adicionales</h2>${isAdmin()?'<button class="btn primary" type="button" id="sv-new">Nuevo servicio</button>':''}</div>
       <p class="muted small">Se suman al plan de internet. Cada cliente puede tener uno, otro o los dos.</p><div class="list" id="sv-list"></div>`;
     const sn=$('#sv-new',el);if(sn)sn.addEventListener('click',()=>openServicioForm(null));
     $('#sv-list',el).addEventListener('click',e=>{const b=e.target.closest('[data-edit-sv]');if(b)openServicioForm(b.dataset.editSv);});
     const nb=$('#pl-new',el);if(nb)nb.addEventListener('click',()=>openPlanForm(null));
     $('#pl-list',el).addEventListener('click',e=>{const b=e.target.closest('[data-edit-plan]');if(b)openPlanForm(b.dataset.editPlan);});
+    $('#pl-nov',el).addEventListener('click',e=>{const b=e.target.closest('[data-nov]');if(!b)return;if(b.dataset.nov==='cargar')cargarPlanesNov();else desactivarPlanesViejos();});
     this.update();
   },
   update(){
     const l=$('#pl-list');if(!l)return;
+    const nov=$('#pl-nov');
+    if(nov){
+      const f=isAdmin()&&S.loaded.planes?planesNovFaltan():[],v=isAdmin()&&S.loaded.planes&&S.loaded.clientes?planesViejos():[];
+      nov.innerHTML=(f.length?`<div class="notice info" style="margin-bottom:12px"><b>Planes de noviembre</b><div class="small">Faltan ${f.length}: ${esc(f.map(x=>x[0]+' ('+fmtMoney(x[2])+')').join(', '))}. Se crean con la velocidad y la ráfaga que usan los routers.</div><div class="actions start"><button class="btn primary small" type="button" data-nov="cargar">Cargar planes de noviembre</button></div></div>`:'')
+        +(v.length?`<div class="notice info" style="margin-bottom:12px"><b>${v.length} ${v.length===1?'plan viejo sin clientes':'planes viejos sin clientes'}</b><div class="small">${esc(v.map(p=>p.nombre).join(', '))}. Si ya no existen, desactivalos para que no se ofrezcan.</div><div class="actions start"><button class="btn small" type="button" data-nov="viejos">Desactivar planes sin clientes</button></div></div>`:'');
+    }
     const sl=$('#sv-list');if(sl)sl.innerHTML=serviciosList().length?serviciosList().map(servicioRow).join(''):'<div class="hint">Todavía no hay servicios adicionales.</div>';
     const rows=[...S.planes.values()].sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
     l.innerHTML=rows.length?rows.map(planCard).join(''):`<div class="empty" style="grid-column:1/-1"><b>Todavía no hay planes</b><span>${isAdmin()?'Creá el primero para poder asignarlo a los clientes.':'El administrador todavía no cargó planes.'}</span></div>`;
