@@ -91,6 +91,18 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Clientes sin plan:** si al importar avisa «Velocidades sin plan», creá esos planes en *Planes* (la velocidad de bajada tiene que coincidir) y volvé a importar el mismo CSV con **Completar** tildado: les asigna el plan, y si su precio especial es igual al del plan, lo saca.
 - **Datos del recibo:** *Ajustes → Datos del recibo* (nombre comercial, razón social, CUIT, Ingresos Brutos, domicilio, teléfonos, web, punto de venta y alias de pago). Se cargan una vez y salen en todos los recibos, como en el recibo de papel: ORIGINAL · NO VÁLIDO COMO FACTURA, punto de venta y número, cliente, condición de venta, período facturado y vencimiento, tabla con el servicio, importe total y alias. Se puede copiar, mandar por WhatsApp (mismo contenido en texto) o **imprimir** (desde la computadora). El número del recibo sigue siendo el código de la app (fecha + letras).
 
+## Dónde están los técnicos (horario laboral)
+
+La pestaña **Técnicos** muestra, para cada técnico, cuándo fue la última vez que mandó su posición, su precisión, el recorrido del día y dos botones: **Ver en el mapa** (abre Maps en su última posición) y **Recorrido del día** (ruta aproximada en Maps). Hay un selector de día para mirar los anteriores. La ve el administrador y quien tenga el permiso **«Ver dónde están los técnicos»** (Ajustes → Perfiles).
+
+Cómo funciona, para que sea claro y justo con quien trabaja en la calle:
+- **Solo en horario laboral: de 8 a 20 h** (hora de Argentina). El horario lo controla el servidor con su reloj: lo que llega fuera de ese rango se descarta aunque el celular lo mande. El administrador lo cambia con **Cambiar el horario**.
+- **Cada técnico acepta un aviso** la primera vez que entra («Ubicación en horario laboral»): dice el horario, quién la ve y que se borra. Si dice «Ahora no», no se manda nada. Mientras comparte, ve el cartel **Ubicación activa** arriba.
+- **Un punto por minuto** como máximo (el servidor no guarda más de uno cada 20 segundos) y **se borra a los 14 días**. No entra en las copias de seguridad.
+- Solo los usuarios de tipo **Técnico** comparten ubicación. La oficina y el administrador no.
+- En Chrome o en la app, la posición se manda **mientras la app está abierta**. Para que siga con la pantalla apagada hace falta la versión del APK con el servicio de ubicación.
+- Si el técnico no dio el permiso de ubicación del celular, ve «Ubicación sin permiso» y en la pestaña figura «Todavía no mandó su posición».
+
 ## Cliente nuevo desde el reporte del técnico
 
 En **Clientes → Nuevo cliente**, arriba, está **Completar con el reporte del técnico**: pegás el texto que manda el técnico por WhatsApp y toca **Completar los datos**.

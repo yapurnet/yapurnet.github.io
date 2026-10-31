@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -224,6 +224,14 @@ export default {
   }
 };
 
+/* ================= ubicación de los técnicos en horario laboral ================= */
+/* Solo se guarda lo que llega dentro del horario (por defecto de 8 a 20 h, hora de Argentina) y se borra a los 14 días.
+   El horario lo controla el servidor con su propio reloj: no importa lo que diga el celular. Argentina no tiene horario de verano: siempre UTC-3. */
+const UBIC_DIAS = 14;
+const UBIC_MIN_MS = 20e3;            // no se guarda más de un punto cada 20 segundos por técnico
+const arTime = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
+const arDayStart = fecha => Date.parse(fecha + 'T00:00:00-03:00');
+
 /* ================= la base de datos y toda la lógica ================= */
 export class YapurDB extends DurableObject {
   constructor(ctx, env) {
@@ -245,10 +253,12 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
       CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
     `);
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
     this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
+    this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
     this.loadUsers();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
@@ -674,6 +684,52 @@ export class YapurDB extends DurableObject {
     return { ok: true, part, registros: c.n, total, ignorados: c.bad };
   }
 
+  /* ----- ubicación de los técnicos ----- */
+  ubicHorario() {
+    const r = this.q1("SELECT v FROM meta WHERE k='ubic_horario'");
+    const [d, h] = String(r && r.v || '8,20').split(',').map(Number);
+    return Number.isInteger(d) && Number.isInteger(h) && d >= 0 && h <= 24 && d < h ? { desde: d, hasta: h } : { desde: 8, hasta: 20 };
+  }
+  ubicDentro(ts, h) { const hr = arTime(ts).min / 60; return hr >= h.desde && hr < h.hasta; }
+  ubicAcepto(uid) { return !!this.q1('SELECT 1 x FROM meta WHERE k=?', 'ubicok:' + uid); }
+  ubicEstado(u) {
+    const h = this.ubicHorario();
+    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), desde: h.desde, hasta: h.hasta, dentro: this.ubicDentro(Date.now(), h), dias: UBIC_DIAS };
+  }
+  ubicGuardar(u, b) {
+    if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos comparten su ubicación.');
+    if (!this.ubicAcepto(u.id)) throw httpErr(409, 'Primero hay que aceptar el aviso de ubicación.', 'sin_aceptar');
+    const h = this.ubicHorario(), now = Date.now();
+    const pts = (Array.isArray(b.pts) ? b.pts : [b]).filter(isPlain).slice(0, 30);
+    pts.forEach(x => { const t = Number(x.ts); x._ts = isFinite(t) && t <= now + 60e3 && t >= now - 15 * 60e3 ? t : now; });
+    pts.sort((x, y) => x._ts - y._ts);
+    let n = 0, fuera = 0;
+    for (const x of pts) {
+      const lat = Number(x.lat), lng = Number(x.lng);
+      if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) continue;
+      if (!this.ubicDentro(x._ts, h)) { fuera++; continue; }
+      if (this.q1('SELECT 1 x FROM ubic WHERE uid=? AND ts>? AND ts<?', u.id, x._ts - UBIC_MIN_MS, x._ts + UBIC_MIN_MS)) continue;   // ya hay uno a menos de 20 s (también sirve para los puntos que llegan tarde)
+      const acc = Number(x.acc);
+      this.sql.exec('INSERT OR REPLACE INTO ubic(uid,ts,lat,lng,acc) VALUES(?,?,?,?,?)', u.id, x._ts, Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6, isFinite(acc) && acc >= 0 ? Math.min(Math.round(acc), 99999) : null);
+      n++;
+    }
+    if (Math.random() < 0.01) this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5);
+    return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, desde: h.desde, hasta: h.hasta };
+  }
+  ubicLista(dia) {
+    const h = this.ubicHorario(), ahora = Date.now(), hoy = arTime(ahora).fecha;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(arDayStart(dia))) dia = hoy;
+    const t0 = arDayStart(dia), t1 = t0 + 864e5;
+    const tecnicos = [...this.USERS.values()].filter(u => u.role === 'tecnico' && u.activo).map(u => {
+      const ultima = this.q1('SELECT ts,lat,lng,acc FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts DESC LIMIT 1', u.id, t0, t1) || null;
+      const todos = this.q('SELECT ts,lat,lng FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts', u.id, t0, t1);
+      const paso = Math.max(1, Math.ceil(todos.length / 240));
+      const ruta = todos.filter((_, i) => i % paso === 0 || i === todos.length - 1).map(r => [r.ts, r.lat, r.lng]);
+      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto: this.ubicAcepto(u.id), ultima, puntos: todos.length, ruta };
+    });
+    return { dia, hoy, ahora, horario: h, dias: UBIC_DIAS, tecnicos };
+  }
+
   /* ================= HTTP ================= */
   async fetch(request) {
     try {
@@ -768,6 +824,26 @@ export class YapurDB extends DurableObject {
     if (p === '/api/mis-cobros' && m === 'GET') {
       const a = await this.needAuth(request);
       return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));
+    }
+    if (p === '/api/ubicacion/estado' && m === 'GET') return send(200, this.ubicEstado((await this.needAuth(request)).user));
+    if (p === '/api/ubicacion/acepto' && m === 'POST') {
+      const a = await this.needAuth(request);
+      if (a.user.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos comparten su ubicación.');
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubicok:' + a.user.id, String(Date.now()));
+      return send(200, this.ubicEstado(a.user));
+    }
+    if (p === '/api/ubicacion' && m === 'POST') return send(200, this.ubicGuardar((await this.needAuth(request)).user, readBody(raw, 2e5)));
+    if (p === '/api/ubicaciones' && m === 'GET') {
+      const a = await this.needAuth(request);
+      if (!effPerms(a.user).verTecnicos) throw httpErr(403, 'No tenés permiso para ver la ubicación de los técnicos.');
+      return send(200, this.ubicLista(url.searchParams.get('dia') || ''));
+    }
+    if (p === '/api/ubicacion/horario' && m === 'POST') {
+      await this.needAdmin(request);
+      const b = readBody(raw, 1e3), d = Number(b.desde), h = Number(b.hasta);
+      if (!Number.isInteger(d) || !Number.isInteger(h) || d < 0 || h > 24 || d >= h) throw httpErr(400, 'El horario no es válido: «desde» tiene que ser menor que «hasta» (de 0 a 24).');
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubic_horario', d + ',' + h);
+      return send(200, { horario: this.ubicHorario() });
     }
     let mm;
     if (p === '/api/router/ingest' && m === 'POST') return send(200, await this.routerIngest(request, url, raw));

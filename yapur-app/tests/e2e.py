@@ -8,6 +8,15 @@ SHOTS = os.environ.get('SHOTS', os.path.join(ROOT, 'tests', 'shots'))
 os.makedirs(SHOTS, exist_ok=True)
 
 results = []
+async def sin_aviso(pg):
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no» como lo haría una persona
+    if await pg.evaluate("S.realRole") != 'tecnico': return
+    try:
+        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
+    except Exception: pass
+
 def check(name, cond, extra=''):
     results.append((name, bool(cond)))
     print(('ok   ' if cond else 'FAIL ') + name + ('' if cond else f'  -> {extra}'))
@@ -32,6 +41,7 @@ async def login_ui(pg, user, clave):
     await pg.fill('#lg-pass', clave)
     await pg.click('#lg-form button[type=submit]')
     await pg.wait_for_selector('#tabs .tab', timeout=10000)
+    await sin_aviso(pg)
 
 async def main():
     code = CODE

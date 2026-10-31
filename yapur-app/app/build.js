@@ -3,7 +3,7 @@
    que es lo que publica Cloudflare. Uso: node build.js [carpeta de salida ...] */
 const fs = require('fs'), path = require('path'), cp = require('child_process'), crypto = require('crypto');
 const src = path.join(__dirname, 'src');
-const JS = ['p04_core.js', 'p04b_net.js', 'p05_clients.js', 'p05b_red.js', 'p06_plans_settings.js', 'p06c_profiles.js', 'p06b_import.js', 'p06d_routers.js', 'p07_orders.js', 'p08_pay.js', 'p09_boot.js', 'p09c_update.js', 'p09b_boot.js'];
+const JS = ['p04_core.js', 'p04b_net.js', 'p05_clients.js', 'p05b_red.js', 'p06_plans_settings.js', 'p06c_profiles.js', 'p06b_import.js', 'p06d_routers.js', 'p07_orders.js', 'p07c_ubic.js', 'p08_pay.js', 'p09_boot.js', 'p09c_update.js', 'p09b_boot.js'];
 const rd = f => fs.readFileSync(path.join(src, f), 'utf8');
 const js = JS.map(rd).join('\n');
 const tmp = path.join(require('os').tmpdir(), 'yapur-all-' + process.pid + '.js');
