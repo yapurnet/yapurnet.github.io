@@ -2415,17 +2415,26 @@ function mesesTxt(l){
   if(l.length<=3)return same?capFirst(l.slice(0,-1).map(m=>nom(m).toLowerCase()).join(', ')+' y '+nom(l[l.length-1]).toLowerCase())+' de '+y:l.map(nm).join(', ');
   return (same?nom(l[0]):nm(l[0]))+' a '+monthLabel(l[l.length-1])+' ('+l.length+' meses)';
 }
-/* Qué clientes pasan a cobrarse desde el mes `eff`. Lo que debían antes queda como «deuda anterior» (aparte de las mensualidades). */
-function bulkCero(eff){
-  const out={cambian:[],conDeuda:0,sinDeuda:0,monto:0,yaDesde:0,omitidos:0};
+/* Qué clientes pasan a cobrarse desde el mes `eff`. Lo que debían antes queda como «deuda anterior» (aparte de las mensualidades).
+   Con `perdonar` no queda nada anotado: se perdonan los meses sin pagar y también la deuda anterior que ya estuviera cargada. */
+function bulkCero(eff,perdonar){
+  const out={cambian:[],conDeuda:0,sinDeuda:0,monto:0,yaDesde:0,omitidos:0,perdonados:0,perdon:0};
   for(const c of S.clientes.values()){
     if(c.estado!=='activo'&&c.estado!=='suspendido'){out.omitidos++;continue;}
     const from=c.desde||(c.alta?c.alta.slice(0,7):curMonth());
-    if(from>=eff){out.yaDesde++;continue;}
+    const ant=perdonar?deudaAntRest(c):0,saldar=ant>0?{deudaAnt:Object.assign({},c.deudaAnt,{m:deudaAntPagado(c),s:todayStr()})}:null;
+    if(from>=eff){
+      if(saldar){out.cambian.push({id:c.id,shard:c._doc||clientShard(c.id),patch:saldar});out.perdonados++;out.perdon+=ant;}
+      else out.yaDesde++;
+      continue;
+    }
     const d=deudaPrevia(c,eff),patch={desde:eff};
+    if(saldar){Object.assign(patch,saldar);out.perdonados++;out.perdon+=ant;}
     if(d.monto>0){
-      const prev=c.deudaAnt&&Number(c.deudaAnt.m)>0?c.deudaAnt:null;
-      patch.deudaAnt={m:(prev?Number(prev.m):0)+d.monto,det:[prev&&prev.det,mesesTxt(d.meses)].filter(Boolean).join(' + '),f:(prev&&prev.f)||todayStr()};
+      if(!perdonar){
+        const prev=c.deudaAnt&&Number(c.deudaAnt.m)>0?c.deudaAnt:null;
+        patch.deudaAnt={m:(prev?Number(prev.m):0)+d.monto,det:[prev&&prev.det,mesesTxt(d.meses)].filter(Boolean).join(' + '),f:(prev&&prev.f)||todayStr()};
+      }
       out.conDeuda++;out.monto+=d.monto;
     }else out.sinDeuda++;
     out.cambian.push({id:c.id,shard:c._doc||clientShard(c.id),patch});
@@ -2438,25 +2447,29 @@ function openCeroBloque(){
   openModal({title:'Empezar a cobrar de cero',wide:true,html:`<p class="muted small">Deja a todos los clientes en cero: no se les cobra ni se les genera deuda antes del mes que elijas. Lo que cada uno debía hasta ese momento queda anotado como <b>Deuda anterior</b>: se ve en su ficha, en Cobranzas y en el Resumen, se cobra aparte y <b>no genera cortes</b>.</p>
     ${S.loaded.clientes&&S.loaded.pagos?'':'<div class="notice bad">Todavía están cargando los clientes y los cobros. Esperá unos segundos y volvé a abrir esto.</div>'}
     ${F('Empezar a cobrar desde','cz-mes',`<input id="cz-mes" type="month" min="${cur}" max="${addMonths(cur,3)}" value="${addMonths(cur,1)}">`,'Los clientes con «cobrar desde» en ese mes o después no se tocan.')}
+    <label class="per"><input type="checkbox" id="cz-perdon"><span class="grow"><b>No dejar deuda anterior: perdonar lo que debían</b><br><span class="small muted">Nadie queda debiendo nada: los meses sin pagar no se anotan ni se cobran, y la deuda anterior que ya estuviera cargada se da por saldada. No se puede deshacer.</span></span></label>
     <div id="cz-out"></div>`,
     onMount(el){
       const show=()=>{
-        const eff=$('#cz-mes',el).value,out=$('#cz-out',el);
+        const eff=$('#cz-mes',el).value,out=$('#cz-out',el),perdonar=$('#cz-perdon',el).checked;
         if(!/^\d{4}-\d{2}$/.test(eff)||eff<cur){out.innerHTML='<div class="notice bad">Elegí el mes desde el que se empieza a cobrar (este mes o uno posterior).</div>';return;}
         if(!S.loaded.clientes||!S.loaded.pagos){out.innerHTML='';return;}
-        const res=bulkCero(eff);
-        out.innerHTML=`<div class="card flat"><h3>${res.cambian.length} ${res.cambian.length===1?'cliente empieza':'clientes empiezan'} a cobrarse desde ${esc(monthLabel(eff))}</h3>
-          <dl class="kv"><dt>Con deuda anterior</dt><dd>${res.conDeuda} ${res.conDeuda===1?'cliente':'clientes'} · ${esc(fmtMoney(res.monto))}</dd><dt>Al día</dt><dd>${res.sinDeuda} ${res.sinDeuda===1?'cliente':'clientes'} sin deuda</dd>${res.yaDesde?`<dt>Ya empiezan ese mes o después</dt><dd>${res.yaDesde} no se tocan</dd>`:''}${res.omitidos?`<dt>Por instalar, de baja o sin servicio</dt><dd>${res.omitidos} no se tocan</dd>`:''}</dl>
+        const res=bulkCero(eff,perdonar),empiezan=res.cambian.filter(x=>x.patch.desde).length;
+        out.innerHTML=`<div class="card flat"><h3>${empiezan} ${empiezan===1?'cliente empieza':'clientes empiezan'} a cobrarse desde ${esc(monthLabel(eff))}</h3>
+          <dl class="kv"><dt>${perdonar?'Meses sin pagar que se perdonan':'Con deuda anterior'}</dt><dd>${res.conDeuda} ${res.conDeuda===1?'cliente':'clientes'} · ${esc(fmtMoney(res.monto))}</dd>${perdonar&&res.perdonados?`<dt>Deuda anterior ya cargada que se da por saldada</dt><dd>${res.perdonados} ${res.perdonados===1?'cliente':'clientes'} · ${esc(fmtMoney(res.perdon))}</dd>`:''}<dt>Al día</dt><dd>${res.sinDeuda} ${res.sinDeuda===1?'cliente':'clientes'} sin deuda</dd>${res.yaDesde?`<dt>Ya empiezan ese mes o después</dt><dd>${res.yaDesde} no se tocan</dd>`:''}${res.omitidos?`<dt>Por instalar, de baja o sin servicio</dt><dd>${res.omitidos} no se tocan</dd>`:''}</dl>
           <div class="actions"><button class="btn primary" type="button" id="cz-go"${res.cambian.length?'':' disabled'}>Poner a ${res.cambian.length} en cero</button></div><div class="hint" id="cz-prog"></div></div>`;
         const go=$('#cz-go',el);
         if(go)go.addEventListener('click',async()=>{
-          if(!await askConfirm(`Se pone en cero a ${res.cambian.length} clientes: empiezan a cobrarse desde ${monthLabel(eff)} y ${res.conDeuda} quedan con deuda anterior (${fmtMoney(res.monto)}). ¿Seguro?`,'Poner en cero'))return;
+          const txt=perdonar
+            ?`Se pone en cero a ${res.cambian.length} clientes y se PERDONA su deuda: ${fmtMoney(res.monto)} de meses sin pagar y ${fmtMoney(res.perdon)} de deuda anterior ya cargada. No queda anotada ni se puede cobrar después. ¿Seguro?`
+            :`Se pone en cero a ${res.cambian.length} clientes: empiezan a cobrarse desde ${monthLabel(eff)} y ${res.conDeuda} quedan con deuda anterior (${fmtMoney(res.monto)}). ¿Seguro?`;
+          if(!await askConfirm(txt,'Poner en cero'))return;
           go.disabled=true;
           try{await applyBulkPrecios(res.cambian,(d,t)=>{const h=$('#cz-prog',el);if(h)h.textContent=`Actualizando… ${d} de ${t}`;});toast(res.cambian.length+' clientes en cero');closeModal();}
           catch(err){dbError(err);go.disabled=false;const h=$('#cz-prog',el);if(h)h.textContent='No se pudo terminar. Los que ya cambiaron no se repiten: volvé a abrir esto y revisá cuántos faltan.';}
         });
       };
-      $('#cz-mes',el).addEventListener('input',show);show();
+      $('#cz-mes',el).addEventListener('input',show);$('#cz-perdon',el).addEventListener('change',show);show();
     }});
 }
 function openImport(){
@@ -3693,7 +3706,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='bf8884ebba';
+const BUILD='c6608d083e';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

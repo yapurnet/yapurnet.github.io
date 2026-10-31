@@ -137,12 +137,20 @@ Cuando los de noviembre ya están cargados y los clientes ya se pasaron a ellos,
 
 **Eliminar un plan:** Planes → el plan → *Editar* → **Eliminar plan** (solo el administrador). Se puede únicamente si **ningún cliente lo usa**: ni los activos, ni los dados de baja, ni en el historial de precios de un cliente (un cliente que antes tuvo ese plan lo conserva ahí para que los meses viejos y la deuda anterior no cambien de precio). Si alguien lo usa, el formulario lo explica («figura en 12 clientes») y no muestra el botón; el servidor también lo rechaza. En ese caso lo que corresponde es **destildar «Plan disponible para clientes nuevos»**: deja de ofrecerse y todo lo cargado sigue intacto. Eliminar no se puede deshacer, pero queda en las copias de seguridad diarias.
 
+## Cómo se arma lo que paga cada cliente: plan + servicios
+
+El total mensual es **el plan de internet + cada servicio adicional** (por ejemplo Plan 100 + Multimedia + Multimedia Net). Los precios de los servicios se cambian en la pestaña *Planes*, sección *Servicios adicionales* (solo el administrador). El **precio especial** reemplaza **solo la parte de internet**: los servicios se suman aparte. Por eso:
+- Cliente con Plan 100 y Multimedia: plan = Plan 100, servicio = Multimedia, precio especial vacío. Cobra lo que vale el plan + lo que vale Multimedia.
+- Si ese cliente tiene un descuento en internet, el precio especial es **solo el internet con descuento**, no el total con el servicio. Si cargás el total, el servicio se cuenta dos veces.
+- Cliente que paga solo un servicio (TV, adicionales): plan «Sin plan» y el servicio tildado.
+- Para controlar la caja del mes: el **Resumen** muestra la *Facturación mensual de activos* y, abajo, cuántos clientes tiene cada plan y cada servicio con su total.
+
 ## Asignar planes y servicios a los clientes ya cargados
 
 En **Ajustes → Importar clientes (CSV)** tildá **Actualizar el plan, los servicios y el precio de los que ya están cargados** y elegí desde qué mes rigen (por defecto el siguiente). El archivo necesita la columna `nombre` y, según lo que quieras cambiar, `plan`, `servicios` y `precio especial`.
 - Se buscan por nombre (sin importar el orden de las palabras). **No se crean clientes nuevos**: las filas sin coincidencia se cuentan aparte y se saltean.
 - `plan` con el nombre exacto del plan (creálo antes en Planes). `Sin plan` deja solo los servicios. `servicios` admite varios: `Multimedia + Multimedia Net`.
-- `precio especial` vacío = que cobre el precio del plan. Si es igual al del plan, se saca solo.
+- `precio especial` es **solo la parte de internet** (los servicios se suman aparte). Vacío = que cobre el precio del plan. Si es igual al del plan, se saca solo.
 - Una fila sin plan ni servicios no toca a nadie. Lo que tenía cada cliente queda guardado hasta el mes anterior, así los meses viejos y la deuda anterior conservan su precio.
 - Antes de confirmar ves cuántos cambian, por plan.
 
@@ -156,6 +164,8 @@ Lo que cada uno debía hasta ese momento **no se pierde**: queda anotado como **
 - **Cobranzas → Deuda anterior** lista a todos (los que más deben primero), con el total por cobrar, botón **Cobrar** y **Recordar por WhatsApp**. El Resumen muestra el total y lleva a esa lista.
 - **Cobrar deuda anterior** acepta pagos parciales y emite recibo («Deuda anterior: Octubre de 2026»). Si se anula el cobro, la deuda vuelve.
 - En la ficha, **Editar → Facturación** permite cargar o corregir la deuda a mano (por ejemplo una que estaba anotada en las notas), y **Dar por saldada** la perdona.
+
+**Sin deuda anterior:** tildá **«No dejar deuda anterior: perdonar lo que debían»** y nadie queda debiendo nada: los meses sin pagar no se anotan y la deuda anterior que ya estuviera cargada se da por saldada (a todos, incluso a quienes ya empezaban ese mes). La pantalla cuenta cuánto se perdona antes de confirmar. **No se puede deshacer**, por eso viene sin tildar. Los cobros ya hechos y los recibos no se tocan.
 
 Correrlo dos veces no mueve a nadie dos veces. Los clientes que ya empiezan ese mes o después, los «por instalar» y los de baja no se tocan.
 

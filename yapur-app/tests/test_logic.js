@@ -206,7 +206,15 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   t('deudaPrevia: suma los meses sin pagar antes del mes elegido (mes pagado no cuenta)',dp.monto===40000&&dp.meses.length===2&&dp.meses.includes(m3)&&dp.meses.includes(cu),dp);
   const rb=bulkCero(nx);
   t('bulkCero: pasa a cobrar desde el mes elegido y suma lo nuevo a la deuda anterior que ya tenía',rb.cambian.length===1&&rb.cambian[0].patch.desde===nx&&rb.cambian[0].patch.deudaAnt.m===70000&&/Septiembre 2026 \\+ /.test(rb.cambian[0].patch.deudaAnt.det)&&rb.conDeuda===1&&rb.monto===40000,rb);
+  const rp=bulkCero(nx,true),pp=rp.cambian[0]&&rp.cambian[0].patch;
+  t('bulkCero perdonando: empieza desde el mes elegido, no anota deuda nueva y da por saldada la que ya tenía',rp.cambian.length===1&&pp.desde===nx&&pp.deudaAnt.m===12000.5&&rp.conDeuda===1&&rp.monto===40000&&rp.perdonados===1&&rp.perdon===17999.5,rp);
+  S.clientes.set('dc',Object.assign({},cc,pp));rebuildDerived();
+  t('bulkCero perdonando: después de aplicarlo no debe deuda anterior ni mensualidades',deudaAntRest(S.clientes.get('dc'))===0&&billing(S.clientes.get('dc')).deuda===0&&bulkCero(nx,true).cambian.length===0);
+  S.clientes.set('dc',cc);rebuildDerived();
   S.clientes.set('dc',Object.assign({},cc,{desde:nx}));rebuildDerived();
+  const rq=bulkCero(nx,true);
+  t('bulkCero perdonando: a quien ya empieza ese mes solo le salda la deuda anterior que tenga (sin tocar «cobrar desde»)',rq.cambian.length===1&&!('desde' in rq.cambian[0].patch)&&rq.perdonados===1&&rq.perdon===17999.5&&rq.yaDesde===0,rq);
+  t('bulkCero sin perdonar: no toca a ese cliente',bulkCero(nx).cambian.length===0);
   t('bulkCero: no mueve dos veces a quien ya empieza ese mes',bulkCero(nx).cambian.length===0&&bulkCero(nx).yaDesde===1);
   t('con «cobrar desde» el mes que viene, hoy no debe mensualidades',billing(S.clientes.get('dc')).deuda===0&&billing(S.clientes.get('dc')).vencidos===0);
   S.clientes.clear();S.pagos.clear();S.planes.clear();rebuildDerived();
