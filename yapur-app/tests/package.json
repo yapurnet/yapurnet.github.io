@@ -2,6 +2,6 @@
   "name": "yapur-pruebas",
   "private": true,
   "description": "Pruebas automáticas de Gestión YAPUR.NET (corren el servidor de Cloudflare en la computadora con wrangler dev).",
-  "scripts": { "test": "node test_build.js && node test_server.js && node test_logic.js && node test_ciclos.js" },
+  "scripts": { "test": "node test_build.js && node test_server.js && node test_ubic.js && node test_logic.js && node test_ciclos.js" },
   "devDependencies": { "wrangler": "^4.151.0" }
 }

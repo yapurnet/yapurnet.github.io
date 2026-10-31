@@ -35,6 +35,7 @@ function allowedTabs(){
   if(can('red'))t.push(['red','Red']);
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
+  if(can('verTecnicos'))t.push(['tecnicos','Técnicos']);
   if(isAdmin())t.push(['ajustes','Ajustes']);
   return t;
 }
@@ -228,6 +229,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
   S.ready=true;refreshAll();updateNetBar();
+  ubicInit();
 })();
 
 startUpdateWatch();
