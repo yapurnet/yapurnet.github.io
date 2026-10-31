@@ -233,8 +233,8 @@ function fotoJpeg(file){
 }
 function compHTML(px){
   return `<div class="fgroup" id="${px}-comp" hidden><div class="legend">Comprobante de la transferencia *</div>
-    <div class="hint">Sacale una foto al comprobante o elegí la captura que te mandó el cliente. Sin la foto no se registra el cobro.</div>
-    <div class="actions start"><button class="btn small" type="button" id="${px}-comp-b">Sacar o elegir foto</button><input id="${px}-comp-f" type="file" accept="image/*" hidden></div>
+    <div class="hint">Sacale una foto al comprobante con la cámara del celular (o usá la captura que te mandó el cliente) y elegila acá. Sin la foto no se registra el cobro.</div>
+    <div class="actions start"><button class="btn small" type="button" id="${px}-comp-b">Elegir la foto</button><input id="${px}-comp-f" type="file" hidden></div>
     <img id="${px}-comp-img" class="comp-thumb" alt="Foto del comprobante" hidden><div class="hint" id="${px}-comp-st"></div></div>`;
 }
 function mountComp(el,px,getMetodo){
