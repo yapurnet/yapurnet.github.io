@@ -119,7 +119,8 @@ const NET=(function(){
     if(seq<=(docSeq.has(k)?docSeq.get(k):baseSeq))return;
     docSeq.set(k,seq);
     const m=data[coll]||(data[coll]=new Map());
-    m.set(id,op==='set'||!m.has(id)?d:deepMerge(m.get(id),d));
+    if(op==='delete')m.delete(id);
+    else m.set(id,op==='set'||!m.has(id)?d:deepMerge(m.get(id),d));
     if(!quiet){dirty.add(coll);kick();}
     else dirty.add(coll);
   }
@@ -227,6 +228,7 @@ const NET=(function(){
   const docRef=(coll,id)=>({
     update:obj=>write(coll,id,'PATCH',obj),
     set:obj=>write(coll,id,'PUT',obj),
+    delete:()=>write(coll,id,'DELETE'),
     onSnapshot:(cb,err)=>watch(coll,id,cb,err)
   });
   const dbApi={

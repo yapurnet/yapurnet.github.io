@@ -23,14 +23,14 @@ function redDescendants(id){
 function napLine(c){
   if(!c||!c.nap)return '';
   const p=S.red.get(c.nap);if(!p)return '';
-  return `<b>${esc(p.nombre)}</b>${c.napPuerto?' · puerto '+esc(c.napPuerto):''} <button class="btn small ghost" type="button" data-act="nap">Ver caja</button>`;
+  return `<b>${esc(p.nombre)}</b>${c.napPuerto?' · puerto '+esc(c.napPuerto):''} <button class="btn small ghost" type="button" data-act="nap">Ver caja</button>${canMoverNap()?' <button class="btn small ghost" type="button" data-act="mover-nap">Mover</button>':''}`;
 }
 
 /* ----- campo «Caja NAP» + puerto del cliente (formulario y cierre de instalación) ----- */
-function napOptionsHTML(sel,from){
+function napOptionsHTML(sel,from,vacio){
   const l=[...S.red.values()].filter(p=>p.tipo==='nap').map(p=>({p,d:from&&hasGeo(p)?distM(from,p):null}));
   l.sort((a,b)=>(a.d!=null&&b.d!=null)?a.d-b.d:(a.d!=null?-1:(b.d!=null?1:redCmp(a.p,b.p))));
-  return '<option value="">Sin caja asignada</option>'+l.map(({p,d})=>{
+  return '<option value="">'+esc(vacio||'Sin caja asignada')+'</option>'+l.map(({p,d})=>{
     const u=napUsed(p.id);
     return opt(p.id,p.nombre+' · '+(p.puertos?u+'/'+p.puertos+' puertos':u+(u===1?' cliente':' clientes'))+(d!=null?' · a '+fmtDist(d):''),p.id===sel);
   }).join('');
@@ -154,14 +154,56 @@ VIEWS.red={
   }
 };
 
+/* ----- los puertos de una caja: la mitad de adelante y la mitad de atrás, con el cliente de cada uno ----- */
+const portLados=n=>{const h=Math.ceil(n/2);return n>=2?[['Adelante',1,h],['Atrás',h+1,n]]:[['Puertos',1,n]];};
+const callePuerto=c=>[c.dir,c.loc].filter(Boolean).join(' · ');
+/* quién está en cada puerto (by), los que no tienen un puerto válido (sin), los puertos repetidos (dup) y los libres */
+function napMap(p){
+  const by=new Map(),sin=[];
+  napClients(p.id).forEach(c=>{const k=parseInt(c.napPuerto,10);if(k>=1&&k<=p.puertos){if(!by.has(k))by.set(k,[]);by.get(k).push(c);}else sin.push(c);});
+  const libres=[];for(let i=1;i<=p.puertos;i++)if(!by.has(i))libres.push(i);
+  return {by,sin,libres,dup:[...by.entries()].filter(([,l])=>l.length>1)};
+}
+/* o.pick: se está eligiendo un puerto libre para mover un cliente · o.self: el cliente que se está moviendo · o.sel: el puerto elegido */
+function portGridHTML(p,m,o){
+  o=o||{};
+  const cell=i=>{
+    const l=m.by.get(i)||[],lbl=`<span class="n">Puerto ${i}</span>`;
+    if(!l.length)return o.pick
+      ?`<button class="port free${o.sel===i?' sel':''}" type="button" data-pick="${i}" aria-pressed="${o.sel===i}">${lbl}<span class="w">Libre</span></button>`
+      :`<div class="port free">${lbl}<span class="w">Libre</span></div>`;
+    const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado&&c.estado!=='activo'?' · '+(ESTADOS[c.estado]||c.estado):'';
+    const body=l.length>1?'<span class="w">Repetido</span><span class="s">'+l.length+' clientes en este puerto</span>'
+      :`<span class="w">${esc(c.nombre)}</span><span class="s">${esc(callePuerto(c)||'Sin domicilio')}${esc(est)}</span>`;
+    if(o.pick)return `<div class="port ${mine?'self':l.length>1?'dup':'used'}">${lbl}${mine?'<span class="w">Acá está hoy</span>':body}</div>`;
+    return l.length>1?`<div class="port dup">${lbl}${body}</div>`:`<button class="port used" type="button" data-cl="${esc(c.id)}">${lbl}${body}</button>`;
+  };
+  return portLados(p.puertos).map(([lab,a,b])=>{
+    const nums=[];for(let i=a;i<=b;i++)nums.push(i);
+    const lib=nums.filter(i=>!m.by.has(i)).length;
+    return `<div class="port-side"><div class="head-row"><b>${lab}</b><span class="small muted">puertos ${a} a ${b} · ${lib} ${lib===1?'libre':'libres'}</span></div><div class="ports">${nums.map(cell).join('')}</div></div>`;
+  }).join('');
+}
+function portsSectionHTML(p,m){
+  const n=m.libres.length;
+  const resumen=n?`Quedan <b>${n}</b> ${n===1?'puerto libre':'puertos libres'}.`:'<b>Caja llena</b>: no queda ningún puerto libre.';
+  const aviso=m.sin.length?` Hay ${m.sin.length} ${m.sin.length===1?'cliente':'clientes'} sin puerto válido cargado: alguno de los lugares libres puede estar usado.`:'';
+  const rev=[...m.sin.map(c=>[c,c.napPuerto?'El puerto '+c.napPuerto+' no existe en esta caja':'Sin puerto cargado']),...m.dup.flatMap(([k,l])=>l.map(c=>[c,'Puerto '+k+' repetido']))];
+  return `<div><h3>Puertos</h3><div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${resumen}${aviso}</div>${portGridHTML(p,m)}
+    ${rev.length?`<h3 style="margin-top:14px">Para revisar</h3><div class="list" style="margin-top:8px">${rev.map(([c,why])=>`<button class="item" type="button" data-cl="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(why)}${callePuerto(c)?' · '+esc(callePuerto(c)):''}</div></div></button>`).join('')}</div>`:''}</div>`;
+}
+/* mover un cliente de caja o de puerto: el puerto de origen queda libre y el de destino ocupado en una sola escritura (el puerto vive en el propio cliente) */
+/* la app recibe el dato guardado un instante después de que el servidor responde: se espera (hasta 2 s) a tenerlo antes de dibujar la ficha de la caja destino */
+async function esperarCliente(id,ok){for(let i=0;i<40&&!ok(S.clientes.get(id)||{});i++)await new Promise(r=>setTimeout(r,50));}
+const canMoverNap=()=>can('red')&&(can('editarClientes')||can('ubicacion')||can('operarOrdenes'));
+
 /* ----- ficha de una caja o empalme ----- */
 function openRed(id){
   const p=S.red.get(id);if(!p){toast('No se encontró ese punto de la red','bad');return;}
-  const nap=p.tipo==='nap',cl=nap?napClients(p.id):[],kids=redKids(p.id),par=p.padre?S.red.get(p.padre):null;
+  const nap=p.tipo==='nap',grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],kids=redKids(p.id),par=p.padre?S.red.get(p.padre):null;
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
-  const nums=cl.map(c=>parseInt(c.napPuerto,10)).filter(n=>n>=1);
-  let libres='';
-  if(nap&&p.puertos&&cl.length<p.puertos){const f=[];for(let i=1;i<=p.puertos&&f.length<24;i++)if(!nums.includes(i))f.push(i);libres=f.join(', ')+(f.length===24?'…':'');}
+  const m=grid?napMap(p):null;
+  const libres=grid&&m.libres.length?m.libres.slice(0,24).join(', ')+(m.libres.length>24?'…':''):'';
   const vis=cl.filter(clientVisible).sort((a,b)=>((parseInt(a.napPuerto,10)||999)-(parseInt(b.napPuerto,10)||999))||norm(a.nombre).localeCompare(norm(b.nombre)));
   const html=`
     <div class="head-row"><div><span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`:''}</div>
@@ -170,16 +212,79 @@ function openRed(id){
     <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(p)}${can('red')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(p)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${kids.length?`<div><h3>De acá salen</h3><div class="list" style="margin-top:8px">${kids.sort(redCmp).map(k=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div></div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
-    ${nap?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
+    ${grid?portsSectionHTML(p,m):''}
+    ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
       ${cl.length>vis.length&&vis.length?`<div class="hint">Y ${cl.length-vis.length} más que tu perfil no puede ver.</div>`:''}</div>`:''}`;
   openModal({title:RED_TIPO[p.tipo]||'Red',html,onMount(el){
     el.addEventListener('click',e=>{
       const o=e.target.closest('[data-open-client]');if(o){openClient(o.dataset.openClient);return;}
+      const g=e.target.closest('[data-cl]');if(g){openNapClient(p.id,g.dataset.cl);return;}
       const r=e.target.closest('[data-red]');if(r){openRed(r.dataset.red);return;}
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openRedForm(p.id);
       else if(a.dataset.act==='ubicacion')openRedGeo(p.id);
     });
+  }});
+}
+/* un cliente dentro de una caja: quién es, dónde está y las acciones (ver su ficha, mover) */
+function openNapClient(napId,cid){
+  const p=S.red.get(napId),c=S.clientes.get(cid);
+  if(!p||!c)return openRed(napId);
+  const vis=clientVisible(c),kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
+  const html=`<div class="head-row"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
+    <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}</h2>
+    <dl class="kv">${kv('Caja',esc(p.nombre))}${kv('Puerto',c.napPuerto?esc(c.napPuerto):'Sin puerto cargado')}${kv('Domicilio',esc(callePuerto(c)))}${vis&&can('telefono')&&c.tel?kv('Teléfono',esc(c.tel)):''}</dl>
+    <div class="actions">${vis?'<button class="btn" type="button" data-act="ficha">Ver ficha del cliente</button>':''}${canMoverNap()?'<button class="btn primary" type="button" data-act="mover">Mover a otra caja o puerto</button>':''}<button class="btn ghost" type="button" data-act="volver">Volver a la caja</button></div>`;
+  openModal({title:'Cliente en '+p.nombre,html,onMount(el){
+    el.addEventListener('click',e=>{
+      const a=e.target.closest('[data-act]');if(!a)return;
+      if(a.dataset.act==='ficha')openClient(c.id);
+      else if(a.dataset.act==='mover')openMoverNap(c.id,napId);
+      else if(a.dataset.act==='volver')openRed(napId);
+    });
+  }});
+}
+function openMoverNap(cid,volverA){
+  const c=S.clientes.get(cid);if(!c)return;
+  if(!canMoverNap())return toast('Tu perfil no puede cambiar de caja a un cliente','bad');
+  const cur=c.nap&&S.red.get(c.nap),from=hasGeo(c)?c:null;
+  let dest=cur&&cur.tipo==='nap'?cur.id:'',sel=null;
+  const html=`<p>Pasar a <b>${esc(c.nombre)}</b> ${cur?'de <b>'+esc(cur.nombre)+(c.napPuerto?' · puerto '+esc(c.napPuerto):'')+'</b>':'(hoy sin caja)'} a otra caja o a otro puerto. Al confirmar queda libre el puerto de origen y ocupado el de destino.</p>
+    ${F('Caja NAP de destino','mv-nap',`<select id="mv-nap">${napOptionsHTML(dest,from,'Elegí la caja de destino')}</select>`,from?'Las más cercanas a la casa del cliente aparecen primero.':'')}
+    <div id="mv-ports"></div><div class="hint" id="mv-hint"></div>
+    <div class="actions"><button class="btn ghost" type="button" id="mv-cancel">Cancelar</button><button class="btn primary" type="button" id="mv-go" disabled>Mover</button></div>`;
+  openModal({title:'Mover cliente de caja',html,onMount(el){
+    const box=$('#mv-ports',el),go=$('#mv-go',el),hint=$('#mv-hint',el);
+    const draw=()=>{
+      const p=dest&&S.red.get(dest);
+      hint.textContent='';hint.className='hint';go.disabled=!p||!sel;
+      if(!p){box.innerHTML='';return;}
+      if(!p.puertos){
+        box.innerHTML=F('Puerto','mv-num',`<input id="mv-num" type="number" min="1" max="288" step="1" inputmode="numeric" value="${sel||''}">`,'Esta caja no tiene cargada la cantidad de puertos.');
+        $('#mv-num',el).addEventListener('input',e=>{const n=parseInt(e.target.value,10);sel=n>=1?n:null;go.disabled=!sel;});
+        return;
+      }
+      const m=napMap(p),n=m.libres.length;
+      box.innerHTML=`<div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${n?'Elegí un puerto libre: quedan '+n+'.':'Esta caja está llena: no hay puertos libres.'}</div>${portGridHTML(p,m,{pick:true,self:c.id,sel})}`;
+    };
+    $('#mv-nap',el).addEventListener('change',e=>{dest=e.target.value;sel=null;draw();});
+    box.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(!b)return;sel=parseInt(b.dataset.pick,10);draw();});
+    const volver=()=>{if(volverA&&S.red.has(volverA))openRed(volverA);else if(cur)openRed(cur.id);else closeModal();};
+    $('#mv-cancel',el).addEventListener('click',volver);
+    go.addEventListener('click',async()=>{
+      const p=S.red.get(dest);if(!p||!sel)return;
+      if(p.puertos&&sel>p.puertos)return toast(p.nombre+' tiene '+p.puertos+' puertos: el '+sel+' no existe','bad');
+      if(dest===c.nap&&sel===parseInt(c.napPuerto,10))return toast('Ya está en ese puerto','bad');
+      const otro=napClients(dest).find(x=>x.id!==c.id&&parseInt(x.napPuerto,10)===sel);
+      if(otro){toast('El puerto '+sel+' de '+p.nombre+' acaba de ser ocupado por '+otro.nombre+'. Elegí otro.','bad');sel=null;draw();return;}
+      go.disabled=true;
+      try{
+        await putItem('clientes',clientShard(c.id),c.id,{nap:dest,napPuerto:sel,mod:Date.now()});
+        await esperarCliente(c.id,x=>x.nap===dest&&parseInt(x.napPuerto,10)===sel);
+        toast('Movido a '+p.nombre+' · puerto '+sel);openRed(dest);
+      }catch(err){dbError(err);go.disabled=false;}
+    });
+    draw();
   }});
 }
 function openRedGeo(id){

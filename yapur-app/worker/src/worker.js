@@ -413,6 +413,43 @@ export class YapurDB extends DurableObject {
     this.snapshotSoon();
     return { ok: true, seq: out.seq, op: sendOp, data: this.viewData(u, p, coll, id, payload) };
   }
+  /* Borrar un plan: solo el administrador, y solo si ningún cliente lo usa ni lo usó (ni siquiera dados de baja ni en el historial de
+     precios): borrarlo cambiaría a qué plan y precio figuran esos meses. Para dejar de ofrecerlo alcanza con desactivarlo. */
+  planEnUso(id) {
+    const key = JSON.stringify(id);
+    let act = 0, baja = 0, hist = 0;
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      if (!r.data.includes(key)) continue;
+      const its = JSON.parse(r.data).items || {};
+      for (const k of Object.keys(its)) {
+        const c = its[k];
+        if (!isPlain(c)) continue;
+        if (c.planId === id) { if (c.estado === 'baja') baja++; else act++; }
+        else if (Array.isArray(c.hp) && c.hp.some(e => isPlain(e) && e.planId === id)) hist++;
+      }
+    }
+    return { act, baja, hist };
+  }
+  deleteDoc(u, coll, id) {
+    if (coll !== 'planes' || !ID_RE.test(id)) throw httpErr(400, 'Solo se pueden borrar planes.', 'invalid_argument');
+    if (u.role !== 'admin') throw httpErr(403, 'Solo el administrador puede borrar planes.', 'permission_denied');
+    let seq;
+    this.tx(() => {
+      const plan = this.readDoc('planes', id);
+      if (!plan) throw httpErr(404, 'Ese plan no existe.', 'not_found');
+      const n = this.planEnUso(id), partes = [];
+      if (n.act) partes.push(n.act + (n.act === 1 ? ' cliente' : ' clientes'));
+      if (n.baja) partes.push(n.baja + (n.baja === 1 ? ' cliente dado de baja' : ' clientes dados de baja'));
+      if (n.hist) partes.push('el historial de precios de ' + n.hist + (n.hist === 1 ? ' cliente' : ' clientes'));
+      if (partes.length) throw httpErr(409, 'No se puede eliminar «' + String(plan.nombre || id) + '»: figura en ' + partes.join(', ') + '. Desactivalo para que no se ofrezca más.', 'failed_precondition');
+      this.sql.exec('DELETE FROM docs WHERE coll=? AND id=?', 'planes', id);
+      this.SEQ++;
+      seq = this.SEQ;
+    });
+    this.broadcastDoc('planes', id, 'delete', {}, seq);
+    this.snapshotSoon();
+    return { ok: true, seq, op: 'delete', data: {} };
+  }
   /* Todo lo que puede ver esta persona, ya armado como texto JSON. Lo que no hay que filtrar (por ejemplo los pagos, que son lo más grande)
      se copia tal cual desde la base, sin abrirlo: así no se agota la memoria cuando haya años de cobros. */
   syncJSON(u) {
@@ -879,6 +916,7 @@ export class YapurDB extends DurableObject {
         const b = await readBody(raw, 2e6);
         return send(200, this.writeDoc(a.user, coll, id, m === 'PUT' ? 'set' : 'merge', b.data));
       }
+      if (m === 'DELETE') return send(200, this.deleteDoc(a.user, coll, id));
     }
 
     if (p === '/api/users' && m === 'GET') { await this.needAdmin(request); return send(200, { users: [...this.USERS.values()].map(pubUser) }); }

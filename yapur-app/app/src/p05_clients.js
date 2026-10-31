@@ -163,6 +163,7 @@ function openClient(id){
       if(a.dataset.act==='editar')openClientForm(c.id);
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
       else if(a.dataset.act==='nap')openRed(c.nap);
+      else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
       else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
       else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);

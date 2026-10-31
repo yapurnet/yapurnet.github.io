@@ -95,9 +95,22 @@ function qRowHTML([k,label,key,kind,ex],q){
   const val=s=>esc(q[k+s]==null?'':q[k+s]);
   return F(`${label} <span class="muted small mono">${key}</span>`,`q-${k}B`,`<div class="qpair"><input id="q-${k}B" autocomplete="off" inputmode="${kind==='rate'||kind==='text'?'text':'decimal'}" placeholder="${esc(ex)}" aria-label="${esc(label)}, bajada" value="${val('B')}"><input id="q-${k}S" autocomplete="off" inputmode="${kind==='rate'||kind==='text'?'text':'decimal'}" placeholder="${esc(ex)}" aria-label="${esc(label)}, subida" value="${val('S')}"></div>`);
 }
+/* a quiénes alcanza un plan: clientes activos, dados de baja y los que lo tuvieron antes (historial de precios) */
+function planUso(id){
+  let act=0,baja=0,hist=0;
+  for(const c of S.clientes.values()){
+    if(c.planId===id){if(c.estado==='baja')baja++;else act++;}
+    else if(Array.isArray(c.hp)&&c.hp.some(e=>e&&e.planId===id))hist++;
+  }
+  const partes=[];
+  if(act)partes.push(act+(act===1?' cliente':' clientes'));
+  if(baja)partes.push(baja+(baja===1?' cliente dado de baja':' clientes dados de baja'));
+  if(hist)partes.push('el historial de precios de '+hist+(hist===1?' cliente':' clientes'));
+  return {act,baja,hist,total:act+baja+hist,txt:partes.join(', ')};
+}
 function openPlanForm(id){
   const old=id?S.planes.get(id):null;const p=old||{activo:true,tecnologia:'fibra'};
-  const q=p.q||{},hasQ=Object.keys(q).length>0;
+  const q=p.q||{},hasQ=Object.keys(q).length>0,uso=old?planUso(old.id):{total:0};
   const html=`<form class="form" id="pform" novalidate>
     ${F('Nombre del plan *','pf-nombre',`<input id="pf-nombre" value="${esc(p.nombre||'')}" placeholder="Hogar 100" autocomplete="off">`)}
     <div class="grid2">${F('Bajada (Mbps) *','pf-bajada','<input id="pf-bajada" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.bajada||'')+'">')}${F('Subida (Mbps) *','pf-subida','<input id="pf-subida" type="text" inputmode="decimal" autocomplete="off" value="'+esc(p.subida||'')+'">')}</div>
@@ -112,7 +125,8 @@ function openPlanForm(id){
       <div class="hint">Así queda: <span class="mono" id="q-prev"></span></div></div></details>
     ${F('Nombre del perfil en el router (opcional)','pf-perfil',`<input id="pf-perfil" class="mono" value="${esc(p.perfil||'')}" placeholder="plan-100M">`,'Sirve de referencia para quien configura MikroTik.')}
     <label class="per"><input id="pf-activo" type="checkbox"${p.activo!==false?' checked':''}><span class="grow">Plan disponible para clientes nuevos</span></label>
-    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar plan</button></div></form>`;
+    ${old&&isAdmin()&&uso.total?`<div class="hint" id="pf-uso">No se puede eliminar: este plan figura en ${esc(uso.txt)}. Si ya no lo querés ofrecer, destildá «Plan disponible para clientes nuevos».</div>`:''}
+    <div class="actions">${old&&isAdmin()&&!uso.total?'<button class="btn danger" type="button" id="pf-del">Eliminar plan</button>':''}<button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar plan</button></div></form>`;
   openModal({title:old?'Editar plan':'Nuevo plan',html,onMount(el){
     bindMoney($('#pf-precio',el),$('#pf-precio-h',el));
     const v=i=>$('#'+i,el).value.trim();
@@ -140,6 +154,13 @@ function openPlanForm(id){
       el2.textContent=r.error?r.error:(b&&s?queueText({bajada:b,subida:s,q:r.q}):'Completá bajada y subida.');
     };
     $('#pform',el).addEventListener('input',prev);prev();
+    const del=$('#pf-del',el);
+    if(del)del.addEventListener('click',async()=>{
+      const u2=planUso(old.id);
+      if(u2.total)return toast('No se puede eliminar: figura en '+u2.txt+'.','bad');
+      if(!await askConfirm('¿Eliminar el plan «'+old.nombre+'»? Ningún cliente lo usa. No se puede deshacer.','Eliminar',true))return;
+      try{await S.db.collection('planes').doc(old.id).delete();toast('Plan eliminado');closeModal();}catch(err){dbError(err);}
+    });
     $('#pform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const bajada=num(v('pf-bajada')),subida=num(v('pf-subida')),precio=num(v('pf-precio'));
