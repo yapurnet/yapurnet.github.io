@@ -82,16 +82,18 @@ function printReceipt(d){
 }
 function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
-  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c);
+  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c),pc=ps.find(x=>x.comp);
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     <div class="actions start" style="margin-top:12px">${d.anulado?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
+    ${pc&&puedeVerComp(pc)?`<div class="actions start"><button class="btn" type="button" id="rc-comp">Ver comprobante de la transferencia</button></div><div class="hint" id="rc-comp-st"></div><img id="rc-comp-img" class="comp-full" alt="Comprobante de la transferencia" hidden>`:''}
     <div id="rc-tel" class="card flat" hidden><p class="small muted" style="margin:0 0 8px">Este cliente no tiene teléfono cargado. Escribí su número de WhatsApp (con el código de área, sin 0 ni 15) y se abre el chat con el recibo listo para mandar.</p>
       ${F('WhatsApp del cliente','rc-num','<input id="rc-num" type="tel" inputmode="tel" autocomplete="off" placeholder="3844 56-2605">')}
       ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
       <div class="actions"><a class="btn primary" id="rc-wa-go" target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
     onMount(el){
+      const bc=$('#rc-comp',el);if(bc)bc.addEventListener('click',()=>{bc.disabled=true;verComprobante(pc.comp,$('#rc-comp-img',el),$('#rc-comp-st',el)).finally(()=>{bc.disabled=false;});});
       const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
       const wa=$('#rc-wa',el);
       if(wa&&wa.tagName==='BUTTON'){   /* sin teléfono cargado: se pide el número en el momento */
@@ -140,11 +142,14 @@ function openCobro(clientId,con1,pre){
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
+    ${campo?compHTML('cb'):''}
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
     <div class="hint" id="cb-sum"></div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="cb-go">Registrar cobro</button></div>`;
   openModal({title:'Cobrar',html,onMount(el){
     let con=con0,manual=false;
+    const comp=campo?mountComp(el,'cb',()=>$('#cb-met',el).value):null;
+    if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
     const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
     const sum=()=>{
@@ -169,13 +174,15 @@ function openCobro(clientId,con1,pre){
     sum();
     if(pre){   /* cobro ya completado (por ejemplo desde el reporte del técnico) */
       const bt=$('[data-con="'+pre.concepto+'"]',el);if(bt)bt.click();
-      if(METODOS[pre.metodo])$('#cb-met',el).value=pre.metodo;
+      if(METODOS[pre.metodo]){$('#cb-met',el).value=pre.metodo;if(comp)comp.sync();}
       if(pre.monto)$('#cb-monto',el).value=pre.monto;if(pre.nota)$('#cb-nota-o',el).value=pre.nota;sum();
     }
     $('#cb-go',el).addEventListener('click',async()=>{
       const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
+      const sinFoto=comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');
       const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
       const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
+      if(comp&&comp.id())base.comp=comp.id();
       const items={};
       if(con==='deuda_anterior'&&monto>daRest+0.005)return toast('Es más que la deuda anterior: faltan '+fmtMoney(daRest),'bad');
       if(con==='mensualidad'){
@@ -201,10 +208,68 @@ function cobradorName(p){
   const u=p.por&&ACC.users.find(x=>x.id===p.por);
   return u?u.nombre:'';
 }
+/* ===== foto del comprobante de una transferencia =====
+   Quien cobra en la calle y recibe una transferencia tiene que adjuntar la foto del comprobante: el servidor no registra el cobro sin ella.
+   La foto se reduce en el celular (lado mayor 1400 px, JPEG de menos de 400 KB) y se sube apenas se elige; el cobro lleva solo su número. */
+const COMP_METODOS=['transferencia'];
+const pideComp=metodo=>soloCampo()&&COMP_METODOS.includes(metodo);
+function fotoJpeg(file){
+  return new Promise((ok,mal)=>{
+    const url=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{
+      try{
+        const k=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight)),w=Math.max(1,Math.round(img.naturalWidth*k)),h=Math.max(1,Math.round(img.naturalHeight*k));
+        const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+        const cx=cv.getContext('2d');cx.fillStyle='#fff';cx.fillRect(0,0,w,h);cx.drawImage(img,0,0,w,h);
+        let q=0.8,d=cv.toDataURL('image/jpeg',q);
+        while(d.length*0.75>400e3&&q>0.35){q-=0.1;d=cv.toDataURL('image/jpeg',q);}
+        URL.revokeObjectURL(url);
+        if(d.length*0.75>440e3)mal(new Error('La foto es demasiado grande. Sacala de nuevo más cerca del comprobante.'));else ok(d);
+      }catch(e){URL.revokeObjectURL(url);mal(e);}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);mal(new Error('No se pudo leer la foto. Elegí una imagen (JPG o PNG).'));};
+    img.src=url;
+  });
+}
+function compHTML(px){
+  return `<div class="fgroup" id="${px}-comp" hidden><div class="legend">Comprobante de la transferencia *</div>
+    <div class="hint">Sacale una foto al comprobante con la cámara del celular (o usá la captura que te mandó el cliente) y elegila acá. Sin la foto no se registra el cobro.</div>
+    <div class="actions start"><button class="btn small" type="button" id="${px}-comp-b">Elegir la foto</button><input id="${px}-comp-f" type="file" hidden></div>
+    <img id="${px}-comp-img" class="comp-thumb" alt="Foto del comprobante" hidden><div class="hint" id="${px}-comp-st"></div></div>`;
+}
+function mountComp(el,px,getMetodo){
+  const box=$('#'+px+'-comp',el),f=$('#'+px+'-comp-f',el),img=$('#'+px+'-comp-img',el),st=$('#'+px+'-comp-st',el);
+  let id=null,busy=false;
+  $('#'+px+'-comp-b',el).addEventListener('click',()=>f.click());
+  f.addEventListener('change',async()=>{
+    const file=f.files&&f.files[0];f.value='';if(!file)return;
+    busy=true;id=null;img.hidden=true;st.className='hint';st.textContent='Subiendo la foto…';
+    try{
+      const d=await fotoJpeg(file),r=await NET.api('POST','/api/comprobante',{img:d},{timeout:60000});
+      id=r.id;img.src=d;img.hidden=false;st.className='hint ok';st.textContent='Foto lista. Si te equivocaste, elegí otra.';
+    }catch(e){st.className='hint bad';st.textContent=e.network?'No hay conexión: no se pudo subir la foto. Probá de nuevo.':(e.message||'No se pudo subir la foto.');}
+    finally{busy=false;}
+  });
+  /* antes de registrar el cobro: devuelve el texto del problema, o '' si está todo bien */
+  const falta=()=>!pideComp(getMetodo())?'':busy?'Esperá: se está subiendo la foto del comprobante':id?'':'Adjuntá la foto del comprobante de la transferencia';
+  return {sync:()=>{box.hidden=!pideComp(getMetodo());},id:()=>pideComp(getMetodo())?id:null,falta};
+}
+/* lo ven quienes pueden mirar los cobros y quien lo cobró */
+const puedeVerComp=p=>can('cobrar')||can('caja')||can('anular')||can('promesas')||can('resumen')||(!!p.por&&p.por===S.uid);
+/* mostrar el comprobante (la foto se pide con la sesión: no es un enlace público) */
+async function verComprobante(id,img,st){
+  st.textContent='Cargando…';
+  try{
+    const r=await fetch(NET.base+'/api/comprobante/'+encodeURIComponent(id),{headers:{Authorization:'Bearer '+NET.token}});
+    if(!r.ok){let m='';try{m=(await r.json()).error;}catch(e){}throw new Error(m||'No se pudo abrir el comprobante.');}
+    img.src=URL.createObjectURL(await r.blob());img.hidden=false;st.textContent='';
+  }catch(e){st.textContent=(e&&e.message)||'No se pudo abrir el comprobante.';}
+}
 /* cobro que no es mensualidad (instalación, reclamo, reconexión, otro): lo usan «Cobrar» y el cierre de una orden */
 async function cobrarOtro(c,o){
   const fecha=o.fecha||todayStr(),recibo=newRecibo(fecha),id=newId(),doc=payShard(fecha,c.id);
   const item={c:c.id,metodo:o.metodo||'efectivo',fecha,hora:nowTime(),recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||'',concepto:o.concepto,per:null,monto:o.monto,nota:o.nota||''};
+  if(o.comp)item.comp=o.comp;
   await putMany('pagos',doc,{[id]:item});
   S.pagos.set(id,Object.assign({},item,{id,_doc:doc}));rebuildDerived();dataChanged('pagos');
   return recibo;
@@ -212,7 +277,7 @@ async function cobrarOtro(c,o){
 function paymentRow(p){
   const c=S.clientes.get(p.c);
   return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
-    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}</div></button>`;
+    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}${p.comp?'<span class="chip info">Con comprobante</span>':''}</div></button>`;
 }
 function deudaAntMsg(c,r){
   const d=c.deudaAnt&&c.deudaAnt.det;

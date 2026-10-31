@@ -194,3 +194,5 @@ button.port:hover{border-color:var(--accent-line)}
 .port.self{border-style:dashed;background:var(--surface-2)}
 .port.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .port.used:not(button){opacity:.75}
+.comp-thumb{display:block;align-self:flex-start;justify-self:start;width:auto;height:auto;max-width:100%;max-height:220px;object-fit:contain;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--line)}
+.comp-full{display:block;width:100%;height:auto;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--line)}

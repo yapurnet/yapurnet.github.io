@@ -1,6 +1,6 @@
 # Cobros del técnico en la calle (instalaciones, reclamos, reconexiones) y cierre de caja por cobrador.
 # Chromium real contra el servidor de verdad (workerd).
-import asyncio, json, os, re, sys, time, urllib.request, urllib.error
+import asyncio, base64, json, os, re, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
@@ -41,6 +41,16 @@ async def login(ctx, user, clave):
     await sin_aviso(pg)
     return pg
 
+async def foto(pg):
+    d = await pg.evaluate("""(() => { const c = document.createElement('canvas'); c.width = 1600; c.height = 1200; const x = c.getContext('2d');
+      x.fillStyle = '#fff'; x.fillRect(0, 0, 1600, 1200); x.fillStyle = '#123'; x.font = '28px sans-serif';
+      for (let i = 0; i < 30; i++) x.fillText('Transferencia realizada - comprobante ' + i, 20, 40 + i * 38);
+      for (let i = 0; i < 4000; i++) { x.fillStyle = 'rgb(' + (i * 7 % 255) + ',' + (i * 13 % 255) + ',' + (i * 29 % 255) + ')'; x.fillRect((i * 37) % 1600, (i * 91) % 1200, 6, 6); }
+      return c.toDataURL('image/jpeg', 0.95); })()""")
+    return {'name': 'comprobante.jpg', 'mimeType': 'image/jpeg', 'buffer': base64.b64decode(d.split(',')[1])}
+async def adjuntar(pg, px):
+    await pg.set_input_files('#%s-comp-f' % px, await foto(pg))
+    await pg.wait_for_function("document.querySelector('#%s-comp-st').textContent.includes('Foto lista')" % px, timeout=15000)
 async def tabs(pg): return await pg.evaluate("[...document.querySelectorAll('#tabs .tab')].map(b=>b.textContent.replace(/\\d+$/,'').trim())")
 def pagos_hoy(tok):
     st, j = api('GET', '/api/mis-cobros?dias=1', None, tok)
@@ -86,6 +96,7 @@ async def main():
         check('al cobrar en la calle no existe «Mensualidad»', 'Mensualidad' not in botones and 'Instalación' in botones and 'Reclamo o visita técnica' in botones, botones)
         check('a un cliente por instalar se le ofrece «Instalación», no «Reinstalación»', 'Reinstalación (mudanza)' not in botones and await pg.evaluate("document.querySelector('#cb-con [aria-pressed=true]').textContent") == 'Instalación', botones)
         check('el cobro no muestra lo cobrado antes a ese cliente (el técnico no ve los pagos)', await pg.query_selector('#cb-prev') is None)
+        check('en efectivo no se pide la foto del comprobante', await pg.evaluate("document.querySelector('#cb-comp').hidden"))
         check('la fecha del cobro es hoy y no se puede cambiar', await pg.evaluate("document.querySelector('#cb-fecha').disabled") is True and await pg.input_value('#cb-fecha') == hoy)
         await pg.fill('#cb-monto', '15000')
         await pg.fill('#cb-nota-o', 'Instalación completa')
@@ -115,13 +126,26 @@ async def main():
         await pg.click('#fform button[type=submit]')
         await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('monto')", timeout=4000)
         check('si tildó el cobro y no puso monto no cierra la orden', (await pg.evaluate("S.ordenes.get('o2').estado")) == 'en_curso')
-        await pg.fill('#ff-monto', '3500'); await pg.select_option('#ff-met', 'transferencia')
+        await pg.fill('#ff-monto', '3500')
+        check('en efectivo no se pide la foto del comprobante', await pg.evaluate("document.querySelector('#ff-comp').hidden"))
+        await pg.select_option('#ff-met', 'transferencia')
+        check('al elegir transferencia aparece «Comprobante de la transferencia»', not await pg.evaluate("document.querySelector('#ff-comp').hidden") and 'comprobante de la transferencia' in (await pg.inner_text('#ff-comp')).lower())
+        await pg.click('#fform button[type=submit]')
+        await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('foto del comprobante')", timeout=4000)
+        check('sin la foto no se cierra la orden ni se cobra nada', (await pg.evaluate("S.ordenes.get('o2').estado")) == 'en_curso' and len(pagos_hoy(pedro_tok)) == 1, pagos_hoy(pedro_tok))
+        await adjuntar(pg, 'ff')
+        check('la foto se ve en miniatura antes de cobrar', not await pg.evaluate("document.querySelector('#ff-comp-img').hidden"))
         await pg.click('#fform button[type=submit]')
         await pg.wait_for_selector('.rc', timeout=8000)
         check('cierra la orden y abre el recibo del cobro', (await pg.evaluate("S.ordenes.get('o2').estado")) == 'hecha' and 'Reclamo' in await pg.inner_text('.rc'), await pg.inner_text('.rc'))
+        check('el recibo del técnico trae «Ver comprobante de la transferencia»', await pg.query_selector('#rc-comp') is not None)
+        await pg.click('#rc-comp')
+        await pg.wait_for_function("document.querySelector('#rc-comp-img') && !document.querySelector('#rc-comp-img').hidden && document.querySelector('#rc-comp-img').naturalWidth > 0", timeout=8000)
+        check('al tocarlo se abre la foto que subió', await pg.evaluate("document.querySelector('#rc-comp-img').naturalWidth") <= 1400)
         await pg.click('.sheet [data-close]')
         mis = pagos_hoy(pedro_tok)
         check('quedan 2 cobros del técnico (15.000 efectivo + 3.500 transferencia)', sorted((m['monto'], m['metodo']) for m in mis) == [(3500, 'transferencia'), (15000, 'efectivo')], mis)
+        check('el servidor guardó el cobro por transferencia con su foto y el de efectivo sin foto', all(bool(m.get('comp')) == (m['metodo'] == 'transferencia') for m in mis), mis)
 
         # 3) desde la ficha de un cliente activo no puede cobrar mensualidad
         await pg.evaluate("openClient('a')")
@@ -135,6 +159,17 @@ async def main():
         check('y viene marcado «Reclamo o visita técnica», no una instalación', await pg.evaluate("document.querySelector('#cb-con [aria-pressed=true]').textContent") == 'Reclamo o visita técnica')
         check('explica que si se mudó se cobra la reinstalación', 'ya está instalado' in await pg.inner_text('.sheet') and 'Reinstalación (mudanza)' in await pg.inner_text('.sheet'))
         await pg.click('#cb-con [data-con=reinstalacion]'); await pg.fill('#cb-monto', '20000'); await pg.fill('#cb-nota-o', 'Mudanza a calle 9')
+        await pg.select_option('#cb-met', 'transferencia')
+        check('en «Cobrar» también aparece el pedido de la foto al elegir transferencia', not await pg.evaluate("document.querySelector('#cb-comp').hidden"))
+        n_antes = len(pagos_hoy(pedro_tok))
+        await pg.click('#cb-go')
+        await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('foto del comprobante')", timeout=4000)
+        check('sin la foto el cobro no se registra', len(pagos_hoy(pedro_tok)) == n_antes and await pg.query_selector('.rc') is None)
+        await adjuntar(pg, 'cb')
+        await pg.select_option('#cb-met', 'efectivo')
+        check('si cambia a efectivo el pedido de la foto desaparece', await pg.evaluate("document.querySelector('#cb-comp').hidden"))
+        await pg.select_option('#cb-met', 'transferencia')
+        check('y vuelve con la foto ya cargada al elegir transferencia de nuevo', not await pg.evaluate("document.querySelector('#cb-comp').hidden") and not await pg.evaluate("document.querySelector('#cb-comp-img').hidden"))
         await pg.click('#cb-go'); await pg.wait_for_selector('.rc', timeout=8000)
         check('cobra la reinstalación (mudanza) y el recibo lo dice', 'Reinstalación' in await pg.inner_text('.rc') and '20.000' in await pg.inner_text('.rc'), await pg.inner_text('.rc'))
         await pg.click('.sheet [data-close]')
@@ -193,7 +228,15 @@ async def main():
         filas = await pg3.evaluate("[...document.querySelectorAll('#cb-caja table tbody tr')].map(r=>[...r.cells].map(c=>c.textContent.trim()))")
         por = {f[0]: f for f in filas}
         check('la caja separa lo que cobró cada persona', set(por) == {'Pedro', 'Laura'}, filas)
-        check('Pedro: 3 recibos (instalación 15.000, reclamo 3.500 y reinstalación 20.000): efectivo 35.000, otros medios 3.500, total 38.500', por['Pedro'][1] == '3' and '35.000' in por['Pedro'][2] and '3.500' in por['Pedro'][3] and '38.500' in por['Pedro'][4], por['Pedro'])
+        check('Pedro: 3 recibos (instalación 15.000 en efectivo, reclamo 3.500 y reinstalación 20.000 por transferencia): efectivo 15.000, otros medios 23.500, total 38.500', por['Pedro'][1] == '3' and '15.000' in por['Pedro'][2] and '23.500' in por['Pedro'][3] and '38.500' in por['Pedro'][4], por['Pedro'])
+        check('en la caja, los cobros por transferencia del técnico llevan «Con comprobante»', caja.count('Con comprobante') == 2, caja.count('Con comprobante'))
+        rid_t = await pg3.evaluate("[...S.pagos.values()].find(p => p.por && p.metodo === 'transferencia' && p.concepto === 'reinstalacion').recibo")
+        await pg3.evaluate("openReceipt(%s)" % json.dumps(rid_t))
+        await pg3.wait_for_selector('#rc-comp')
+        await pg3.click('#rc-comp')
+        await pg3.wait_for_function("document.querySelector('#rc-comp-img') && !document.querySelector('#rc-comp-img').hidden && document.querySelector('#rc-comp-img').naturalWidth > 0", timeout=8000)
+        check('la oficina abre la foto del comprobante desde el recibo', True)
+        await pg3.click('.sheet [data-close]')
         row_l = await pg3.evaluate("(() => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get('e')); return d.textContent; })()")
         check('la oficina sí ve los servicios adicionales del cliente', 'Multimedia' in row_l and 'Multimedia Net' in row_l, row_l)
         check('la oficina sí ve si el cliente está activo o suspendido', await pg3.evaluate("S.clientes.get('a').estado === 'activo' && S.clientes.get('e').estado === 'suspendido'"))
