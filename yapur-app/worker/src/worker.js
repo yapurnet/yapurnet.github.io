@@ -247,6 +247,22 @@ export default {
    El horario lo controla el servidor con su propio reloj: no importa lo que diga el celular. Argentina no tiene horario de verano: siempre UTC-3. */
 const UBIC_DIAS = 14;
 const UBIC_MIN_MS = 20e3;            // no se guarda más de un punto cada 20 segundos por técnico
+const UBIC_HUECO_MS = 10 * 60e3;     // más de 10 minutos sin recibir nada = «sin señal»
+/* Tramos sin señal dentro de la ventana [ws, we]: el celular manda un punto por minuto, así que un silencio largo es
+   un celular apagado, sin datos o con la app cerrada. `tss` viene ordenado. Sin ningún punto no se inventa un hueco
+   (puede ser un día libre). El primer tramo (desde que arranca el horario) lleva `inicio`; el último, `sigue` si la ventana aún está abierta. */
+function ubicHuecos(tss, ws, we, abierta) {
+  const out = [];
+  if (!tss.length || we <= ws) return out;
+  let prev = ws, primero = true;
+  for (const ts of tss) {
+    if (ts < ws || ts > we) continue;
+    if (ts - prev > UBIC_HUECO_MS) out.push(primero ? { desde: prev, hasta: ts, inicio: true } : { desde: prev, hasta: ts });
+    prev = ts; primero = false;
+  }
+  if (we - prev > UBIC_HUECO_MS) out.push(abierta ? { desde: prev, hasta: we, sigue: true } : { desde: prev, hasta: we });
+  return out;
+}
 const arTime = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
 const arDayStart = fecha => Date.parse(fecha + 'T00:00:00-03:00');
 
@@ -838,12 +854,21 @@ export class YapurDB extends DurableObject {
     const h = this.ubicHorario(), ahora = Date.now(), hoy = arTime(ahora).fecha;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(arDayStart(dia))) dia = hoy;
     const t0 = arDayStart(dia), t1 = t0 + 864e5;
+    const esHoy = dia === hoy, dentro = this.ubicDentro(ahora, h);
+    const ws = t0 + h.desde * 3600e3, wend = t0 + h.hasta * 3600e3, we = esHoy ? Math.min(ahora, wend) : wend, abierta = esHoy && ahora < wend;
     const tecnicos = [...this.USERS.values()].filter(u => u.role === 'tecnico' && u.activo).map(u => {
       const ultima = this.q1('SELECT ts,lat,lng,acc FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts DESC LIMIT 1', u.id, t0, t1) || null;
       const todos = this.q('SELECT ts,lat,lng FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts', u.id, t0, t1);
       const paso = Math.max(1, Math.ceil(todos.length / 240));
       const ruta = todos.filter((_, i) => i % paso === 0 || i === todos.length - 1).map(r => [r.ts, r.lat, r.lng]);
-      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto: this.ubicAcepto(u.id), ultima, puntos: todos.length, ruta };
+      const acepto = this.ubicAcepto(u.id);
+      /* estado (solo hoy): sin_aceptar · fuera_horario · sin_datos (no mandó nada) · en_linea (≤10 min) · sin_senal */
+      let estado = 'historico';
+      if (!acepto) estado = 'sin_aceptar';
+      else if (esHoy) estado = !dentro ? 'fuera_horario' : !ultima ? 'sin_datos' : ahora - ultima.ts <= UBIC_HUECO_MS ? 'en_linea' : 'sin_senal';
+      const huecos = acepto ? ubicHuecos(todos.map(r => r.ts), ws, we, abierta) : [];
+      const sinSenalMin = Math.round(huecos.reduce((s, g) => s + (g.hasta - g.desde), 0) / 60000);
+      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin };
     });
     return { dia, hoy, ahora, horario: h, dias: UBIC_DIAS, tecnicos };
   }

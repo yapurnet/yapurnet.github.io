@@ -99,18 +99,32 @@ function rutaUrl(ruta){
   for(let i=1;i<=n;i++)mid.push(pt(ruta[Math.round(i*(ruta.length-1)/(n+1))]));
   return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+pt(ruta[0])+'&destination='+pt(ruta[ruta.length-1])+(mid.length?'&waypoints='+encodeURIComponent(mid.join('|')):'');
 }
+const durTxt=m=>{m=Math.max(1,Math.round(m));if(m<60)return m+' min';const h=Math.floor(m/60);return h+' h'+(m%60?' '+(m%60)+' min':'');};
+/* mensaje para que el técnico vuelva a abrir la app; sale del WhatsApp de la oficina */
+function tecAvisoUrl(t){
+  const nom=String(t.nombre||'').split(' ')[0];
+  const txt=t.estado==='sin_datos'
+    ?`Hola ${nom}, la oficina todavía no recibe tu ubicación de hoy. Abrí la app YAPUR Gestión y dejala abierta, por favor.`
+    :`Hola ${nom}, la oficina no recibe tu ubicación desde las ${hhmm(t.ultima.ts)}. Abrí la app YAPUR Gestión y fijate que el celular tenga datos y la ubicación activada.`;
+  return waUrl(t.tel,txt);
+}
+const tecProblema=t=>t.estado==='sin_senal'||t.estado==='sin_datos';
 function tecCard(t,d){
-  const esHoy=d.dia===d.hoy,u=t.ultima;
+  const esHoy=d.dia===d.hoy,u=t.ultima,e=t.estado,m=u?(d.ahora-u.ts)/60000:0;
   let chip;
-  if(!t.acepto)chip='<span class="chip quiet">Todavía no aceptó el aviso</span>';
-  else if(!u)chip='<span class="chip quiet">Sin ubicación '+(esHoy?'hoy':'ese día')+'</span>';
-  else if(!esHoy)chip='<span class="chip quiet">'+t.puntos+' '+(t.puntos===1?'punto':'puntos')+'</span>';
-  else{const m=(d.ahora-u.ts)/60000;chip=`<span class="chip ${m<=10?'ok':m<=60?'warn':'bad'}">${m<=10?'En línea · ':'Visto '}${esc(haceTxt(u.ts))}</span>`;}
-  const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(t.acepto&&esHoy?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
-  const ruta=rutaUrl(t.ruta);
+  if(e==='sin_aceptar')chip='<span class="chip quiet">Todavía no aceptó el aviso</span>';
+  else if(e==='sin_datos')chip='<span class="chip warn">Todavía no mandó su posición</span>';
+  else if(e==='en_linea')chip=`<span class="chip ok">En línea · ${esc(haceTxt(u.ts))}</span>`;
+  else if(e==='sin_senal')chip=`<span class="chip ${m<=60?'warn':'bad'}">Sin señal · ${esc(haceTxt(u.ts))}</span>`;
+  else if(e==='fuera_horario')chip=`<span class="chip quiet">Fuera de horario${u?' · visto '+esc(haceTxt(u.ts)):''}</span>`;
+  else chip=u?'<span class="chip quiet">'+t.puntos+' '+(t.puntos===1?'punto':'puntos')+'</span>':'<span class="chip quiet">Sin ubicación ese día</span>';
+  const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(e==='sin_datos'?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
+  const hu=t.huecos||[];
+  const huHTML=hu.length?`<details class="small tec-hu"><summary>Sin señal ${esc(durTxt(t.sinSenalMin))} en ${hu.length} ${hu.length===1?'tramo':'tramos'}</summary><ul class="plain">${hu.map(g=>`<li>${hhmm(g.desde)} a ${hhmm(g.hasta)} · ${durTxt((g.hasta-g.desde)/60000)}${g.inicio?' (antes de su primera posición)':''}${g.sigue?' (sigue sin señal)':''}</li>`).join('')}</ul></details>`:'';
+  const ruta=rutaUrl(t.ruta),aviso=tecProblema(t)&&t.tel&&can('telefono');
   return `<article class="card tcard"><div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(t.nombre)}</h3>${chip}</div>
-    ${detalle?`<div class="small muted">${esc(detalle)}</div>`:''}
-    <div class="actions start">${u?`<a class="btn small primary" href="${mapaUrl(u.lat,u.lng)}" target="_blank" rel="noopener">Ver en el mapa</a>`:''}${ruta?`<a class="btn small" href="${ruta}" target="_blank" rel="noopener">Recorrido del día</a>`:''}${t.tel&&can('telefono')?`<a class="btn small ghost" href="${waUrl(t.tel,'')}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div></article>`;
+    ${detalle?`<div class="small muted">${esc(detalle)}</div>`:''}${huHTML}
+    <div class="actions start">${aviso?`<a class="btn small primary" href="${tecAvisoUrl(t)}" target="_blank" rel="noopener">Avisarle por WhatsApp</a>`:''}${u?`<a class="btn small${aviso?'':' primary'}" href="${mapaUrl(u.lat,u.lng)}" target="_blank" rel="noopener">Ver en el mapa</a>`:''}${ruta?`<a class="btn small" href="${ruta}" target="_blank" rel="noopener">Recorrido del día</a>`:''}${!aviso&&t.tel&&can('telefono')?`<a class="btn small ghost" href="${waUrl(t.tel,'')}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div></article>`;
 }
 function tecRender(){
   const out=$('#tu-out');if(!out)return;
@@ -119,8 +133,10 @@ function tecRender(){
   const hz=d.horario;
   $('#tu-horario').textContent=`Se comparte de ${hz.desde} a ${hz.hasta} h y se borra a los ${d.dias} días.`;
   const dia=$('#tu-dia');if(dia&&dia.value!==d.dia)dia.value=d.dia;
-  const list=[...d.tecnicos].sort((a,b)=>((b.ultima?b.ultima.ts:0)-(a.ultima?a.ultima.ts:0))||a.nombre.localeCompare(b.nombre));
-  out.innerHTML=list.length?`<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
+  const list=[...d.tecnicos].sort((a,b)=>(tecProblema(b)-tecProblema(a))||((b.ultima?b.ultima.ts:0)-(a.ultima?a.ultima.ts:0))||a.nombre.localeCompare(b.nombre));
+  const sin=list.filter(tecProblema);
+  const banner=sin.length?`<div class="notice" role="status" id="tu-alerta" style="margin-bottom:12px"><b>${sin.length===1?'1 técnico sin señal':sin.length+' técnicos sin señal'}:</b> ${sin.map(t=>esc(t.nombre)+(t.ultima?' ('+esc(haceTxt(t.ultima.ts))+')':' (no mandó nada hoy)')).join(', ')}.</div>`:'';
+  out.innerHTML=list.length?`${banner}<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
 }
 async function tecCargar(){
   if(TU.busy)return;TU.busy=true;
@@ -145,7 +161,7 @@ VIEWS.tecnicos={
       <p class="muted small" id="tu-horario"></p>
       <div class="toolbar"><div class="line"><input id="tu-dia" type="date" aria-label="Día" style="width:auto">${isAdmin()?'<button class="btn small ghost" type="button" id="tu-hz">Cambiar el horario</button>':''}</div></div>
       <div id="tu-out"></div>
-      <p class="muted small">La ubicación se toma solo en el horario indicado, mientras la app del técnico esté abierta o activa. Cada técnico acepta un aviso antes de empezar.</p>`;
+      <p class="muted small">La ubicación se toma solo en el horario indicado. En la app instalada sigue con la pantalla apagada una vez que el técnico la abrió; en el navegador, solo con la página abierta. Si pasan más de 10 minutos sin recibir nada, el técnico figura «Sin señal» y el tramo queda anotado. Cada técnico acepta un aviso antes de empezar.</p>`;
     $('#tu-act',el).addEventListener('click',()=>tecCargar());
     $('#tu-dia',el).addEventListener('change',e=>{TU.dia=e.target.value;TU.data=null;tecRender();tecCargar();});
     const hz=$('#tu-hz',el);if(hz)hz.addEventListener('click',openHorarioUbic);
