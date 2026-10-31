@@ -178,3 +178,19 @@ button.chip[hidden],.netbar[hidden]{display:none}
 @media (max-width:480px){th,td{padding:8px 8px}th{letter-spacing:.02em;font-size:11px}th.right,td.right{white-space:nowrap}}
 .kpi.tap{cursor:pointer}
 .kpi.tap:hover{border-color:var(--accent-line)}
+/* puertos de una caja NAP */
+.port-side{margin-top:10px}
+.ports{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:6px}
+.port{display:flex;flex-direction:column;gap:2px;min-width:0;min-height:60px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);text-align:left;font:inherit;color:var(--ink)}
+button.port{cursor:pointer}
+button.port:hover{border-color:var(--accent-line)}
+.port .n{font-size:12px;font-weight:700;color:var(--muted)}
+.port .w{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.port .s{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.port.free{background:var(--ok-soft);border-color:transparent}
+.port.free .w{color:var(--ok)}
+.port.dup{background:var(--warn-soft);border-color:transparent}
+.port.dup .w{color:var(--warn)}
+.port.self{border-style:dashed;background:var(--surface-2)}
+.port.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.port.used:not(button){opacity:.75}

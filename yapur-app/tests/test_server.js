@@ -338,6 +338,63 @@ async function openStream(token) {
     r = await call('GET', '/api/sync', undefined, O);
     t('sync oficina: con pagos', r.j.cols.pagos && r.j.cols.pagos[0].data.items.pg1, r.j && Object.keys(r.j.cols || {}));
 
+    /* ---- borrar planes: solo el administrador y solo si ningún cliente lo usa ---- */
+    r = await call('PUT', '/api/doc/planes/pdel', { data: { nombre: 'Plan sin uso', bajada: 10, subida: 5, precio: 9000 } }, A);
+    t('borrar plan: se crea un plan de prueba sin clientes', r.s === 200, r);
+    const dsO = await openStream(O), dsT = await openStream(T);
+    await sleep(200);
+    r = await call('DELETE', '/api/doc/planes/pdel', undefined, O);
+    t('borrar plan: la oficina no puede', r.s === 403 && /administrador/i.test(r.j.error), r);
+    r = await call('DELETE', '/api/doc/planes/pdel', undefined, T);
+    t('borrar plan: el técnico no puede', r.s === 403, r);
+    r = await call('DELETE', '/api/doc/planes/pdel');
+    t('borrar plan: sin sesión no puede', r.s === 401, r);
+    r = await call('GET', '/api/doc/planes/pdel', undefined, A);
+    t('borrar plan: tras los intentos rechazados el plan sigue', r.j.exists === true, r);
+    r = await call('DELETE', '/api/doc/planes/p1', undefined, A);
+    t('borrar plan: no deja si lo usan clientes activos', r.s === 409 && /Hogar 100/.test(r.j.error) && /2 clientes/.test(r.j.error) && /Desactivalo/.test(r.j.error), r);
+    r = await call('GET', '/api/doc/planes/p1', undefined, A);
+    t('borrar plan: el plan en uso sigue intacto', r.j.exists === true && r.j.data.precio === 20000, r);
+    r = await call('DELETE', '/api/doc/clientes/c01', undefined, A);
+    t('borrar: solo se pueden borrar planes (los clientes no)', r.s === 400, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('borrar: los clientes siguen ahí tras el intento', r.j.exists === true && r.j.data.items.cli1, r);
+    r = await call('DELETE', '/api/doc/planes/noexiste', undefined, A);
+    t('borrar plan: uno que no existe da 404', r.s === 404, r);
+
+    /* un plan que solo figura en un cliente dado de baja */
+    await call('PUT', '/api/doc/planes/pbaja', { data: { nombre: 'Plan viejo', bajada: 5, subida: 2, precio: 5000 } }, A);
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cliB: { nombre: 'Ex cliente', planId: 'pbaja', estado: 'baja' } } } }, O);
+    r = await call('DELETE', '/api/doc/planes/pbaja', undefined, A);
+    t('borrar plan: tampoco si lo tiene un cliente dado de baja', r.s === 409 && /1 cliente dado de baja/.test(r.j.error), r);
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cliB: { planId: 'p1' } } } }, O);
+    r = await call('DELETE', '/api/doc/planes/pbaja', undefined, A);
+    t('borrar plan: al quedar sin clientes se puede borrar', r.s === 200 && r.j.ok === true && r.j.op === 'delete', r);
+
+    /* un plan que solo figura en el historial de precios de un cliente (lo que pagó antes) */
+    await call('PUT', '/api/doc/planes/phist', { data: { nombre: 'Plan de antes', bajada: 5, subida: 2, precio: 6000 } }, A);
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cliH: { nombre: 'Con historial', planId: 'p1', hp: [{ h: '2026-01', planId: 'phist', precio: 6000 }] } } } }, O);
+    r = await call('DELETE', '/api/doc/planes/phist', undefined, A);
+    t('borrar plan: tampoco si figura en el historial de precios de un cliente', r.s === 409 && /historial de precios de 1 cliente/.test(r.j.error), r);
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cliH: { hp: [] } } } }, O);
+    r = await call('DELETE', '/api/doc/planes/phist', undefined, A);
+    t('borrar plan: sin referencias en el historial se puede borrar', r.s === 200, r);
+
+    r = await call('DELETE', '/api/doc/planes/pdel', undefined, A);
+    t('borrar plan: el administrador borra el plan sin uso', r.s === 200 && r.j.ok === true && r.j.op === 'delete' && r.j.seq > 0, r);
+    r = await call('GET', '/api/doc/planes/pdel', undefined, A);
+    t('borrar plan: ya no existe', r.j.exists === false, r);
+    r = await call('DELETE', '/api/doc/planes/pdel', undefined, A);
+    t('borrar plan: borrarlo dos veces da 404, no rompe', r.s === 404, r);
+    r = await call('GET', '/api/sync', undefined, T);
+    t('borrar plan: ya no viaja en la sincronización', r.j.cols.planes.length === 2 && !r.j.cols.planes.some(x => ['pdel', 'pbaja', 'phist'].includes(x.id)), r.j.cols.planes.map(x => x.id));
+    await sleep(200);
+    const evO = dsO.events.filter(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.op === 'delete').map(e => e.data.id);
+    const evT = dsT.events.filter(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.op === 'delete').map(e => e.data.id);
+    t('borrar plan: el borrado llega en vivo a la oficina y al técnico (una vez por plan)', ['pbaja', 'phist', 'pdel'].every(id => evO.filter(x => x === id).length === 1 && evT.filter(x => x === id).length === 1), [evO, evT]);
+    t('borrar plan: ningún intento rechazado se anunció', !dsO.events.some(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.id === 'p1'), dsO.events.length);
+    dsO.close(); dsT.close();
+
     /* ---- tiempo real ---- */
     const sO = await openStream(O), sT = await openStream(T);
     await sleep(200);
