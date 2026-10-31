@@ -95,6 +95,8 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 
 En **Planes**, si faltan, aparece el aviso **Cargar planes de noviembre**: crea de una vez **Plan 100** ($18.000) y **Plan 200** ($19.000) de 15 Mbps, y **Plan 20 Mbps** ($23.000), **Plan 25 Mbps** ($24.000) y **Plan 30 Mbps** ($35.000). Las velocidades y la ráfaga salen de las colas de los routers (ráfaga = velocidad + 10M, umbral 8M, 22 s, garantizada 256k de subida y 1M de bajada). Si ya existe un plan con ese nombre, no se duplica ni se toca. Después se editan como cualquier plan (el precio con «rige desde»).
 
+De dónde salen: en los 4 routers (Admin, FM, Leo, Bomberos; 729 colas al 31/10/2026) casi todo es 15M/15M con ráfaga 25M (Plan 100 y Plan 200 comparten velocidad, solo cambia el precio) y hay un segundo nivel 25M/25M con ráfaga 35M; el resto son casos sueltos (20M, 30M, 40M, 50M…) que se cargan con «precio especial».
+
 Cuando los de noviembre ya están cargados y los clientes ya se pasaron a ellos, el mismo lugar ofrece **Desactivar planes sin clientes**: deja de ofrecer los planes viejos que nadie usa. No se borran; se reactivan desde «Editar».
 
 ## Asignar planes y servicios a los clientes ya cargados
