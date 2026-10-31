@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'verCobros'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, verCobros: true },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, verCobros: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -115,11 +115,11 @@ function canWrite(u, p, coll, op) {
 }
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
-const CAMPO_CONCEPTOS = ['instalacion', 'reconexion', 'reclamo', 'otro'];
+const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reconexion', 'reclamo', 'otro'];
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
-function guard(u, p, coll, existing, patch) {
+function guard(u, p, coll, existing, patch, ctx) {
   if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red') return null;
   const items = isPlain(patch.items) ? patch.items : null;
   if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' ? 'Formato inválido.' : null;
@@ -147,6 +147,13 @@ function guard(u, p, coll, existing, patch) {
           if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
           if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
           if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
+          /* «Instalación» se cobra una sola vez, a quien todavía no está instalado; a uno ya instalado (una mudanza) se le cobra «Reinstalación» */
+          const cl = ctx ? ctx.clienteDe(nw.c) : null;
+          if (nw.concepto === 'instalacion') {
+            if (cl && cl.estado && cl.estado !== 'pendiente') return 'Ese cliente ya está instalado. Si se mudó, cobrá «Reinstalación (mudanza)».';
+            const ya = ctx ? ctx.cobrosDe(nw.c).find(x => x.concepto === 'instalacion' && !x.anulado) : null;
+            if (ya) return 'A este cliente ya se le cobró la instalación' + (ya.fecha ? ' el ' + String(ya.fecha).split('-').reverse().join('/') : '') + '. Si se mudó, cobrá «Reinstalación (mudanza)».';
+          } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
         nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();
         continue;
@@ -396,7 +403,7 @@ export class YapurDB extends DurableObject {
     this.tx(() => {
       const existing = this.readDoc(coll, id);
       if (coll === 'ajustes') { data = Object.assign({}, data); delete data.perfiles; }
-      const why = guard(u, p, coll, existing, data);
+      const why = guard(u, p, coll, existing, data, this);
       if (why) throw httpErr(403, why, 'permission_denied');
       if (coll === 'red') { const inUse = this.redInUse(existing, data.items); if (inUse) throw httpErr(409, inUse, 'failed_precondition'); }
       const next = op === 'set' || !existing ? data : deepMerge(existing, data);
@@ -471,6 +478,35 @@ export class YapurDB extends DurableObject {
     return '{"seq":' + this.SEQ + ',"cols":{' + cols.join(',') + '}}';
   }
 
+  /* el cliente tal como está guardado (los clientes viven repartidos en varios documentos) */
+  clienteDe(cid) {
+    const key = JSON.stringify(cid);
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      if (!r.data.includes(key)) continue;
+      const it = (JSON.parse(r.data).items || {})[cid];
+      if (isPlain(it)) return it;
+    }
+    return null;
+  }
+  /* todo lo que se le cobró a un cliente, sin importar en qué documento de la caja quedó */
+  cobrosDe(cid) {
+    const key = '"c":' + JSON.stringify(cid), out = [];
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'pagos')) {
+      if (!r.data.includes(key)) continue;
+      const its = JSON.parse(r.data).items || {};
+      for (const k of Object.keys(its)) { const it = its[k]; if (isPlain(it) && it.c === cid) out.push(Object.assign({ id: k }, it)); }
+    }
+    return out;
+  }
+  /* lo cobrado a un cliente para mostrarlo en su ficha, solo lectura: sin notas ni datos de quién lo anuló */
+  cobrosCliente(u, cid) {
+    const p = effPerms(u);
+    if (!(canReadPagos(u, p) || p.verCobros)) throw httpErr(403, 'Tu usuario no puede ver los cobros.', 'permission_denied');
+    if (typeof cid !== 'string' || !ID_RE.test(cid)) throw httpErr(400, 'Falta el cliente.', 'invalid_argument');
+    const items = this.cobrosDe(cid).sort((a, b) => String(b.fecha || '').concat(b.hora || '').localeCompare(String(a.fecha || '').concat(a.hora || ''))).slice(0, 24)
+      .map(x => ({ concepto: x.concepto, per: x.per || null, monto: x.monto, metodo: x.metodo, fecha: x.fecha, hora: x.hora || '', recibo: x.recibo, porNombre: x.porNombre || '', anulado: !!x.anulado }));
+    return { items };
+  }
   /* los cobros que registró esta persona en los últimos días (quien cobra en la calle no lee la caja entera) */
   misCobros(u, dias) {
     const hoy = ymd(), desde = ymd(Date.now() - (dias - 1) * 864e5), docs = [];
@@ -858,6 +894,7 @@ export class YapurDB extends DurableObject {
       if (!u || !u.activo) return send(401, { error: 'usuario', code: 'unauthenticated' });
       return this.openStream(u);
     }
+    if (p === '/api/cobros-cliente' && m === 'GET') return send(200, this.cobrosCliente((await this.needAuth(request)).user, url.searchParams.get('c')));
     if (p === '/api/mis-cobros' && m === 'GET') {
       const a = await this.needAuth(request);
       return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));

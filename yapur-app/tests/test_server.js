@@ -172,7 +172,10 @@ async function openStream(token) {
     const T2 = r.j.token;
     r = await call('GET', '/api/doc/clientes/c01', undefined, T2);
     t('deuda anterior: a quien solo cobra en la calle no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
-    const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cr1', concepto: 'instalacion', monto: 30000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cp1: { nombre: 'Pablo Pendiente', estado: 'pendiente' }, cinst: { nombre: 'Ines Instalada', estado: 'activo' } } } }, O);
+    t('cobros: se cargan un cliente por instalar y uno ya instalado', r.s === 200, r);
+    const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cp1', concepto: 'instalacion', monto: 30000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
+    const PATCH_PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: o } } }, tok);
     r = await PAGO(T2, 'pt1');
     t('cobros: cobra una instalación y queda a su nombre', r.s === 200 && r.j.data === null, r);
     r = await call('GET', '/api/doc/pagos/' + PG, undefined, A);
@@ -197,10 +200,51 @@ async function openStream(token) {
     t('cobros: ni modificar un cobro ya registrado', r.s === 403, r);
     r = await call('GET', '/api/doc/pagos/' + PG, undefined, T2);
     t('cobros: no puede leer la caja', r.s === 200 && r.j.exists === false, r);
+
+    /* instalación solo una vez y solo a quien no está instalado; a uno ya instalado (mudanza) se le cobra reinstalación */
+    r = await PAGO(T2, 'pi1', { c: 'cinst' });
+    t('instalación: no se le cobra a un cliente que ya está instalado', r.s === 403 && /ya está instalado/.test(r.j.error) && /Reinstalación/.test(r.j.error), r);
+    r = await PAGO(T2, 'pi2', { c: 'cinst', concepto: 'reinstalacion', monto: 20000 });
+    t('instalación: a un cliente ya instalado se le cobra la reinstalación (mudanza)', r.s === 200, r);
+    r = await PAGO(T2, 'pi3', { c: 'cp1', concepto: 'reinstalacion' });
+    t('instalación: la reinstalación no se cobra a quien todavía no está instalado', r.s === 403 && /todavía no está instalado/.test(r.j.error), r);
+    r = await PAGO(T2, 'pi4');
+    t('instalación: a un cliente al que ya se le cobró la instalación no se la cobra de nuevo', r.s === 403 && /ya se le cobró la instalación/.test(r.j.error) && /\d\d\/\d\d\/\d{4}/.test(r.j.error), r);
+    r = await PATCH_PAGO(A, 'pt1', { anulado: true, anuladoMotivo: 'se cobró por error', anuladoFecha: HOY });
+    t('instalación: el administrador anula ese cobro', r.s === 200, r);
+    r = await PAGO(T2, 'pi5', { recibo: 'RTpi5' });
+    t('instalación: con el cobro anulado se puede cobrar de nuevo', r.s === 200, r);
+    r = await PATCH_PAGO(O, 'po1', { c: 'cinst', concepto: 'instalacion', monto: 5000, fecha: HOY, hora: '11:00', recibo: 'ROpo1', metodo: 'efectivo' });
+    t('instalación: a la oficina (que cobra todo) no se le restringe el concepto', r.s === 200, r);
+
+    /* lo cobrado a cada cliente, solo lectura */
+    r = await call('GET', '/api/cobros-cliente?c=cp1', undefined, T2);
+    const cc = r.j && r.j.items;
+    t('ver cobros: el técnico ve lo cobrado al cliente (instalación, quién la cobró, anulados incluidos)', r.s === 200 && cc.length === 3 && cc.some(x => x.concepto === 'instalacion' && x.monto === 30000 && x.porNombre === 'Marcos' && x.anulado === false) && cc.some(x => x.anulado === true), r);
+    t('ver cobros: no se filtra el id de quien cobró ni las notas', !JSON.stringify(r.j).includes(TEC2_ID) && !('por' in cc[0]) && !('nota' in cc[0]) && !('anuladoPor' in cc[0]), r);
+    t('ver cobros: vienen del más nuevo al más viejo', cc.length < 2 || (cc[0].fecha + cc[0].hora) >= (cc[1].fecha + cc[1].hora), cc);
+    r = await call('GET', '/api/cobros-cliente?c=cinst', undefined, T);
+    t('ver cobros: otro técnico con el permiso por defecto también lo ve, y solo de ese cliente', r.s === 200 && r.j.items.length === 2 && r.j.items.every(x => ['reinstalacion', 'instalacion'].includes(x.concepto)), r);
+    r = await call('GET', '/api/cobros-cliente?c=cr1', undefined, T);
+    t('ver cobros: un cliente sin cobros devuelve la lista vacía', r.s === 200 && Array.isArray(r.j.items) && r.j.items.length === 0, r);
+    r = await call('GET', '/api/cobros-cliente?c=cp1', undefined, O);
+    t('ver cobros: la oficina también', r.s === 200 && r.j.items.length === 3, r);
+    r = await call('GET', '/api/cobros-cliente?c=cp1');
+    t('ver cobros: sin sesión no', r.s === 401, r);
+    r = await call('GET', '/api/cobros-cliente?c=' + encodeURIComponent('a b/../x'), undefined, T);
+    t('ver cobros: un cliente con formato inválido da 400', r.s === 400, r);
+    r = await call('GET', '/api/cobros-cliente', undefined, T);
+    t('ver cobros: sin indicar el cliente da 400', r.s === 400, r);
+    r = await call('PATCH', '/api/users/' + TEC2_ID, { permisos: { cobrarCampo: true, verCobros: false } }, A);
+    r = await call('GET', '/api/cobros-cliente?c=cp1', undefined, T2);
+    t('ver cobros: con el permiso apagado el servidor lo rechaza', r.s === 403 && /no puede ver los cobros/.test(r.j.error), r);
+    r = await call('PATCH', '/api/users/' + TEC2_ID, { permisos: { cobrarCampo: true } }, A);
+    r = await call('GET', '/api/doc/pagos/' + PG, undefined, T);
+    t('ver cobros: ver lo cobrado de un cliente no abre la caja entera', r.s === 200 && r.j.exists === false, r);
     r = await call('GET', '/api/sync', undefined, T2);
     t('cobros: la sincronización del técnico no trae pagos', r.s === 200 && !('pagos' in r.j.cols));
     r = await call('GET', '/api/mis-cobros', undefined, T2);
-    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pt1,pt2' && r.j.hoy === HOY, r);
+    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pi2,pi5,pt1,pt2' && r.j.hoy === HOY, r);
     r = await call('GET', '/api/mis-cobros', undefined, T);
     t('cobros: otro técnico no ve los de Marcos', r.s === 200 && r.j.docs.length === 0, r);
     r = await call('GET', '/api/mis-cobros', undefined);

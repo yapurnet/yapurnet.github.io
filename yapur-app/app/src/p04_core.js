@@ -40,7 +40,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reinstalacion:'Reinstalación (mudanza)',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -70,14 +70,15 @@ const PERMS=[
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
   ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reclamo, reconexión u otro cobro. No cobra mensualidades. Queda a su nombre y suma a la caja del día.','Dinero'],
+  ['verCobros','Ver lo que se cobró a cada cliente','Solo lectura: en la ficha del cliente aparecen sus últimos cobros (instalación, mensualidades) y quién los cobró, para no cobrar dos veces. No ve la caja ni los morosos.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,verCobros:true},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,verCobros:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */

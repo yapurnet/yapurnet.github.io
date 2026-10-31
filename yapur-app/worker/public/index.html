@@ -307,7 +307,7 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
-const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reinstalacion:'Reinstalación (mudanza)',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
 
 /* ===== estado global ===== */
 const S={
@@ -337,14 +337,15 @@ const PERMS=[
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
   ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reclamo, reconexión u otro cobro. No cobra mensualidades. Queda a su nombre y suma a la caja del día.','Dinero'],
+  ['verCobros','Ver lo que se cobró a cada cliente','Solo lectura: en la ficha del cliente aparecen sus últimos cobros (instalación, mensualidades) y quién los cobró, para no cobrar dos veces. No ve la caja ni los morosos.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,verCobros:true},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,verCobros:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */
@@ -937,12 +938,14 @@ function searchClients(q,filter,limit){
   out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
   return limit?out.slice(0,limit):out;
 }
+/* quien no ve la facturación (el técnico) igual tiene que ver de un vistazo si el cliente está activo, suspendido, por instalar o de baja */
+const estChip=c=>(can('cobrar')||can('caja'))||!c.estado?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`;
 function clientRow(c){
   const pl=S.planes.get(c.planId);
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
-    <div class="side">${c.estado==='activo'?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`}</div>
+    <div class="side">${c.estado==='activo'&&(can('cobrar')||can('caja'))?'':`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span>`}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasOf(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasOf(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
     ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
@@ -954,7 +957,7 @@ function mountClientPicker(host,opts){
     const q=inp.value.trim();
     if(!q){list.innerHTML='';return;}
     const rows=searchClients(q,opts.filter,8);
-    list.innerHTML=rows.length?rows.map(c=>`<button class="item" type="button" data-pick="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div><div class="s">${esc(c.dir||'')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${billChip(c)}</div></button>`).join(''):'<div class="hint">No hay clientes con esa búsqueda.</div>';
+    list.innerHTML=rows.length?rows.map(c=>`<button class="item" type="button" data-pick="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div><div class="s">${esc(c.dir||'')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${billChip(c)||estChip(c)}</div></button>`).join(''):'<div class="hint">No hay clientes con esa búsqueda.</div>';
   };
   inp.addEventListener('input',draw);
   list.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(b)opts.onPick(S.clientes.get(b.dataset.pick));});
@@ -1057,17 +1060,20 @@ function openClient(id){
     <div class="head-row"><div><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span> ${billChip(c)}</div>
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
-    ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:(c.estado==='suspendido'?`<div class="notice bad">Servicio suspendido${c.corteMora?' por falta de pago desde el '+esc(dmy(c.corteMora)):''}.</div>`:(c.estado==='baja'?'<div class="notice">Cliente dado de baja.</div>':''))}
     ${deudaAntBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasOf(c).length?kv('Servicios adicionales',extrasOf(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasOf(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?'<button class="btn primary" type="button" data-act="cobrar">Cobrar instalación o reclamo</button>':''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
+    ${!(can('cobrar')||can('caja'))&&can('verCobros')?'<div id="fc-cobros"><h3>Lo cobrado</h3><div class="hint" style="margin-top:8px">Consultando…</div></div>':''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td></tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
   openModal({title:'Ficha del cliente',html,onMount(el){
+    const fc=$('#fc-cobros',el);
+    if(fc)cobrosDeCliente(c.id).then(l=>{if(!$('#fc-cobros'))return;fc.innerHTML='<h3>Lo cobrado</h3><div style="margin-top:8px">'+cobrosTablaHTML(l||[])+'</div>';}).catch(e=>{fc.innerHTML='<h3>Lo cobrado</h3><div class="hint" style="margin-top:8px">'+cobrosErrTxt(e)+'</div>';});
     el.addEventListener('click',e=>{
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openClientForm(c.id);
@@ -2876,12 +2882,15 @@ function openOrderForm({id,clientId}){
 /* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reconexión, reclamo) */
 const CONC_ORD={instalacion:'instalacion',reconexion:'reconexion',falla:'reclamo',visita:'reclamo'};
 const puedeCobrarOrden=c=>!!c&&(can('cobrar')||can('cobrarCampo'));
-function cobroOrdenHTML(o){
-  const con0=CONC_ORD[o.tipo]||'otro';
+function cobroOrdenHTML(o,c){
+  const lista=conceptosCobro(c,soloCampo());
+  let con0=CONC_ORD[o.tipo]||'otro';
+  if(con0==='instalacion'&&instalado(c))con0='reinstalacion';   /* una instalación sobre un cliente ya instalado es una mudanza */
+  if(!lista.includes(con0))con0=lista.includes('otro')?'otro':lista[0];
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>
     <div id="ff-cobro-box" hidden>
-      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>k!=='mensualidad'&&k!=='deuda_anterior').map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
+      <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>lista.includes(k)).map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
     </div></div>`;
@@ -2893,7 +2902,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c)?cobroOrdenHTML(o):''}
+    ${puedeCobrarOrden(c)?cobroOrdenHTML(o,c):''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
@@ -3262,6 +3271,24 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
+/* «Instalación» se cobra una sola vez, al cliente que todavía no está instalado; a uno ya instalado (una mudanza) se le cobra «Reinstalación».
+   Se aplica a quien cobra en la calle; el servidor lo controla igual. */
+const instalado=c=>!!c&&!!c.estado&&c.estado!=='pendiente';
+function conceptosCobro(c,campo){
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+}
+/* lo cobrado a un cliente: quien ve la caja lo tiene en memoria; el resto lo pide al servidor (solo lectura) */
+async function cobrosDeCliente(cid){
+  if(can('cobrar')||can('caja'))return (S.payByClient.get(cid)||[]).slice(0,12);
+  if(!can('verCobros'))return null;
+  const j=await NET.api('GET','/api/cobros-cliente?c='+encodeURIComponent(cid));
+  return j.items||[];
+}
+function cobrosTablaHTML(l,max){
+  if(!l.length)return '<div class="hint">Todavía no se le cobró nada.</div>';
+  return `<div class="tbl-wrap"><table><tbody>${l.slice(0,max||10).map(p=>`<tr><td class="nowrap">${esc(dmy(p.fecha))}</td><td>${esc(p.concepto==='mensualidad'&&p.per?'Mensualidad '+monthLabel(p.per):CONCEPTOS[p.concepto]||'Otro')}${p.anulado?' <span class="chip bad">Anulado</span>':''}<div class="small muted">${esc(METODOS[p.metodo]||p.metodo||'')}${p.porNombre?' · cobró '+esc(p.porNombre):''}</div></td><td class="right tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+const cobrosErrTxt=e=>e&&e.network?'Sin conexión: no se pudo consultar lo cobrado.':'No se pudo consultar lo cobrado.';
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
@@ -3269,12 +3296,13 @@ function openCobro(clientId,con1,pre){
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
   const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
-  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':'instalacion';
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),verPrev=!can('cobrar')&&can('verCobros'),permitidos=conceptosCobro(c,campo);
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:` · ${esc(ESTADOS[c.estado]||c.estado)}`}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:true).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
-    ${campo?'<div class="hint">Queda registrado a tu nombre y suma a la caja del día.</div>':''}
+    <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
+    ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
+    ${verPrev?'<div id="cb-prev"><div class="hint">Consultando lo ya cobrado a este cliente…</div></div>':''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
@@ -3283,6 +3311,12 @@ function openCobro(clientId,con1,pre){
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="cb-go">Registrar cobro</button></div>`;
   openModal({title:'Cobrar',html,onMount(el){
     let con=con0,manual=false;
+    const prev=$('#cb-prev',el);
+    if(prev)cobrosDeCliente(c.id).then(l=>{
+      if(!$('#cb-prev'))return;
+      l=l||[];const inst=l.find(p=>p.concepto==='instalacion'&&!p.anulado);
+      prev.innerHTML=(inst?`<div class="notice">Ya se le cobró la instalación el ${esc(dmy(inst.fecha))} (${esc(fmtMoney(inst.monto))}).</div>`:'')+(l.length?`<div class="small muted" style="margin-bottom:4px">Lo último que se le cobró</div>${cobrosTablaHTML(l,4)}`:'<div class="hint">Todavía no se le cobró nada.</div>');
+    }).catch(e=>{prev.innerHTML='<div class="hint">'+cobrosErrTxt(e)+'</div>';});
     const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
     const sum=()=>{
@@ -3676,7 +3710,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='8e61dc125a';
+const BUILD='a5e052c61a';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

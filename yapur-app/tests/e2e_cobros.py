@@ -31,7 +31,7 @@ ERR = []
 async def login(ctx, user, clave):
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: ERR.append('PAGEERROR ' + str(e)))
-    pg.on('console', lambda m: ERR.append('CONSOLE ' + m.text) if m.type == 'error' and 'fonts.g' not in m.text and 'Failed to load resource' not in m.text and 'ERR_' not in m.text else None)
+    pg.on('console', lambda m: ERR.append('CONSOLE ' + m.text) if m.type == 'error' and 'fonts.g' not in m.text and 'Failed to load resource' not in m.text and 'ERR_' not in m.text and 'ya se le cobró la instalación' not in m.text else None)   # ese error lo provoca a propósito la prueba de la instalación repetida
     await pg.goto(BASE, wait_until='domcontentloaded')
     await pg.wait_for_selector('#lg-form', timeout=8000)
     await pg.fill('#lg-user', user); await pg.fill('#lg-pass', clave)
@@ -56,10 +56,11 @@ async def main():
     api('PUT', '/api/doc/planes/p1', {'data': {'nombre': 'Hogar 50', 'precio': 20000}}, TA)
     for cid, c in {
         'a': {'nombre': 'Ana Activa', 'estado': 'activo', 'planId': 'p1', 'dir': 'Calle 1', 'tel': '3844000001', 'desde': cur},
-        'd': {'nombre': 'Darío Instalar', 'estado': 'pendiente', 'planId': 'p1', 'dir': 'Calle 4', 'tel': '3844000004'}}.items():
+        'd': {'nombre': 'Darío Instalar', 'estado': 'pendiente', 'planId': 'p1', 'dir': 'Calle 4', 'tel': '3844000004'},
+        'e': {'nombre': 'Elena Suspendida', 'estado': 'suspendido', 'corteMora': '2026-10-20', 'planId': 'p1', 'dir': 'Calle 5', 'tel': '3844000005', 'desde': cur}}.items():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
-    for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id'])):
-        api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid == 'o1' else ('visita' if oid == 'o4' else 'falla'), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
+    for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id']), ('o5', 'e', pedro['id']), ('o6', 'a', pedro['id'])):
+        api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid in ('o1', 'o6') else ('visita' if oid == 'o4' else 'falla'), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         async def nuevo():
@@ -70,7 +71,7 @@ async def main():
 
         # 1) el técnico con permiso ve «Mis cobros» y cobra una instalación a un cliente pendiente
         pg = await login(ctx, 'pedro', 'pedro123')
-        await pg.wait_for_function('S.clientes.size >= 1', timeout=10000)
+        await pg.wait_for_function('S.clientes.size >= 3', timeout=10000)
         t = await tabs(pg)
         check('el técnico con permiso ve la pestaña «Mis cobros»', 'Mis cobros' in t, t)
         check('no ve Cobranzas ni la caja general', 'Cobranzas' not in t and 'Caja' not in t, t)
@@ -82,6 +83,9 @@ async def main():
         await pg.wait_for_selector('#cb-go')
         botones = await pg.evaluate("[...document.querySelectorAll('#cb-con button')].map(b=>b.textContent.trim())")
         check('al cobrar en la calle no existe «Mensualidad»', 'Mensualidad' not in botones and 'Instalación' in botones and 'Reclamo o visita técnica' in botones, botones)
+        check('a un cliente por instalar se le ofrece «Instalación», no «Reinstalación»', 'Reinstalación (mudanza)' not in botones and await pg.evaluate("document.querySelector('#cb-con [aria-pressed=true]').textContent") == 'Instalación', botones)
+        await pg.wait_for_function("document.querySelector('#cb-prev').textContent.includes('Todavía no se le cobró nada')", timeout=5000)
+        check('antes de cobrar muestra que todavía no se le cobró nada', True)
         check('la fecha del cobro es hoy y no se puede cambiar', await pg.evaluate("document.querySelector('#cb-fecha').disabled") is True and await pg.input_value('#cb-fecha') == hoy)
         await pg.fill('#cb-monto', '15000')
         await pg.fill('#cb-nota-o', 'Instalación completa')
@@ -94,6 +98,19 @@ async def main():
         check('el servidor lo guardó a nombre del técnico', len(mis) == 1 and mis[0]['por'] == pedro['id'] and mis[0]['porNombre'] == 'Pedro' and mis[0]['concepto'] == 'instalacion' and mis[0]['monto'] == 15000 and mis[0]['fecha'] == hoy, mis)
         await pg.wait_for_function("document.querySelector('#mc-body').textContent.includes('15.000')", timeout=5000)
         check('«Mis cobros» muestra lo cobrado hoy', 'Cobrado hoy' in await pg.inner_text('#mc-body'))
+        # el técnico ve lo cobrado en la ficha del cliente, y no puede cobrar la instalación dos veces
+        await pg.evaluate("openClient('d')")
+        await pg.wait_for_function("document.querySelector('#fc-cobros') && document.querySelector('#fc-cobros').textContent.includes('15.000')", timeout=6000)
+        fc = await pg.inner_text('#fc-cobros')
+        check('la ficha muestra «Lo cobrado»: instalación, monto, medio y quién la cobró', 'Lo cobrado' in fc and 'Instalación' in fc and '15.000' in fc and 'Efectivo' in fc and 'cobró Pedro' in fc, fc)
+        check('el cliente por instalar se ve como «Por instalar»', 'Por instalar' in await pg.inner_text('.sheet'))
+        await pg.click('.sheet [data-act=cobrar]'); await pg.wait_for_selector('#cb-go')
+        await pg.wait_for_function("document.querySelector('#cb-prev').textContent.includes('Ya se le cobró la instalación')", timeout=5000)
+        check('al volver a cobrarle avisa que ya se le cobró la instalación', 'Ya se le cobró la instalación el ' in await pg.inner_text('#cb-prev') and '15.000' in await pg.inner_text('#cb-prev'), await pg.inner_text('#cb-prev'))
+        await pg.fill('#cb-monto', '5000'); await pg.click('#cb-go')
+        await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('ya se le cobró la instalación')", timeout=5000)
+        check('y el servidor no deja cobrarla de nuevo', len(pagos_hoy(pedro_tok)) == 1, pagos_hoy(pedro_tok))
+        await pg.click('.sheet [data-close]')
 
         # 2) cerrar una orden con cobro (falla/reclamo → concepto «Reclamo»)
         await pg.evaluate("openFinishOrder(S.ordenes.get('o2'))")
@@ -115,10 +132,36 @@ async def main():
         # 3) desde la ficha de un cliente activo no puede cobrar mensualidad
         await pg.evaluate("openClient('a')")
         await pg.wait_for_selector('.sheet [data-act=cobrar]')
-        check('en la ficha de un cliente aparece «Cobrar instalación o reclamo»', 'Cobrar instalación o reclamo' in await pg.inner_text('.sheet'))
+        check('en la ficha de un cliente ya instalado aparece «Cobrar reclamo o reinstalación»', 'Cobrar reclamo o reinstalación' in await pg.inner_text('.sheet') and 'Cobrar instalación' not in await pg.inner_text('.sheet'))
+        check('la ficha dice que el cliente está activo', 'Activo' in await pg.inner_text('.sheet'))
         await pg.click('.sheet [data-act=cobrar]'); await pg.wait_for_selector('#cb-go')
         check('no puede marcar meses de mensualidad', await pg.query_selector('#cb-mens:not([hidden])') is None)
+        botones = await pg.evaluate("[...document.querySelectorAll('#cb-con button')].map(b=>b.textContent.trim())")
+        check('a un cliente ya instalado no se le ofrece «Instalación»: se ofrece «Reinstalación (mudanza)»', botones == ['Reinstalación (mudanza)', 'Reconexión', 'Reclamo o visita técnica', 'Otro'], botones)
+        check('y viene marcado «Reclamo o visita técnica», no una instalación', await pg.evaluate("document.querySelector('#cb-con [aria-pressed=true]').textContent") == 'Reclamo o visita técnica')
+        check('explica que si se mudó se cobra la reinstalación', 'ya está instalado' in await pg.inner_text('.sheet') and 'Reinstalación (mudanza)' in await pg.inner_text('.sheet'))
+        await pg.click('#cb-con [data-con=reinstalacion]'); await pg.fill('#cb-monto', '20000'); await pg.fill('#cb-nota-o', 'Mudanza a calle 9')
+        await pg.click('#cb-go'); await pg.wait_for_selector('.rc', timeout=8000)
+        check('cobra la reinstalación (mudanza) y el recibo lo dice', 'Reinstalación' in await pg.inner_text('.rc') and '20.000' in await pg.inner_text('.rc'), await pg.inner_text('.rc'))
         await pg.click('.sheet [data-close]')
+        await pg.evaluate("openClient('a')")
+        await pg.wait_for_function("document.querySelector('#fc-cobros') && document.querySelector('#fc-cobros').textContent.includes('Reinstalación')", timeout=6000)
+        check('queda a la vista en la ficha del cliente', '20.000' in await pg.inner_text('#fc-cobros'))
+        await pg.click('.sheet [data-close]')
+        # el cierre de una orden de instalación sobre un cliente ya instalado (mudanza) propone reinstalación
+        await pg.evaluate("openFinishOrder(S.ordenes.get('o6'))")
+        await pg.wait_for_selector('#ff-cobro')
+        optsc = await pg.evaluate("[...document.querySelectorAll('#ff-con option')].map(o=>o.value)")
+        check('al cerrar una instalación sobre un cliente instalado propone «Reinstalación» y no ofrece «Instalación»', await pg.input_value('#ff-con') == 'reinstalacion' and 'instalacion' not in optsc, optsc)
+        await pg.click('.sheet [data-close]')
+        # cliente suspendido: el técnico lo ve
+        await pg.evaluate("openClient('e')")
+        await pg.wait_for_selector('.sheet .notice.bad')
+        sh = await pg.inner_text('.sheet')
+        check('de un cliente suspendido la ficha dice «Suspendido» y desde cuándo', 'Suspendido' in sh and 'Servicio suspendido por falta de pago desde el 20/10/2026' in sh, sh[:400])
+        await pg.click('.sheet [data-close]')
+        chips = await pg.evaluate("[clientRow(S.clientes.get('a')), clientRow(S.clientes.get('e')), clientRow(S.clientes.get('d'))]")
+        check('en la lista el técnico ve el estado de cada cliente: Activo, Suspendido y Por instalar', 'Activo' in chips[0] and 'Suspendido' in chips[1] and 'Por instalar' in chips[2], chips)
         # el servidor lo impide aunque lo intente por afuera
         st, j = api('PATCH', '/api/doc/pagos/' + hoy[:4] + '-s00', {'data': {'items': {'x1': {'c': 'a', 'concepto': 'mensualidad', 'per': cur, 'monto': 20000, 'metodo': 'efectivo', 'fecha': hoy, 'recibo': 'RX'}}}}, pedro_tok)
         check('el servidor rechaza una mensualidad del técnico', st == 400 or st == 403, (st, j))
@@ -134,7 +177,7 @@ async def main():
 
         # 5) la oficina cobra una mensualidad y mira el cierre de caja por cobrador
         ctx3 = await nuevo(); pg3 = await login(ctx3, 'laura', 'laura123')
-        await pg3.wait_for_function('S.clientes.size === 2 && S.pagos.size >= 2', timeout=10000)
+        await pg3.wait_for_function('S.clientes.size === 3 && S.pagos.size >= 2', timeout=10000)
         await pg3.evaluate("openCobro('a')"); await pg3.wait_for_selector('#cb-go')
         check('la oficina sí ve «Mensualidad» como concepto', 'Mensualidad' in await pg3.inner_text('#cb-con'))
         await pg3.fill('#cb-monto', '20000'); await pg3.click('#cb-go')
@@ -148,7 +191,7 @@ async def main():
         filas = await pg3.evaluate("[...document.querySelectorAll('#cb-caja table tbody tr')].map(r=>[...r.cells].map(c=>c.textContent.trim()))")
         por = {f[0]: f for f in filas}
         check('la caja separa lo que cobró cada persona', set(por) == {'Pedro', 'Laura'}, filas)
-        check('Pedro: 2 recibos, efectivo 15.000, otros medios 3.500, total 18.500', por['Pedro'][1] == '2' and '15.000' in por['Pedro'][2] and '3.500' in por['Pedro'][3] and '18.500' in por['Pedro'][4], por['Pedro'])
+        check('Pedro: 3 recibos (instalación 15.000, reclamo 3.500 y reinstalación 20.000): efectivo 35.000, otros medios 3.500, total 38.500', por['Pedro'][1] == '3' and '35.000' in por['Pedro'][2] and '3.500' in por['Pedro'][3] and '38.500' in por['Pedro'][4], por['Pedro'])
         check('Laura: 1 recibo de 20.000 en efectivo', por['Laura'][1] == '1' and '20.000' in por['Laura'][2] and '20.000' in por['Laura'][4], por['Laura'])
         check('el total de la caja del día suma todo (38.500)', '38.500' in caja, caja[:200])
         check('cada cobro dice quién lo hizo', 'cobró Pedro' in caja and 'cobró Laura' in caja)
