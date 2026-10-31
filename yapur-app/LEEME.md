@@ -119,6 +119,7 @@ PAGO: (Efectivo) 65mil pesos que es el costo de instalación
 - Lee `NOMBRE`, `DNI`, `IP` y `PAGO`; también `TELÉFONO`, `DIRECCIÓN`, `LOCALIDAD` y `PLAN` si vienen. Ignora los emojis y los renglones en blanco.
 - Deja al cliente **activo** y con «cobrar desde» el **mes siguiente** (se puede cambiar). Avisa qué falta completar (el teléfono y la calle son obligatorios) y si ya hay otro cliente con ese DNI o esa IP.
 - Si trae un pago («65mil», «65 mil pesos», «$65.000»…), al guardar se abre **Cobrar** ya completado: concepto (instalación, reconexión o reclamo según el texto), medio (efectivo, transferencia o Mercado Pago) y monto. Hay que confirmarlo con «Registrar cobro».
+- Si `PAGO` trae solo el medio y no el monto («PAGO: (Transferencia)»), lo avisa y, al guardar, abre **Cobrar** con ese medio ya elegido para que pongas cuánto fue. Si dice «no pagó» o «pendiente», no abre nada.
 - El cobro queda a nombre de quien lo registra. Si la plata la tiene el técnico y tiene que figurar en su caja, que lo cargue él desde su celular con «Cobrar instalación o reclamo».
 
 ## Planes de noviembre (un solo botón)
