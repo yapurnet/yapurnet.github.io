@@ -71,12 +71,14 @@ public class UbicacionService extends Service implements LocationListener {
 
     @Override
     public int onStartCommand(Intent it, int flags, int startId) {
-        if (it == null || token.length() == 0) { stopSelf(); return START_NOT_STICKY; }
-        desde = it.getIntExtra(EXTRA_DESDE, 8);
-        hasta = it.getIntExtra(EXTRA_HASTA, 20);
-        /* Android exige mostrar la notificación enseguida después de startForegroundService */
-        if (!enPrimerPlano()) { stopSelf(); return START_NOT_STICKY; }
-        if (!dentroDeHorario()) { stopSelf(); return START_NOT_STICKY; }
+        if (it != null) {
+            desde = it.getIntExtra(EXTRA_DESDE, 8);
+            hasta = it.getIntExtra(EXTRA_HASTA, 20);
+        }
+        /* Android exige llamar a startForeground enseguida después de startForegroundService, aunque después no haya nada que hacer:
+           por eso va primero, antes de cualquier salida (si no, en algunas versiones se cierra toda la aplicación). */
+        boolean visible = enPrimerPlano();
+        if (!visible || it == null || token.length() == 0 || !dentroDeHorario()) { stopSelf(); return START_NOT_STICKY; }
         if (!running) {
             running = true;
             main = new Handler(Looper.getMainLooper());
