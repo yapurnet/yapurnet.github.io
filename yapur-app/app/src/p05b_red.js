@@ -172,7 +172,7 @@ function portGridHTML(p,m,o){
     if(!l.length)return o.pick
       ?`<button class="port free${o.sel===i?' sel':''}" type="button" data-pick="${i}" aria-pressed="${o.sel===i}">${lbl}<span class="w">Libre</span></button>`
       :`<div class="port free">${lbl}<span class="w">Libre</span></div>`;
-    const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado&&c.estado!=='activo'?' · '+(ESTADOS[c.estado]||c.estado):'';
+    const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado!=='activo'&&estLabel(c)?' · '+estLabel(c):'';
     const body=l.length>1?'<span class="w">Repetido</span><span class="s">'+l.length+' clientes en este puerto</span>'
       :`<span class="w">${esc(c.nombre)}</span><span class="s">${esc(callePuerto(c)||'Sin domicilio')}${esc(est)}</span>`;
     if(o.pick)return `<div class="port ${mine?'self':l.length>1?'dup':'used'}">${lbl}${mine?'<span class="w">Acá está hoy</span>':body}</div>`;
@@ -213,7 +213,7 @@ function openRed(id){
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(p)}${can('red')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(p)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${kids.length?`<div><h3>De acá salen</h3><div class="list" style="margin-top:8px">${kids.sort(redCmp).map(k=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div></div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
     ${grid?portsSectionHTML(p,m):''}
-    ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
+    ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${estChip(c)}</div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
       ${cl.length>vis.length&&vis.length?`<div class="hint">Y ${cl.length-vis.length} más que tu perfil no puede ver.</div>`:''}</div>`:''}`;
   openModal({title:RED_TIPO[p.tipo]||'Red',html,onMount(el){
     el.addEventListener('click',e=>{
@@ -231,7 +231,7 @@ function openNapClient(napId,cid){
   const p=S.red.get(napId),c=S.clientes.get(cid);
   if(!p||!c)return openRed(napId);
   const vis=clientVisible(c),kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
-  const html=`<div class="head-row"><span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(ESTADOS[c.estado]||c.estado)}</span></div>
+  const html=`<div class="head-row">${estChip(c)}</div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}</h2>
     <dl class="kv">${kv('Caja',esc(p.nombre))}${kv('Puerto',c.napPuerto?esc(c.napPuerto):'Sin puerto cargado')}${kv('Domicilio',esc(callePuerto(c)))}${vis&&can('telefono')&&c.tel?kv('Teléfono',esc(c.tel)):''}</dl>
     <div class="actions">${vis?'<button class="btn" type="button" data-act="ficha">Ver ficha del cliente</button>':''}${canMoverNap()?'<button class="btn primary" type="button" data-act="mover">Mover a otra caja o puerto</button>':''}<button class="btn ghost" type="button" data-act="volver">Volver a la caja</button></div>`;
