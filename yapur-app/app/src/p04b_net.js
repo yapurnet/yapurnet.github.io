@@ -58,6 +58,7 @@ const NET=(function(){
   /* ----- sesión ----- */
   function setSession(t,m){token=t;me=m;lsSet('tok',t);lsSet('me',JSON.stringify(m));}
   function clearSession(){
+    try{const b=window.YapurApp;if(b&&typeof b.stopLocation==='function')b.stopLocation();}catch(e){}   /* el APK deja de compartir la ubicación al terminar la sesión */
     token='';me=null;lsSet('tok','');lsSet('me','');['viewAsP','tab','tecId','sess'].forEach(k=>lsSet(k,''));
     closeStream();synced=false;fresh=false;started=false;for(const k of Object.keys(data))delete data[k];
     kvClear();

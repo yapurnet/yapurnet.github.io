@@ -1,0 +1,39 @@
+name: Probar APK Gestión YAPUR
+
+# En cada pull request que toca el programa de Android: arma el APK completo con una clave de prueba descartable
+# (la de verdad nunca se usa acá) y comprueba el manifiesto, el servicio de ubicación y los permisos.
+# No publica nada: es solo para enterarse de un error ANTES de mezclar el cambio.
+on:
+  pull_request:
+    paths:
+      - 'yapur-app/android/**'
+      - '.github/workflows/build-yapur-apk.yml'
+      - '.github/workflows/probar-apk-yapur.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas de Android
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt apksigner zipalign android-sdk-platform-23 dalvik-exchange zip unzip
+
+      - name: Elegir el Android SDK de la máquina
+        run: bash yapur-app/android/elegir_sdk.sh >> "$GITHUB_ENV"
+
+      - name: Armar el APK con una clave de prueba
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -keystore "$RUNNER_TEMP/prueba.jks" -alias prueba -keyalg RSA -keysize 2048 -validity 2 \
+            -storepass prueba123 -keypass prueba123 -dname "CN=prueba" 2>/dev/null
+          export KEYSTORE="$RUNNER_TEMP/prueba.jks" KEYSTORE_PASSWORD=prueba123 KEY_ALIAS=prueba KEY_PASSWORD=prueba123
+          export VERSION_CODE=1 VERSION_NAME=prueba ALLOW_ANY_CERT=1
+          bash yapur-app/android/build_apk.sh "$RUNNER_TEMP/prueba.apk"

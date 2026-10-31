@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -44,6 +45,7 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 1;
     private static final int REQ_STORAGE = 2;
     private static final int REQ_LOC = 3;
+    private static final int REQ_NOTIF = 4;
     private static final String OFFLINE = "file:///android_asset/offline.html";
     private static final String[] OPENABLE = {"http", "https", "tel", "mailto", "geo", "whatsapp", "waze", "sms", "smsto"};
 
@@ -55,6 +57,7 @@ public class MainActivity extends Activity {
     private byte[] pendData;
     private GeolocationPermissions.Callback geoCb;
     private String geoOrigin;
+    private boolean notifAsked;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -237,6 +240,19 @@ public class MainActivity extends Activity {
         }
     }
 
+    /* Android 13+: sin este permiso el servicio igual funciona, pero la notificación «ubicación activa» no se vería en la barra */
+    private void pedirNotificaciones() {
+        if (Build.VERSION.SDK_INT < 33 || notifAsked) return;
+        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
+        notifAsked = true;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try { requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_NOTIF); } catch (Exception e) { /* nada */ }
+            }
+        });
+    }
+
     private boolean hasLocationPermission() {
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
             || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
@@ -336,6 +352,7 @@ public class MainActivity extends Activity {
             if (!ok) toast("Sin el permiso de ubicación no se puede usar el GPS.");
             return;
         }
+        if (req == REQ_NOTIF) return;   // da igual lo que conteste: el servicio no depende de esto
         if (req == REQ_STORAGE) {
             byte[] d = pendData;
             String n = pendName, m = pendMime;
@@ -376,6 +393,36 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String version() { return Config.VERSION; }
+
+        /* Ubicación del técnico en horario laboral (la página ya mostró el aviso y el técnico lo aceptó).
+           Devuelve «ok» cuando el servicio quedó andando; si no, la causa, y la página sigue con el GPS de la ventana. */
+        @JavascriptInterface
+        public String startLocation(String token, int desde, int hasta) {
+            try {
+                if (token == null || token.length() < 8 || token.length() > 1000) return "token";
+                if (desde < 0 || hasta > 24 || desde >= hasta) return "horario";
+                if (!hasLocationPermission()) return "permiso";   // el permiso lo pide la página con el GPS de la ventana; al minuto vuelve a intentar
+                UbicacionService.token = token;
+                Intent it = new Intent(MainActivity.this, UbicacionService.class);
+                it.putExtra(UbicacionService.EXTRA_DESDE, desde);
+                it.putExtra(UbicacionService.EXTRA_HASTA, hasta);
+                if (Build.VERSION.SDK_INT >= 26) {
+                    Context.class.getMethod("startForegroundService", Intent.class).invoke(MainActivity.this, it);
+                } else {
+                    startService(it);
+                }
+                pedirNotificaciones();
+                return "ok";
+            } catch (Throwable t) {
+                return "error";
+            }
+        }
+
+        @JavascriptInterface
+        public void stopLocation() {
+            UbicacionService.token = "";
+            try { stopService(new Intent(MainActivity.this, UbicacionService.class)); } catch (Throwable t) { /* ya estaba parado */ }
+        }
 
         @JavascriptInterface
         public void reload() {
