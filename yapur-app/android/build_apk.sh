@@ -81,17 +81,26 @@ done
 unzip -p "$OUT" classes.dex > "$WORK/check.dex"
 grep -aq "Lar/net/yapur/gestion/MainActivity;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae MainActivity" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/UbicacionService;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
+grep -aq "Lar/net/yapur/gestion/UbicacionReceptor;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el receptor de arranque de la ubicación" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "$SERVER_URL" "$WORK/check.dex" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }
-# El servicio de ubicación: declarado, no exportado y del tipo «location» (Android 14 no deja arrancarlo sin esto), con sus permisos
-for perm in ACCESS_FINE_LOCATION FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION POST_NOTIFICATIONS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+# El servicio de ubicación: declarado, no exportado y del tipo «location» (Android 14 no deja arrancarlo sin esto), con sus permisos.
+# ACCESS_BACKGROUND_LOCATION («todo el tiempo») y RECEIVE_BOOT_COMPLETED son los que dejan que la ubicación siga con la app cerrada y vuelva
+# sola al reiniciar el celular: sin ellos la jornada de los técnicos dependería de que abran la app.
+for perm in ACCESS_FINE_LOCATION ACCESS_BACKGROUND_LOCATION FOREGROUND_SERVICE FOREGROUND_SERVICE_LOCATION RECEIVE_BOOT_COMPLETED POST_NOTIFICATIONS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
   echo "$BADGE" | grep -q "^uses-permission: name='android.permission.$perm'" || { echo "ERROR: falta el permiso $perm en el manifiesto" >&2; rm -f "$OUT"; exit 1; }
 done
-echo "$BADGE" | grep -q "ACCESS_BACKGROUND_LOCATION" && { echo "ERROR: el manifiesto pide ubicación en segundo plano; no hace falta y no debe pedirse" >&2; rm -f "$OUT"; exit 1; }
 XML="$("$AAPT" dump xmltree "$OUT" AndroidManifest.xml)"
 SVC="$(printf '%s\n' "$XML" | awk '/E: service/ {f=1} f {print} /E: activity|E: receiver|E: provider/ && f {exit}')"
 printf '%s\n' "$SVC" | grep -q 'ar.net.yapur.gestion.UbicacionService' || { echo "ERROR: el manifiesto no declara el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
 printf '%s\n' "$SVC" | grep -Eq 'foregroundServiceType\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x8$' || { echo "ERROR: el servicio de ubicación no es del tipo «location»" >&2; rm -f "$OUT"; exit 1; }
 printf '%s\n' "$SVC" | grep -Eq 'android:exported\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x0$' || { echo "ERROR: el servicio de ubicación no debe estar exportado" >&2; rm -f "$OUT"; exit 1; }
+# El receptor que vuelve a poner en marcha el servicio: declarado, no exportado, y atento al arranque del celular y a la actualización de la app
+REC="$(printf '%s\n' "$XML" | awk '/E: receiver/ {f=1} f {print} /E: activity|E: service|E: provider/ && f {exit}')"
+printf '%s\n' "$REC" | grep -q 'ar.net.yapur.gestion.UbicacionReceptor' || { echo "ERROR: el manifiesto no declara el receptor que reactiva la ubicación" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$REC" | grep -Eq 'android:exported\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x0$' || { echo "ERROR: el receptor de arranque no debe estar exportado" >&2; rm -f "$OUT"; exit 1; }
+for ac in BOOT_COMPLETED MY_PACKAGE_REPLACED; do
+  printf '%s\n' "$REC" | grep -q "android.intent.action.$ac" || { echo "ERROR: el receptor no escucha $ac" >&2; rm -f "$OUT"; exit 1; }
+done
 if ! unzip -Zv "$OUT" resources.arsc | grep -q "compression method:.*stored"; then
   echo "ERROR: resources.arsc debe ir sin comprimir (Android 11+ lo exige)" >&2; rm -f "$OUT"; exit 1
 fi

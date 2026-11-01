@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private static final int REQ_STORAGE = 2;
     private static final int REQ_LOC = 3;
     private static final int REQ_NOTIF = 4;
+    private static final int REQ_BG = 5;
     private static final String OFFLINE = "file:///android_asset/offline.html";
     private static final String[] OPENABLE = {"http", "https", "tel", "mailto", "geo", "whatsapp", "waze", "sms", "smsto"};
 
@@ -289,6 +290,12 @@ public class MainActivity extends Activity {
             || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
+    /* Ubicación «todo el tiempo» (ACCESS_BACKGROUND_LOCATION): existe desde Android 10; antes, el permiso de ubicación ya la incluye */
+    private boolean tieneUbicacionSiempre() {
+        if (Build.VERSION.SDK_INT < 29) return hasLocationPermission();
+        return checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION") == PackageManager.PERMISSION_GRANTED;
+    }
+
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         if (req == REQ_FILE) {
@@ -384,6 +391,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (req == REQ_NOTIF) return;   // da igual lo que conteste: el servicio no depende de esto
+        if (req == REQ_BG) return;      // la página vuelve a preguntar (ubicacionSiempre) cada minuto: no hace falta avisarle
         if (req == REQ_STORAGE) {
             byte[] d = pendData;
             String n = pendName, m = pendMime;
@@ -426,15 +434,17 @@ public class MainActivity extends Activity {
         public String version() { return Config.VERSION; }
 
         /* Ubicación del técnico en horario laboral (la página ya mostró el aviso y el técnico lo aceptó).
-           Devuelve «ok» cuando el servicio quedó andando; si no, la causa, y la página sigue con el GPS de la ventana. */
+           Devuelve «ok» cuando el servicio quedó andando; si no, la causa, y la página sigue con el GPS de la ventana.
+           El servicio queda «residente»: sigue vivo con la app cerrada y vuelve solo (ver UbicacionService); el horario de cada día
+           se lo pide él mismo al servidor. Las dos formas con horario son de las versiones anteriores de la página: el horario que
+           traen solo vale hasta que el servicio lo consulta. */
         @JavascriptInterface
         public String startLocation(String token, int desde, int hasta) {
             if (desde < 0 || hasta > 24 || desde >= hasta) return "horario";
             return arrancarUbicacion(token, desde, hasta, null);
         }
 
-        /* Igual, pero con el horario del día en uno o dos tramos: «8-20» (de corrido) o «8-13,17-22» (cortado, con siesta).
-           En la siesta el servicio queda en pausa solo y retoma a la hora. */
+        /* Igual, pero con el horario del día en uno o dos tramos: «8-20» (de corrido) o «8-13,17-22» (cortado, con siesta). */
         @JavascriptInterface
         public String startLocationTramos(String token, String tramos) {
             if (tramos == null || !tramos.matches("[0-9]{1,2}-[0-9]{1,2}(,[0-9]{1,2}-[0-9]{1,2})?")) return "horario";
@@ -454,19 +464,58 @@ public class MainActivity extends Activity {
             }
         }
 
+        /* La forma nueva: solo la sesión, a cualquier hora (el servicio decide solo cuándo tomar posiciones). La página la llama cada
+           minuto con la app abierta, y así el servicio también se entera si cambió la sesión. */
+        @JavascriptInterface
+        public String startLocationSiempre(String token) {
+            return arrancarUbicacion(token, -1, -1, null);
+        }
+
+        /* «si» / «no»: si la app tiene el permiso de ubicación «todo el tiempo» (sin él, con la app cerrada puede no poder leer el GPS) */
+        @JavascriptInterface
+        public String ubicacionSiempre() {
+            try { return tieneUbicacionSiempre() ? "si" : "no"; } catch (Throwable t) { return "no"; }
+        }
+
+        /* Pide «Permitir todo el tiempo». Desde Android 11 el sistema no muestra un cuadro: abre la pantalla de permisos de la app,
+           donde el técnico elige «Permitir todo el tiempo». Devuelve «ya» (ya estaba), «pedido» o «permiso» (primero falta el permiso común). */
+        @JavascriptInterface
+        public String pedirUbicacionSiempre() {
+            try {
+                if (!hasLocationPermission()) return "permiso";
+                if (tieneUbicacionSiempre()) return "ya";
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try { requestPermissions(new String[]{"android.permission.ACCESS_BACKGROUND_LOCATION"}, REQ_BG); } catch (Throwable t) { /* nada */ }
+                    }
+                });
+                return "pedido";
+            } catch (Throwable t) {
+                return "error";
+            }
+        }
+
         private String arrancarUbicacion(String token, int desde, int hasta, String tramos) {
             try {
                 if (token == null || token.length() < 8 || token.length() > 1000) return "token";
                 if (!hasLocationPermission()) return "permiso";   // el permiso lo pide la página con el GPS de la ventana; al minuto vuelve a intentar
+                /* la sesión queda guardada (solo en la memoria privada de la app) para que el servicio pueda volver solo si el celular se reinicia */
+                getSharedPreferences(UbicacionService.PREFS, Context.MODE_PRIVATE).edit()
+                    .putBoolean(UbicacionService.P_ACTIVO, true).putString(UbicacionService.P_TOKEN, token).apply();
                 UbicacionService.token = token;
-                Intent it = new Intent(MainActivity.this, UbicacionService.class);
-                it.putExtra(UbicacionService.EXTRA_DESDE, desde);
-                it.putExtra(UbicacionService.EXTRA_HASTA, hasta);
-                if (tramos != null) it.putExtra(UbicacionService.EXTRA_TRAMOS, tramos);
-                if (Build.VERSION.SDK_INT >= 26) {
-                    Context.class.getMethod("startForegroundService", Intent.class).invoke(MainActivity.this, it);
-                } else {
-                    startService(it);
+                if (!UbicacionService.running) {
+                    Intent it = new Intent(MainActivity.this, UbicacionService.class);
+                    if (desde >= 0) {
+                        it.putExtra(UbicacionService.EXTRA_DESDE, desde);
+                        it.putExtra(UbicacionService.EXTRA_HASTA, hasta);
+                    }
+                    if (tramos != null) it.putExtra(UbicacionService.EXTRA_TRAMOS, tramos);
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        Context.class.getMethod("startForegroundService", Intent.class).invoke(MainActivity.this, it);
+                    } else {
+                        startService(it);
+                    }
                 }
                 pedirNotificaciones();
                 pedirSinRestriccionBateria();
@@ -476,9 +525,10 @@ public class MainActivity extends Activity {
             }
         }
 
+        /* Cierre de sesión (o el servidor dijo que ya no vale): el servicio se detiene y se borra la sesión guardada */
         @JavascriptInterface
         public void stopLocation() {
-            UbicacionService.token = "";
+            UbicacionService.desactivar(MainActivity.this);
             try { stopService(new Intent(MainActivity.this, UbicacionService.class)); } catch (Throwable t) { /* ya estaba parado */ }
         }
 
