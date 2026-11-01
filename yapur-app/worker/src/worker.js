@@ -314,6 +314,45 @@ function jornadaEstadoDia(v, o) {
   else estado = esHoy && o.ahora <= ws + o.tol * 60e3 ? 'esperando' : 'sin_ingreso';
   return { estado, atrasoMin: atraso, tarde: atraso > o.tol, ingreso2: v ? (v.ingreso2 || null) : null, atraso2Min: atraso2, tarde2: atraso2 > o.tol, sinRetomar };
 }
+/* ----- horas trabajadas en un día -----
+   La jornada empieza cuando el celular aparece en la base y termina cuando vuelve a guardar el vehículo. En un día cortado hay dos tramos:
+   se cuenta cada uno por separado, así la siesta no suma. f = { ingreso, ingreso2, ult, ev:[[ts,1|0]…] (cada vez que entró/salió de la base después del ingreso),
+   adj:{s:[[desde,hasta]…]}|null (corrección de la oficina), tr:'8-13,17-22'|null (tramos de ese día, guardados con la fila) }; o = { dia, hoy, ahora, tr (de respaldo) }.
+   Devuelve { min, estado: ok | en_curso | incompleto | corregido, segs:[[desde,hasta]…], estimado }.
+     · ok: el tramo terminó con un regreso a la base (o, si no es el último tramo del día, el tramo se acabó con el técnico en la calle: la siesta).
+     · en_curso: es hoy y el tramo sigue abierto: se cuenta hasta ahora.
+     · incompleto: el último tramo del día se cerró sin que vuelva a la base (celular apagado, app cerrada…): se cuenta hasta la última posición recibida y queda marcado para revisar.
+     · corregido: la oficina cargó las horas a mano. */
+const trStr = tr => tr.map(t => t[0] + '-' + t[1]).join(',');
+const trParse = s => String(s || '').split(',').map(x => x.split('-').map(Number)).filter(trOk);
+function jornadaHoras(f, o) {
+  const H = 3600e3, t0 = arDayStart(o.dia), esHoy = o.dia === o.hoy;
+  if (f.adj && Array.isArray(f.adj.s)) {
+    const segs = f.adj.s.filter(x => Array.isArray(x) && x[1] > x[0]);
+    return { min: Math.round(segs.reduce((a, x) => a + (x[1] - x[0]), 0) / 60000), estado: 'corregido', segs, estimado: false };
+  }
+  let tr = f.tr ? trParse(f.tr) : [];
+  if (!tr.length) tr = o.tr;
+  const ev = Array.isArray(f.ev) ? f.ev : [], segs = [];
+  let abierto = false, incompleto = false, estimado = false;
+  tr.forEach((t, k) => {
+    const ws = t0 + t[0] * H, we = t0 + t[1] * H, ultimo = k === tr.length - 1;
+    let ini = null;
+    if (k === 0) ini = f.ingreso < we ? f.ingreso : null;
+    else if (f.ingreso2) ini = f.ingreso2;
+    else if (f.ingreso >= t0 + tr[k - 1][1] * H) ini = f.ingreso;
+    else if (ev.some(e => e[1] === 1 && e[0] >= ws && e[0] < we)) { ini = ws; estimado = true; }   // volvió a la base a la noche sin haber pasado a la tarde: se cuenta desde que empezó la tarde
+    if (ini === null) return;
+    const evk = ev.filter(e => e[0] >= ini && e[0] < we), last = evk[evk.length - 1];
+    let fin;
+    if (last && last[1] === 1) fin = last[0];
+    else if (esHoy && o.ahora < we) { fin = Math.max(ini, o.ahora); abierto = true; }
+    else if (!ultimo) fin = we;
+    else { fin = Math.min(we, Math.max(ini, f.ult || ini)); incompleto = true; }
+    segs.push([ini, Math.max(ini, fin)]);
+  });
+  return { min: Math.round(segs.reduce((a, x) => a + (x[1] - x[0]), 0) / 60000), estado: incompleto ? 'incompleto' : abierto ? 'en_curso' : 'ok', segs, estimado };
+}
 /* fin de las funciones puras del horario */
 
 /* ================= la base de datos y toda la lógica ================= */
@@ -339,10 +378,10 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS comprobantes(id TEXT PRIMARY KEY, uid TEXT NOT NULL, ts INTEGER NOT NULL, pago TEXT, data BLOB NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
-      CREATE TABLE IF NOT EXISTS jornada(uid TEXT NOT NULL, dia TEXT NOT NULL, ingreso INTEGER NOT NULL, origen TEXT NOT NULL, dist INTEGER, regreso INTEGER, en_base INTEGER NOT NULL DEFAULT 1, ult INTEGER NOT NULL DEFAULT 0, ingreso2 INTEGER, PRIMARY KEY(uid,dia)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS jornada(uid TEXT NOT NULL, dia TEXT NOT NULL, ingreso INTEGER NOT NULL, origen TEXT NOT NULL, dist INTEGER, regreso INTEGER, en_base INTEGER NOT NULL DEFAULT 1, ult INTEGER NOT NULL DEFAULT 0, ingreso2 INTEGER, ev TEXT, tr TEXT, adj TEXT, PRIMARY KEY(uid,dia)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
     `);
-    try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ingreso2 INTEGER'); } catch (e) { /* la tabla ya la tiene */ }
+    for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
     this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
     this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
@@ -968,7 +1007,7 @@ export class YapurDB extends DurableObject {
     const dias = Array.isArray(b.dias) ? [...new Set(b.dias.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [1, 2, 3, 4, 5, 6];   // 0 = domingo
     return { base, radio, tol, dias };
   }
-  jornadaFila(uid, dia) { return this.q1('SELECT ingreso, origen, dist, regreso, en_base, ult, ingreso2 FROM jornada WHERE uid=? AND dia=?', uid, dia) || null; }
+  jornadaFila(uid, dia) { return this.q1('SELECT ingreso, origen, dist, regreso, en_base, ult, ingreso2, ev, tr, adj FROM jornada WHERE uid=? AND dia=?', uid, dia) || null; }
   jornadaEnterado(uid) { return !!this.q1('SELECT 1 x FROM meta WHERE k=?', 'jornadaok:' + uid); }
   jornadaPos(b) {
     const lat = Number(b && b.lat), lng = Number(b && b.lng);
@@ -978,7 +1017,8 @@ export class YapurDB extends DurableObject {
   /* lo que ve el propio técnico */
   jornadaEstado(u) {
     const ahora = Date.now(), dia = arTime(ahora).fecha, c = this.jornadaBase();
-    return { aplica: u.role === 'tecnico', enterado: this.jornadaEnterado(u.id), dia, ahora, horario: (h => ({ desde: h.desde, hasta: h.hasta, tramos: h.tramos }))(this.ubicDia(dia)), hayBase: !!c.base, fila: this.jornadaVista(this.jornadaFila(u.id, dia)) };
+    const horas = u.role === 'tecnico' ? this.jornadaResumen(u, '', 7).tecnicos[0] : null;
+    return { aplica: u.role === 'tecnico', horas: horas ? { semana: horas.total, desde: horas.dias[0].dia, dias: horas.dias.map(x => ({ dia: x.dia, min: x.min, estado: x.estado })) } : null, enterado: this.jornadaEnterado(u.id), dia, ahora, horario: (h => ({ desde: h.desde, hasta: h.hasta, tramos: h.tramos }))(this.ubicDia(dia)), hayBase: !!c.base, fila: this.jornadaVista(this.jornadaFila(u.id, dia)) };
   }
   jornadaSoloTecnico(u) { if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos registran su jornada.'); }
   /* se llama con cada posición guardada, en orden */
@@ -988,14 +1028,17 @@ export class YapurDB extends DurableObject {
     if (!c.base || (isFinite(acc) && acc > Math.max(c.radio, 50))) return;
     const dia = arTime(ts).fecha, d = distM(lat, lng, c.base.lat, c.base.lng), f = this.jornadaFila(u.id, dia), now = Date.now();
     if (!f) {
-      if (d <= c.radio) this.sql.exec('INSERT OR IGNORE INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult) VALUES(?,?,?,?,?,1,?)', u.id, dia, Math.min(ts, now), 'base', d, ts);
+      if (d <= c.radio) this.sql.exec('INSERT OR IGNORE INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult,ev,tr) VALUES(?,?,?,?,?,1,?,?,?)', u.id, dia, Math.min(ts, now), 'base', d, ts, '[]', trStr(this.ubicDia(dia).tramos));
       return;
     }
     if (ts <= f.ult) return;   // una posición atrasada que llegó después de otras más nuevas no cambia nada
     /* en un día cortado, la primera vez que aparece en la base a la tarde es su «retoma» */
     if (d <= c.radio && jornadaRetoma(this.ubicDia(dia).tramos, arDayStart(dia), f, ts)) this.sql.exec('UPDATE jornada SET ingreso2=? WHERE uid=? AND dia=?', Math.min(ts, now), u.id, dia);
-    if (d <= c.radio && !f.en_base) this.sql.exec('UPDATE jornada SET regreso=?, en_base=1, ult=? WHERE uid=? AND dia=?', Math.min(ts, now), ts, u.id, dia);
-    else if (d > c.radio * 1.5 && f.en_base) this.sql.exec('UPDATE jornada SET en_base=0, ult=? WHERE uid=? AND dia=?', ts, u.id, dia);
+    /* cada entrada y salida de la base queda anotada: de ahí salen las horas de cada tramo */
+    const evs = (() => { try { const a = JSON.parse(f.ev || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } })();
+    const anotar = (est, t) => JSON.stringify([...evs, [t, est]].slice(-40));
+    if (d <= c.radio && !f.en_base) this.sql.exec('UPDATE jornada SET regreso=?, en_base=1, ult=?, ev=? WHERE uid=? AND dia=?', Math.min(ts, now), ts, anotar(1, Math.min(ts, now)), u.id, dia);
+    else if (d > c.radio * 1.5 && f.en_base) this.sql.exec('UPDATE jornada SET en_base=0, ult=?, ev=? WHERE uid=? AND dia=?', ts, anotar(0, ts), u.id, dia);
     else this.sql.exec('UPDATE jornada SET ult=? WHERE uid=? AND dia=?', ts, u.id, dia);
   }
   /* «Iniciar jornada» a mano: para quien arranca sin pasar por la base */
@@ -1005,14 +1048,77 @@ export class YapurDB extends DurableObject {
     if (this.jornadaFila(u.id, dia)) return this.jornadaEstado(u);   // ya empezó: la hora no se pisa
     const c = this.jornadaBase(), pos = this.jornadaPos(b), dist = pos && c.base ? distM(pos.lat, pos.lng, c.base.lat, c.base.lng) : null;
     const enBase = dist !== null && dist <= c.radio;
-    this.sql.exec('INSERT INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult) VALUES(?,?,?,?,?,?,?)', u.id, dia, now, enBase ? 'base' : 'manual', dist, enBase ? 1 : 0, now);
+    this.sql.exec('INSERT INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult,ev,tr) VALUES(?,?,?,?,?,?,?,?,?)', u.id, dia, now, enBase ? 'base' : 'manual', dist, enBase ? 1 : 0, now, '[]', trStr(this.ubicDia(dia).tramos));
     return this.jornadaEstado(u);
   }
   /* lo que ve la oficina de un técnico en un día: estado, horas y minutos de atraso respecto del inicio de cada tramo */
   jornadaDia(u, dia, hoy, ahora, jc, laborable, tr) {
     const v = this.jornadaVista(this.jornadaFila(u.id, dia));
     const e = jornadaEstadoDia(v, { dia, hoy, ahora, tr, base: !!jc.base, laborable, tol: jc.tol });
-    return Object.assign(e, { cortado: tr.length === 2, enterado: this.jornadaEnterado(u.id), ingreso: v ? v.ingreso : null, origen: v ? v.origen : null, dist: v ? v.dist : null, regreso: v ? v.regreso : null, enBase: v ? v.enBase : false });
+    const hs = this.jornadaHorasDia(u.id, dia, hoy, ahora, tr);
+    return Object.assign(e, { horasMin: hs ? hs.min : null, horasEstado: hs ? hs.estado : null, cortado: tr.length === 2, enterado: this.jornadaEnterado(u.id), ingreso: v ? v.ingreso : null, origen: v ? v.origen : null, dist: v ? v.dist : null, regreso: v ? v.regreso : null, enBase: v ? v.enBase : false });
+  }
+
+  /* ----- horas trabajadas ----- */
+  jornadaFilaHoras(uid, dia) {
+    const f = this.jornadaFila(uid, dia);
+    if (!f) return null;
+    const j = x => { try { return x ? JSON.parse(x) : null; } catch (e) { return null; } };
+    return Object.assign({}, f, { ev: j(f.ev) || [], adj: j(f.adj) });
+  }
+  /* las horas de un técnico en un día, con lo que la oficina necesita para revisarlas; null si no hay jornada ese día */
+  jornadaHorasDia(uid, dia, hoy, ahora, tramosDia) {
+    const f = this.jornadaFilaHoras(uid, dia);
+    if (!f) return null;
+    const h = jornadaHoras(f, { dia, hoy, ahora, tr: tramosDia }), tr = f.tr ? trParse(f.tr) : tramosDia;
+    return { dia, min: h.min, estado: h.estado, estimado: h.estimado, segs: h.segs, ingreso: f.ingreso, origen: f.origen, regreso: f.regreso || null, ingreso2: f.ingreso2 || null,
+      tramos: tr.length ? tr : tramosDia, ajuste: f.adj ? { nota: String(f.adj.nota || ''), por: String(f.adj.por || ''), ts: f.adj.ts || 0 } : null };
+  }
+  /* resumen de horas de varios días (por defecto la semana de lunes a domingo): cada técnico ve las suyas; con permiso de ver técnicos, todos */
+  jornadaResumen(u, desde, dias) {
+    const ahora = Date.now(), hoy = arTime(ahora).fecha, ayer90 = arTime(ahora - JORNADA_DIAS * 864e5).fecha;
+    let personas;
+    if (u.role === 'tecnico') personas = [u];
+    else if (effPerms(u).verTecnicos) personas = [...this.USERS.values()].filter(x => x.role === 'tecnico' && x.activo);
+    else throw httpErr(403, 'No tenés permiso para ver las horas de los técnicos.');
+    const n = Math.min(31, Math.max(1, Math.round(Number(dias)) || 7));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(desde || '') || isNaN(arDayStart(desde))) {
+      const dow = new Date(arDayStart(hoy) + 12 * 3600e3).getUTCDay();   // lunes = 1 … domingo = 0
+      desde = arTime(arDayStart(hoy) + 12 * 3600e3 - ((dow + 6) % 7) * 864e5).fecha;
+    }
+    if (desde < ayer90) desde = ayer90;
+    const fechas = [];
+    for (let i = 0; i < n; i++) fechas.push(arTime(arDayStart(desde) + 12 * 3600e3 + i * 864e5).fecha);
+    const pl = this.ubicPlan();
+    const tecnicos = personas.map(p => {
+      const dd = fechas.map(dia => this.jornadaHorasDia(p.id, dia, hoy, ahora, ubicTramosDe(pl, dia)) || { dia, min: 0, estado: 'sin_registro' });
+      return { id: p.id, nombre: p.nombre, dias: dd, total: dd.reduce((a, x) => a + x.min, 0), incompletos: dd.filter(x => x.estado === 'incompleto').length, corregidos: dd.filter(x => x.estado === 'corregido').length };
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    return { desde: fechas[0], hasta: fechas[fechas.length - 1], hoy, ahora, puedeAjustar: u.role === 'admin', tecnicos };
+  }
+  /* la oficina (solo el administrador) carga o corrige las horas de un técnico en un día; sin «segs» vuelve al cálculo automático */
+  jornadaAjustar(admin, b) {
+    const t = this.USERS.get(String(b.uid || ''));
+    if (!t || t.role !== 'tecnico') throw httpErr(404, 'No se encontró ese técnico.');
+    const ahora = Date.now(), hoy = arTime(ahora).fecha, dia = String(b.dia || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(arDayStart(dia)) || dia > hoy || dia < arTime(ahora - JORNADA_DIAS * 864e5).fecha) throw httpErr(400, 'El día no es válido: tiene que ser de hoy hacia atrás, hasta 90 días.');
+    const t0 = arDayStart(dia), f = this.jornadaFilaHoras(t.id, dia), tramos = this.ubicDia(dia).tramos;
+    if (b.quitar === true || b.segs == null) {
+      if (f && f.adj) {
+        if (f.origen === 'oficina') this.sql.exec('DELETE FROM jornada WHERE uid=? AND dia=?', t.id, dia);   // la fila la había creado la oficina: sin ajuste no queda nada
+        else this.sql.exec('UPDATE jornada SET adj=NULL WHERE uid=? AND dia=?', t.id, dia);
+      }
+      return this.jornadaHorasDia(t.id, dia, hoy, ahora, tramos) || { dia, min: 0, estado: 'sin_registro' };
+    }
+    if (!Array.isArray(b.segs) || b.segs.length < 1 || b.segs.length > 2) throw httpErr(400, 'Cargá uno o dos tramos de trabajo.');
+    const segs = b.segs.map(x => Array.isArray(x) && x.length === 2 ? [Number(x[0]), Number(x[1])] : null);
+    if (segs.some(x => !x || !Number.isInteger(x[0]) || !Number.isInteger(x[1]) || x[0] < t0 || x[1] > t0 + 36 * 3600e3 || x[1] <= x[0])) throw httpErr(400, 'Cada tramo tiene que ir de una hora a otra posterior, dentro del día.');
+    segs.sort((x, y) => x[0] - y[0]);
+    if (segs.length === 2 && segs[1][0] < segs[0][1]) throw httpErr(400, 'Los dos tramos no se pueden superponer.');
+    const adj = JSON.stringify({ s: segs, nota: String(b.nota || '').trim().slice(0, 200), por: admin.nombre || admin.usuario, ts: ahora });
+    if (f) this.sql.exec('UPDATE jornada SET adj=? WHERE uid=? AND dia=?', adj, t.id, dia);
+    else this.sql.exec('INSERT INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult,ev,tr,adj) VALUES(?,?,?,?,NULL,0,0,?,?,?)', t.id, dia, segs[0][0], 'oficina', '[]', trStr(tramos), adj);
+    return this.jornadaHorasDia(t.id, dia, hoy, ahora, tramos);
   }
 
   /* ================= HTTP ================= */
@@ -1130,6 +1236,8 @@ export class YapurDB extends DurableObject {
       return send(200, this.ubicLista(url.searchParams.get('dia') || ''));
     }
     if (p === '/api/jornada' && m === 'GET') return send(200, this.jornadaEstado((await this.needAuth(request)).user));
+    if (p === '/api/jornada/horas' && m === 'GET') return send(200, this.jornadaResumen((await this.needAuth(request)).user, url.searchParams.get('desde') || '', url.searchParams.get('dias') || ''));
+    if (p === '/api/jornada/ajuste' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.jornadaAjustar(a.user, readBody(raw, 4e3))); }
     if (p === '/api/jornada/acepto' && m === 'POST') {
       const a = await this.needAuth(request);
       this.jornadaSoloTecnico(a.user);

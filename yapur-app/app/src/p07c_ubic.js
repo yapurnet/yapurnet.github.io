@@ -134,12 +134,30 @@ function jornadaBarra(){
   }else{
     html=`<span>Tu jornada laboral comenzó a las <b>${hhmm(f.ingreso)}</b>${f.origen==='base'?' · en la base':''}${f.ingreso2?' · retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''}.</span>`;
   }
+  if(st.enterado&&st.horas)html+=jrHorasTxt(st);
   bar.className='jrbar'+(cls?' '+cls:'');bar.innerHTML=html;bar.hidden=false;
+  const hs=$('#jr-hs',bar);if(hs)hs.addEventListener('click',jornadaMisHoras);
   const b=$('#jr-ini',bar);if(b)b.addEventListener('click',jornadaIniciar);
   const ok=$('#jr-ok',bar),inf=$('#jr-info',bar);
   if(ok)ok.addEventListener('click',jornadaEntendido);
   if(inf)inf.addEventListener('click',jornadaAviso);
 }
+/* horas de hoy y de la semana, con el botón para ver cada día */
+function jrHorasTxt(st){
+  const hx=st.horas,hoy=hx.dias.find(x=>x.dia===st.dia),m=hoy?hoy.min:0;
+  if(!hx.semana&&!m)return '';
+  return `<div class="jr-h"><span>Hoy <b>${esc(horasTxt(m))}</b> · semana <b>${esc(horasTxt(hx.semana))}</b></span><button class="btn small ghost" type="button" id="jr-hs">Mis horas</button></div>`;
+}
+function jornadaMisHoras(){
+  const st=JR.st;if(!st||!st.horas)return;
+  const hx=st.horas,dias=hx.dias.filter(x=>x.estado!=='sin_registro'||x.dia===st.dia);
+  const nota=x=>x.estado==='incompleto'?'<span class="chip warn">Sin cerrar</span>':x.estado==='corregido'?'<span class="chip quiet">Corregido por la oficina</span>':x.estado==='en_curso'?'<span class="chip ok">En curso</span>':'';
+  openModal({title:'Mis horas',html:`<div class="hr-big">${esc(horasTxt(hx.semana))}</div><div class="small muted">Esta semana (lunes a domingo), ${esc(horasDec(hx.semana))} horas</div>
+    <ul class="plain hr-list">${dias.length?dias.map(x=>`<li><span>${esc(diaNombre(x.dia))} ${esc(fechaCorta(x.dia))}</span><b>${esc(x.estado==='sin_registro'?'–':horasTxt(x.min))}</b>${nota(x)}</li>`).join(''):'<li>Todavía no hay días registrados esta semana.</li>'}</ul>
+    <p class="small muted">Se cuenta desde que tu celular llega a la base hasta que volvés a guardar el vehículo${tramosCortado(st)?' (la siesta no se cuenta)':''}. Si un día figura «Sin cerrar» o ves un error, avisale a la oficina para que lo corrija.</p>
+    <div class="actions"><button class="btn primary" type="button" data-close>Cerrar</button></div>`});
+}
+const tramosCortado=st=>!!(st&&st.horario&&st.horario.tramos&&st.horario.tramos.length>1);
 async function jornadaEntendido(){
   try{JR.st=await NET.api('POST','/api/jornada/acepto',{});}catch(err){toast(err&&err.message||'No se pudo guardar. Probá de nuevo.','bad');return;}
   closeModal();jornadaBarra();
@@ -180,7 +198,7 @@ function jornadaInit(){
 }
 
 /* ----- lado de quien mira: pestaña Técnicos ----- */
-const TU={dia:'',data:null,err:'',busy:false,timer:null};
+const TU={dia:'',data:null,err:'',busy:false,timer:null,vista:'pos'};
 const mapaUrl=(lat,lng)=>'https://www.google.com/maps/search/?api=1&query='+lat+','+lng;
 /* recorrido aproximado: primer punto, hasta 8 intermedios repartidos parejo y el último */
 function rutaUrl(ruta){
@@ -217,6 +235,7 @@ function jornadaTec(t,d){
     else if(j.sinRetomar)ch('bad','No retomó a la tarde');
   }else if(j.estado==='sin_ingreso')ch('bad','Sin ingreso');
   else if(j.estado==='esperando'&&esHoy)ch('quiet','Todavía no ingresó');
+  if(j.horasMin>0)ch(j.horasEstado==='incompleto'?'warn':j.horasEstado==='corregido'?'accent':j.horasEstado==='en_curso'?'ok':'info','Horas: '+horasTxt(j.horasMin)+(j.horasEstado==='incompleto'?' · sin cerrar':j.horasEstado==='corregido'?' · corregido':j.horasEstado==='en_curso'?' · hasta ahora':''));
   if(esHoy&&!j.enterado&&j.estado!=='no_laborable')notas.push('Todavía no tocó «Entendido» en el aviso de jornada');
   if(!chips.length)return '';
   return `<div class="tjor">${chips.join('')}</div>${notas.length?`<div class="small muted">${esc(notas.join(' · '))}</div>`:''}`;
@@ -370,15 +389,130 @@ function openBaseJornada(){
       const q=$('#jb-quitar',el);if(q)q.addEventListener('click',()=>guardar(true));
     }});
 }
+/* ----- horas trabajadas: resumen por día y por semana (la oficina) y «mis horas» (cada técnico) ----- */
+const HR={desde:'',data:null,err:'',busy:false};
+/* la hora de Argentina (UTC−3), sin importar en qué zona esté el celular: así lo que se ve coincide con lo que el servidor cuenta */
+const hhmmAR=ts=>new Date(ts-3*36e5).toISOString().slice(11,16);
+const hm=m=>Math.floor(m/60)+':'+String(m%60).padStart(2,'0');   /* 5:10 */
+const horasTxt=m=>m>0?durTxt(m):'0 h';                              /* 5 h 10 min */
+const horasDec=m=>(m/60).toFixed(2).replace('.',',');               /* 5,17 */
+const fechaCorta=f=>f.slice(8)+'/'+f.slice(5,7);
+const diaLetra=f=>['D','L','M','M','J','V','S'][new Date(f+'T12:00:00Z').getUTCDay()];
+const diaNombre=f=>['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][new Date(f+'T12:00:00Z').getUTCDay()];
+const sumaDias=(f,n)=>new Date(Date.parse(f+'T12:00:00Z')+n*864e5).toISOString().slice(0,10);
+const mapHoras=x=>x.estado==='sin_registro'?'–':hm(x.min);
+/* qué quiere decir cada estado del día, en una frase */
+function horasEstadoTxt(x){
+  if(x.estado==='corregido')return 'Cargado a mano por '+(x.ajuste&&x.ajuste.por||'la oficina')+(x.ajuste&&x.ajuste.nota?': '+x.ajuste.nota:'')+'.';
+  if(x.estado==='incompleto')return 'Falta el regreso a la base: se cuenta hasta la última posición recibida. Revisalo y corregilo si hace falta.';
+  if(x.estado==='en_curso')return 'En curso: se cuenta hasta ahora.';
+  if(x.estado==='sin_registro')return 'Sin registro ese día.';
+  return 'Completo.'+(x.estimado?' La tarde se cuenta desde que empezó, porque no se vio al técnico en la base al retomar.':'');
+}
+const horasSegsTxt=x=>(x.segs||[]).map(g=>hhmmAR(g[0])+'-'+hhmmAR(g[1])).join(' | ');
+async function horasCargar(){
+  if(HR.busy)return;HR.busy=true;
+  try{HR.data=await NET.api('GET','/api/jornada/horas'+(HR.desde?'?desde='+encodeURIComponent(HR.desde)+'&dias=7':''),undefined,{noKick:true,timeout:20000});HR.err='';if(!HR.desde)HR.desde=HR.data.desde;}
+  catch(e){HR.err=e&&e.message||'No se pudieron cargar las horas.';}
+  HR.busy=false;horasRender();
+}
+function horasRender(){
+  const out=$('#hr-out');if(!out)return;
+  const d=HR.data;
+  if(!d){out.innerHTML=HR.err?`<div class="notice bad">${esc(HR.err)}</div>`:'<div class="hint">Cargando…</div>';return;}
+  const esAct=d.desde<=d.hoy&&d.hoy<=d.hasta;
+  const nav=`<div class="line hr-nav"><button class="btn small ghost" type="button" data-hr-nav="-7" aria-label="Semana anterior">‹</button><b>Semana del ${esc(fechaCorta(d.desde))} al ${esc(fechaCorta(d.hasta))}</b><button class="btn small ghost" type="button" data-hr-nav="7" aria-label="Semana siguiente"${d.hasta>=d.hoy?' disabled':''}>›</button>${esAct?'':'<button class="btn small ghost" type="button" data-hr-nav="0">Esta semana</button>'}</div>`;
+  const tot=d.tecnicos.reduce((a,t)=>a+t.total,0),inc=d.tecnicos.reduce((a,t)=>a+t.incompletos,0);
+  const alerta=inc?`<div class="notice" role="status" id="hr-alerta">Hay <b>${inc} ${inc===1?'día':'días'} sin cerrar</b> (no se vio volver a la base). Tocalos para revisarlos.</div>`:'';
+  const tarjetas=d.tecnicos.length?d.tecnicos.map(t=>`<article class="card tcard"><div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(t.nombre)}</h3><div class="hr-tot" title="${esc(horasDec(t.total))} h">${esc(horasTxt(t.total))}</div></div>
+    <div class="hrgrid">${t.dias.map(x=>`<button type="button" class="hrc ${x.estado}${x.dia===d.hoy?' hoy':''}" data-hr="${esc(t.id)}|${esc(x.dia)}" aria-label="${esc(t.nombre+', '+diaNombre(x.dia)+' '+fechaCorta(x.dia)+': '+(x.estado==='sin_registro'?'sin registro':horasTxt(x.min)))}"><span class="hrl">${diaLetra(x.dia)} ${esc(x.dia.slice(8))}</span><b>${esc(mapHoras(x))}${x.estado==='corregido'?'*':''}</b></button>`).join('')}</div>
+    <div class="small muted">Promedio por día trabajado: ${esc(promDia(t))}${t.corregidos?' · * cargado a mano':''}</div></article>`).join(''):'<div class="empty"><b>No hay técnicos cargados</b></div>';
+  out.innerHTML=`${nav}${alerta}<div class="small muted">Horas de todos los técnicos en la semana: <b>${esc(horasTxt(tot))}</b>. Cada casilla es un día (horas:minutos). Tocá una para ver el detalle${isAdmin()?' y corregirla':''}.</div>${tarjetas}
+    <div class="actions start"><button class="btn small" type="button" id="hr-copy">Copiar el resumen</button><button class="btn small" type="button" id="hr-csv">Descargar CSV</button></div>`;
+}
+function promDia(t){const dd=t.dias.filter(x=>x.min>0);return dd.length?horasTxt(Math.round(t.total/dd.length)):'–';}
+function horasTexto(d){
+  const L=['Horas trabajadas · semana del '+fechaCorta(d.desde)+' al '+fechaCorta(d.hasta)];
+  for(const t of d.tecnicos){
+    L.push('',t.nombre+': '+horasTxt(t.total)+' ('+horasDec(t.total)+' h)');
+    for(const x of t.dias)if(x.estado!=='sin_registro')L.push('  '+diaNombre(x.dia).slice(0,3)+' '+fechaCorta(x.dia)+': '+horasTxt(x.min)+(x.estado==='incompleto'?' (sin cerrar)':x.estado==='corregido'?' (corregido)':x.estado==='en_curso'?' (en curso)':''));
+  }
+  return L.join('\n');
+}
+function horasCsv(d){
+  const rows=[['Técnico','Fecha','Día','Horas (h:mm)','Horas (decimal)','Estado','Tramos','Nota']];
+  for(const t of d.tecnicos){
+    for(const x of t.dias)if(x.estado!=='sin_registro')rows.push([t.nombre,x.dia,diaNombre(x.dia),hm(x.min),horasDec(x.min),x.estado,horasSegsTxt(x),x.ajuste&&x.ajuste.nota||'']);
+    rows.push([t.nombre,'TOTAL','',hm(t.total),horasDec(t.total),'','','']);
+  }
+  return toCsv(rows);
+}
+/* detalle de un día de un técnico (con «Corregir» para el administrador) */
+function horaDetalle(tid,dia){
+  const d=HR.data;if(!d)return;
+  const t=d.tecnicos.find(x=>x.id===tid),x=t&&t.dias.find(y=>y.dia===dia);if(!x)return;
+  const origen=x.origen==='base'?'Ingresó en la base':x.origen==='manual'?'Inició a mano':x.origen==='oficina'?'Cargado por la oficina':'';
+  openModal({title:`${t.nombre} · ${diaNombre(dia)} ${fechaCorta(dia)}`,html:`<div class="hr-big">${esc(x.estado==='sin_registro'?'Sin registro':horasTxt(x.min))}</div>
+    ${x.estado==='sin_registro'?'':`<div class="small muted">${esc(horasDec(x.min))} horas</div>`}
+    <p class="${x.estado==='incompleto'?'notice':'small'}">${esc(horasEstadoTxt(x))}</p>
+    ${x.segs&&x.segs.length?`<ul class="plain">${x.segs.map(g=>`<li>${esc(hhmmAR(g[0]))} a ${esc(hhmmAR(g[1]))} · ${esc(horasTxt(Math.round((g[1]-g[0])/60000)))}</li>`).join('')}</ul>`:''}
+    ${origen&&x.estado!=='corregido'?`<div class="small muted">${esc(origen)}${x.regreso?' · último regreso a la base '+esc(hhmmAR(x.regreso)):''}</div>`:''}
+    <div class="actions">${d.puedeAjustar?'<button class="btn primary" type="button" id="hd-corr">Corregir las horas</button>':''}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
+    onMount(el){const b=$('#hd-corr',el);if(b)b.addEventListener('click',()=>{closeModal();horaCorregir(t,x);});}});
+}
+function horaCorregir(t,x){
+  const dia=x.dia,tr=(x.tramos&&x.tramos.length?x.tramos:[[8,20]]),dos=tr.length>1||(x.segs&&x.segs.length>1);
+  const segs=(x.segs&&x.segs.length?x.segs:[]).map(g=>[hhmmAR(g[0]),hhmmAR(g[1])]);
+  while(segs.length<(dos?2:1))segs.push(['','']);
+  const campo=(i,k,v)=>`<input id="hc-${k}${i}" type="time" step="60" value="${esc(v)}" aria-label="${k==='a'?'Desde':'Hasta'} (tramo ${i+1})">`;
+  openModal({title:`Corregir · ${t.nombre} · ${fechaCorta(dia)}`,html:`<form class="form" id="hc-form" novalidate><div class="hint">Cargá a qué hora empezó y a qué hora terminó de trabajar${dos?' en cada tramo (mañana y tarde)':''}. Lo que cargues reemplaza el cálculo automático de ese día y queda marcado como corregido.</div>
+    ${segs.map((g,i)=>`<div class="grid2">${F((dos?(i?'Tarde':'Mañana')+' · ':'')+'Desde','hc-a'+i,campo(i,'a',g[0]))}${F((dos?(i?'Tarde':'Mañana')+' · ':'')+'Hasta','hc-b'+i,campo(i,'b',g[1]))}</div>`).join('')}
+    ${F('Motivo (queda anotado)','hc-n',`<input id="hc-n" maxlength="200" autocomplete="off" placeholder="Ej.: se le apagó el celular" value="${esc(x.ajuste&&x.ajuste.nota||'')}">`)}
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button>${x.estado==='corregido'?'<button class="btn ghost" type="button" id="hc-auto">Volver al cálculo automático</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`,
+    onMount(el){
+      const enviar=async body=>{try{await NET.api('POST','/api/jornada/ajuste',Object.assign({uid:t.id,dia},body));toast('Horas guardadas');closeModal();HR.data=null;horasRender();horasCargar();}catch(err){toast(err&&err.message||'No se pudo guardar','bad');}};
+      $('#hc-form',el).addEventListener('submit',e=>{
+        e.preventDefault();const out=[];
+        for(let i=0;i<segs.length;i++){
+          const a=$('#hc-a'+i,el).value,b=$('#hc-b'+i,el).value;
+          if(!a&&!b)continue;
+          if(!a||!b)return toast('Completá «desde» y «hasta» del tramo','bad');
+          const ta=Date.parse(dia+'T'+a+':00-03:00');let tb=Date.parse(dia+'T'+b+':00-03:00');if(b==='00:00'&&tb<=ta)tb+=864e5;   /* 00:00 de «hasta» = fin del día */
+          if(!(tb>ta))return toast('«Hasta» tiene que ser después de «desde»','bad');
+          out.push([ta,tb]);
+        }
+        if(!out.length)return toast('Cargá al menos un tramo (o tocá «Volver al cálculo automático»)','bad');
+        enviar({segs:out,nota:$('#hc-n',el).value});
+      });
+      const au=$('#hc-auto',el);if(au)au.addEventListener('click',()=>enviar({quitar:true}));
+    }});
+}
 VIEWS.tecnicos={
   mount(el){
     el.innerHTML=`<div class="head-row"><h2>Técnicos</h2><button class="btn small" type="button" id="tu-act">Actualizar</button></div>
+      <div class="seg" id="tu-vista" role="group" aria-label="Ver"><button type="button" data-v="pos" aria-pressed="true">Dónde están</button><button type="button" data-v="horas" aria-pressed="false">Horas trabajadas</button></div>
+      <div id="tu-pos">
       <p class="muted small" id="tu-horario"></p>
       <p class="muted small" id="tu-base"></p>
       <div class="toolbar"><div class="line"><input id="tu-dia" type="date" aria-label="Día" style="width:auto">${isAdmin()?'<button class="btn small ghost" type="button" id="tu-hz">Cambiar el horario</button><button class="btn small ghost" type="button" id="tu-hoy">Hoy: cortado / de corrido</button><button class="btn small ghost" type="button" id="tu-bs">Base y jornada</button>':''}</div></div>
       <div id="tu-out"></div>
-      <p class="muted small">La ubicación se toma solo en el horario indicado. En la app instalada sigue con la pantalla apagada una vez que el técnico la abrió; en el navegador, solo con la página abierta. Si pasan más de 10 minutos sin recibir nada, el técnico figura «Sin señal» y el tramo queda anotado. Cada técnico acepta un aviso antes de empezar.</p>`;
-    $('#tu-act',el).addEventListener('click',()=>tecCargar());
+      <p class="muted small">La ubicación se toma solo en el horario indicado. En la app instalada sigue con la pantalla apagada una vez que el técnico la abrió; en el navegador, solo con la página abierta. Si pasan más de 10 minutos sin recibir nada, el técnico figura «Sin señal» y el tramo queda anotado. Cada técnico acepta un aviso antes de empezar.</p>
+      </div>
+      <div id="hr-wrap" hidden><div id="hr-out"></div><p class="muted small">Las horas salen de la jornada: desde que el celular del técnico llega a la base hasta que vuelve a guardar el vehículo (en un día cortado se cuenta cada tramo y no la siesta). Si un día quedó sin cerrar, se cuenta hasta la última posición recibida y queda marcado para revisar.</p></div>`;
+    const vista=v=>{
+      TU.vista=v;$('#tu-pos',el).hidden=v!=='pos';$('#hr-wrap',el).hidden=v!=='horas';
+      el.querySelectorAll('#tu-vista [data-v]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));
+      if(v==='horas'){horasRender();horasCargar();}
+    };
+    $('#tu-vista',el).addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(b)vista(b.dataset.v);});
+    $('#hr-wrap',el).addEventListener('click',e=>{
+      const n=e.target.closest('[data-hr-nav]');
+      if(n){const k=Number(n.dataset.hrNav),base=HR.data?HR.data.desde:'';HR.desde=k===0?'':sumaDias(base,k);HR.data=null;horasRender();horasCargar();return;}
+      const c=e.target.closest('[data-hr]');if(c){const [tid,dia]=c.dataset.hr.split('|');horaDetalle(tid,dia);return;}
+      if(e.target.closest('#hr-copy')&&HR.data)copyText(horasTexto(HR.data),'Resumen');
+      if(e.target.closest('#hr-csv')&&HR.data)saveFile('horas-'+HR.data.desde+'.csv',horasCsv(HR.data));
+    });
+    $('#tu-act',el).addEventListener('click',()=>{if(TU.vista==='horas')horasCargar();else tecCargar();});
     $('#tu-dia',el).addEventListener('change',e=>{TU.dia=e.target.value;TU.data=null;tecRender();tecCargar();});
     const hz=$('#tu-hz',el);if(hz)hz.addEventListener('click',openHorarioUbic);
     const hh=$('#tu-hoy',el);if(hh)hh.addEventListener('click',hoyCambiar);
