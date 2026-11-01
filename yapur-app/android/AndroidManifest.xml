@@ -9,13 +9,18 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <!-- Ubicación, para dos cosas:
          1) cuando el técnico toca «Usar mi ubicación actual» para cargar las coordenadas de la casa de un cliente;
-         2) solo para los técnicos que aceptaron el aviso y solo dentro del horario laboral (8 a 20 h): un servicio en primer plano, con una notificación
-            «ubicación activa» a la vista, le manda su posición a la oficina aunque la pantalla esté apagada.
-         Fuera del horario no hay ningún seguimiento. No se pide ubicación «en segundo plano» (ACCESS_BACKGROUND_LOCATION): alcanza con el servicio en primer plano. -->
+         2) solo para los técnicos que aceptaron el aviso y solo dentro del horario laboral: un servicio en primer plano, con una notificación
+            «ubicación activa» a la vista, le manda su posición a la oficina aunque la pantalla esté apagada o la app cerrada, para que el
+            ingreso y el fin de la jornada se anoten solos. Fuera del horario no se toma ni se guarda nada.
+         ACCESS_BACKGROUND_LOCATION («Permitir todo el tiempo») hace falta para que, si Android cierra el servicio o se reinicia el celular,
+         pueda volver a leer la posición sin que el técnico abra la app (Android 12+ no deja leerla desde un servicio arrancado en segundo plano). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Para que el servicio de ubicación vuelva solo al prender el celular (y al actualizar la app), sin abrirla -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Android 13+: para poder mostrar la notificación «ubicación activa» -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Para que la app pueda pedirle al técnico, con el cuadro del propio Android, que la deje «sin restricción de batería»:
@@ -45,5 +50,13 @@
             android:name="ar.net.yapur.gestion.UbicacionService"
             android:exported="false"
             android:foregroundServiceType="location"/>
+        <receiver
+            android:name="ar.net.yapur.gestion.UbicacionReceptor"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -3085,7 +3085,7 @@ VIEWS.ordenes={
 /* ===== ubicación de los técnicos en horario laboral =====
    Los técnicos aceptan un aviso y, solo dentro del horario (por defecto de 8 a 20 h), la app manda su posición cada minuto.
    El servidor vuelve a controlar el horario con su reloj y borra todo a los 14 días. Quien tiene el permiso «verTecnicos» la ve en la pestaña Técnicos. */
-const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,nat:false,started:false,refr:false};
+const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,nat:false,started:false,refr:false,bg:'',bgPedido:false,sOk:false};
 const arNow=()=>{const d=new Date(Date.now()-3*3600e3);return {fecha:d.toISOString().slice(0,10),h:d.getUTCHours()+d.getUTCMinutes()/60};};
 /* tramos del día: [[8,20]] de corrido, o [[8,13],[17,22]] en un día cortado (con siesta). Los datos viejos traen solo desde/hasta. */
 const stTramos=s=>!s?[]:(s.tramos&&s.tramos.length?s.tramos:[[s.desde,s.hasta]]);
@@ -3098,19 +3098,64 @@ const haceTxt=ts=>{
   const h=Math.floor(m/60);return 'hace '+h+' h'+(m%60?' '+(m%60)+' min':'');
 };
 
-/* ----- lado del técnico ----- */
-function ubicAviso(st){
+/* ----- modo «siempre activo» (APK nuevo): un servicio que sigue con la app cerrada, para que la jornada se anote sin que nadie abra la app ----- */
+const ubNativo=()=>{const b=window.YapurApp;return b&&typeof b.startLocationSiempre==='function'?b:null;};
+const ubSiempreOk=()=>{try{return localStorage.getItem('yapur_ub_siempre')==='1';}catch(e){return UB.sOk;}};
+const ubSiempreMarcar=()=>{UB.sOk=true;try{localStorage.setItem('yapur_ub_siempre','1');}catch(e){}};
+/* lo que ve el técnico del aviso: lo común, y qué cambia en el APK con el servicio siempre activo */
+const ubAvisoLista=(st,nat)=>`<ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li>${nat
+  ?'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app» y, cuando te lo pida de nuevo, <b>«Permitir todo el tiempo»</b>: es lo que deja que se anote tu jornada con la app cerrada.</li><li>Vas a ver una notificación fija «ubicación activa» mientras se comparte, y una discreta («en espera») fuera de horario.</li><li>El celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta.</li><li>Si cerrás sesión, se corta todo.</li>'
+  :'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li>'}</ul>`;
+/* para quien ya había aceptado el aviso de antes («con la app abierta»): ahora se comparte también con la app cerrada, y eso se avisa aparte */
+function ubicSiempreAviso(st){
   return new Promise(res=>{
     let done=false;const fin=v=>{if(!done){done=true;res(v);}};
-    openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>hoy de ${trTxt(stTramos(st))} h</b> mientras la app esté abierta o activa en tu celular. Hay días de corrido y días con siesta: la app toma sola el horario de cada día.</p>
-      <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li></ul>
+    openModal({title:'Ubicación también con la app cerrada',html:`<p>Desde esta versión, la oficina ve dónde estás <b>de ${trTxt(stTramos(st))} h</b> <b>aunque la app esté cerrada o el celular bloqueado</b>, así tu ingreso y el fin de tu jornada se anotan solos y no tenés que abrir la app.</p>${ubAvisoLista(st,true)}
+      <div class="actions"><button class="btn ghost" type="button" data-act="no">Ahora no</button><button class="btn primary" type="button" data-act="si">Entendido, activar</button></div>`,
+      onMount(el){el.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;fin(b.dataset.act==='si');closeModal();});},
+      onClose:()=>fin(false)});
+  });
+}
+/* «Permitir todo el tiempo»: Android no lo da con el cuadro común; abre la pantalla de permisos de la app y el técnico lo elige ahí */
+function ubicSiempreExplicar(){
+  const nat=ubNativo();if(!nat)return;
+  openModal({title:'Ubicación «todo el tiempo»',html:`<p>Para que tu jornada se anote aunque no abras la app (y para que vuelva sola si el celular se reinicia), Android necesita que dejes la ubicación en <b>«Permitir todo el tiempo»</b>.</p>
+    <ul class="plain"><li>Tocá <b>Activar</b>: se abre la pantalla de permisos de la app.</li><li>Entrá en <b>Ubicación</b> y elegí <b>«Permitir todo el tiempo»</b>, y volvé a la app.</li><li>Solo se comparte dentro del horario de trabajo (de ${trTxt(stTramos(UB.st))} h).</li></ul>
+    <div class="actions"><button class="btn ghost" type="button" data-close>Ahora no</button><button class="btn primary" type="button" id="ub-bg">Activar</button></div>`,
+    onMount(el){$('#ub-bg',el).addEventListener('click',()=>{
+      closeModal();
+      let r='';try{r=String(nat.pedirUbicacionSiempre());}catch(e){}
+      if(r==='pedido')toast('En la pantalla que se abre, elegí «Permitir todo el tiempo»');
+      else if(r==='ya')ubicLoop();
+    });}});
+}
+/* una vez por día, si todavía falta ese permiso, se lo explica y se lo ofrece; el cartelito de arriba queda hasta que lo dé */
+function ubicSiemprePermiso(nat){
+  if(UB.bg==='si'||UB.bgPedido||document.hidden)return;
+  const hoy=arNow().fecha;let ult='';try{ult=localStorage.getItem('yapur_ub_bgpedido')||'';}catch(e){}
+  if(ult===hoy)return;
+  UB.bgPedido=true;try{localStorage.setItem('yapur_ub_bgpedido',hoy);}catch(e){}
+  ubicSiempreExplicar();
+}
+
+/* ----- lado del técnico ----- */
+function ubicAviso(st){
+  const nat=!!ubNativo();
+  return new Promise(res=>{
+    let done=false;const fin=v=>{if(!done){done=true;res(v);}};
+    openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>hoy de ${trTxt(stTramos(st))} h</b> ${nat?'<b>aunque la app esté cerrada o el celular bloqueado</b>, así tu ingreso y el fin de tu jornada se anotan solos':'mientras la app esté abierta o activa en tu celular'}. Hay días de corrido y días con siesta: la app toma sola el horario de cada día.</p>
+      ${ubAvisoLista(st,nat)}
       <div class="actions"><button class="btn ghost" type="button" data-act="no">Ahora no</button><button class="btn primary" type="button" data-act="si">Entendido, aceptar</button></div>`,
       onMount(el){el.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;fin(b.dataset.act==='si');closeModal();});},
       onClose:()=>fin(false)});
   });
 }
 function ubicChip(){
-  let c=$('#ubChip');
+  let c=$('#ubChip'),g=$('#ubChipBg');
+  /* en el APK nuevo, mientras falte el permiso «todo el tiempo»: un botón para darlo */
+  if(UB.st&&UB.st.aplica&&UB.st.acepto&&S.realRole==='tecnico'&&!S.preview&&UB.nat&&UB.bg==='no'&&ubNativo()&&ubSiempreOk()){
+    if(!g){g=document.createElement('button');g.id='ubChipBg';g.type='button';g.className='chip warn';g.textContent='Activar ubicación «todo el tiempo»';g.addEventListener('click',ubicSiempreExplicar);const rc=$('#roleChip');if(rc&&rc.parentNode)rc.parentNode.insertBefore(g,rc);}
+  }else if(g)g.remove();
   if(!UB.st||!UB.st.aplica||!UB.st.acepto||S.realRole!=='tecnico'||S.preview){if(c)c.remove();return;}
   if(!c){c=document.createElement('span');c.id='ubChip';const rc=$('#roleChip');if(!rc||!rc.parentNode)return;rc.parentNode.insertBefore(c,rc);}
   const dentro=ubDentro();
@@ -3157,7 +3202,20 @@ async function ubicRefrescar(){
 }
 function ubicLoop(){
   if(!UB.st||!UB.st.acepto||UB.denied&&!UB.nat){ubicChip();return;}
-  const b=window.YapurApp,tr=stTramos(UB.st);
+  const b=window.YapurApp,tr=stTramos(UB.st),nat=ubNativo();
+  if(nat&&ubSiempreOk()){
+    /* APK nuevo: el servicio queda siempre andando (también fuera de horario y con la app cerrada) y decide solo cuándo tomar posiciones.
+       La página solo lo mantiene al día con la sesión; no lo detiene al terminar el horario. */
+    let r='';try{r=String(nat.startLocationSiempre(NET.token));}catch(e){}
+    UB.nat=r==='ok';
+    try{UB.bg=String(nat.ubicacionSiempre());}catch(e){UB.bg='no';}
+    if(UB.nat){
+      if(UB.watch!=null&&navigator.geolocation)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;   /* ya manda el servicio */
+      ubicSiemprePermiso(nat);
+    }else if(ubDentro())ubicWatch();   /* todavía sin permiso: la ventana lo pide con el GPS */
+    if(ubDentro())ubicFlush();
+    ubicChip();return;
+  }
   if(ubDentro()){
     if(b&&typeof b.startLocation==='function'){   /* en el APK, un servicio sigue enviando con la pantalla apagada */
       try{
@@ -3185,6 +3243,11 @@ async function ubicInit(){
     if(UB.asked)return;UB.asked=true;
     if(!await ubicAviso(UB.st))return;
     try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});}catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo más tarde.','bad');return;}
+    if(ubNativo())ubSiempreMarcar();   /* el aviso de recién ya decía que se comparte también con la app cerrada */
+  }else if(ubNativo()&&!ubSiempreOk()&&!UB.asked){
+    /* aceptó el aviso de antes («con la app abierta»): lo nuevo se avisa aparte y, si no quiere, sigue como antes */
+    UB.asked=true;
+    if(await ubicSiempreAviso(UB.st))ubSiempreMarcar();
   }
   UB.stTs=Date.now();
   ubicLoop();
@@ -3262,7 +3325,7 @@ async function jornadaIniciar(){
 }
 function jornadaAviso(){
   openModal({title:'Control de jornada',html:`<p>La oficina registra a qué hora empezás y a qué hora terminás el día, con la ubicación del celular:</p>
-    <ul class="plain"><li><b>Ingreso:</b> la primera vez que tu celular, con la app abierta, aparece en la base.</li><li><b>Fin:</b> la última vez que volvés a la base a guardar el vehículo.</li><li>Si empezás sin pasar por la base, tocá «Iniciar jornada» en la barra de arriba.</li><li>Ves tus horas en esa misma barra.</li><li>Este registro guarda solo las horas y la distancia a la base, durante 90 días.</li></ul>
+    <ul class="plain"><li><b>Ingreso:</b> la primera vez que tu celular${ubNativo()&&ubSiempreOk()?'':', con la app abierta,'} aparece en la base.</li><li><b>Fin:</b> la última vez que volvés a la base a guardar el vehículo.</li><li>Si empezás sin pasar por la base, tocá «Iniciar jornada» en la barra de arriba.</li><li>Ves tus horas en esa misma barra.</li><li>Este registro guarda solo las horas y la distancia a la base, durante 90 días.</li></ul>
     <div class="actions"><button class="btn primary" type="button" id="jr-ok2">Entendido</button></div>`,
     onMount(el){$('#jr-ok2',el).addEventListener('click',jornadaEntendido);}});
 }
@@ -4213,7 +4276,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='22d2467200';
+const BUILD='21089838c5';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
