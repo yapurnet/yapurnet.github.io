@@ -131,6 +131,7 @@ tr:last-child td{border-bottom:0}
 .notice{padding:12px 14px;border-radius:var(--r-sm);background:var(--warn-soft);color:var(--warn);font-size:14px}
 .notice.bad{background:var(--bad-soft);color:var(--bad)}
 .notice.info{background:var(--info-soft);color:var(--info)}
+.notice.ok{background:var(--ok-soft);color:var(--ok)}
 
 /* ---------- cuenta, conexión ---------- */
 button.chip{font-family:inherit;cursor:pointer}

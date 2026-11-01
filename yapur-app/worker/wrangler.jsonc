@@ -1,7 +1,7 @@
 // Gestión YAPUR.NET en Cloudflare: Worker + base de datos (Durable Object con SQLite) + la app web.
 // Para que Cloudflare lo compile y publique desde este repositorio:
 //   Workers & Pages > Create application > Import a repository, con «Root directory» = /yapur-app/worker y nombre de proyecto «yapur».
-// El nombre tiene que ser igual al de este archivo. No hace falta cargar ningún secreto.
+// El nombre tiene que ser igual al de este archivo. No hace falta cargar ningún secreto, salvo que quieras el recibo automático por WhatsApp (WA_TOKEN y WA_PHONE_ID, como «Secretos» en el panel de Cloudflare; ver LEEME).
 // Cloudflare solo recompila cuando cambia algo dentro de esta carpeta; si un build falla sin cambios de código, alcanza con «Retry build» en el panel del Worker.
 {
   "name": "yapur",

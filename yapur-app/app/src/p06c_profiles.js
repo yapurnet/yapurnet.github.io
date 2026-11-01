@@ -1,7 +1,7 @@
 /* ===== ajustes y usuarios del equipo (solo administrador) ===== */
 async function saveAjustes(patch){
   const next=Object.assign({},S.ajustes,patch);
-  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null,precioInstalacion:precioFijo('instalacion',next),precioReinstalacion:precioFijo('reinstalacion',next)});
+  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null,precioInstalacion:precioFijo('instalacion',next),precioReinstalacion:precioFijo('reinstalacion',next),waAuto:next.waAuto!==false});
 }
 function permsBoxHTML(base,cur){
   const defs=PERM_DEF[base];let g='',html='';
@@ -137,6 +137,40 @@ async function openAutoBackups(){
     });}});
 }
 
+/* texto de la plantilla que hay que crear en WhatsApp (5 datos: nombre, monto, concepto, número de recibo y fecha) */
+const WA_PLANTILLA='Hola {{1}}, recibimos tu pago de {{2}} por {{3}}. Recibo N° {{4}} del {{5}}. Gracias por elegir YAPUR.NET.';
+async function ajWhatsApp(box){
+  let st;
+  try{st=await NET.api('GET','/api/whatsapp');}catch(err){box.innerHTML=`<div class="notice bad">${esc(err.message||'No se pudo leer el estado')}</div>`;return;}
+  if(!st.configurado){
+    box.innerHTML=`<div class="notice">Todavía no está conectado. Hacen falta unos pasos una sola vez (los datos de acceso van solo en Cloudflare, nunca en esta pantalla).</div>
+      <details class="qsec" style="margin-top:10px"><summary>Cómo conectarlo</summary><ol class="small" style="margin:10px 0 0;padding-left:20px;display:grid;gap:8px">
+        <li>En <b>developers.facebook.com</b> creá una app de tipo «Empresa», agregale el producto <b>WhatsApp</b> y registrá el número desde el que querés enviar (conviene un número que no uses en tu WhatsApp común). Anotá el <b>identificador del número de teléfono</b>.</li>
+        <li>En <b>business.facebook.com → Configuración → Usuarios del sistema</b> creá un usuario, dale la app y generá un <b>token permanente</b> con el permiso <i>whatsapp_business_messaging</i>.</li>
+        <li>En <b>WhatsApp Manager → Plantillas de mensajes</b> creá una plantilla llamada <b>recibo_cobro</b>, categoría <b>Utilidad</b>, idioma <b>Español (Argentina)</b>, con este texto, y esperá a que la aprueben:
+          <div class="mono small" style="margin:6px 0;padding:8px;background:var(--surface-2);border-radius:8px;white-space:pre-wrap">${esc(WA_PLANTILLA)}</div>
+          <button class="btn small" type="button" data-copy="${esc(WA_PLANTILLA)}" data-copy-label="Texto de la plantilla">Copiar el texto</button>
+          <span class="small muted"> Ejemplos para los datos: Ana Paz · $ 65.000 · Instalación · R261101-AB3 · 01/11/2026.</span></li>
+        <li>En <b>Cloudflare → Workers y Pages → yapur → Configuración → Variables y secretos</b> agregá dos <b>Secretos</b>: <span class="mono">WA_TOKEN</span> (el token) y <span class="mono">WA_PHONE_ID</span> (el identificador del número), y guardá.</li>
+        <li>Volvé a esta pantalla: tiene que decir «Conectado». Mandate un mensaje de prueba.</li></ol>
+        <p class="small muted" style="margin:10px 0 0">Meta cobra un valor chico por cada mensaje enviado. El cliente tiene que haber aceptado recibir avisos del negocio.</p></details>`;
+    return;
+  }
+  box.innerHTML=`<div class="notice ok">Conectado.${st.hoy?` Hoy se enviaron ${st.hoy} ${st.hoy===1?'mensaje':'mensajes'}.`:''}</div>
+    <label class="per" style="margin-top:10px"><input type="checkbox" id="aj-wa-auto"${st.auto?' checked':''}><span class="grow">Mandar el recibo por WhatsApp cuando cobra un técnico<br><span class="small muted">Si lo apagás, los técnicos y la oficina pueden mandarlo a mano desde el recibo.</span></span></label>
+    <form class="form" id="aj-wa-test" novalidate style="margin-top:10px">${F('Mandar un mensaje de prueba a este celular','aj-wa-tel','<input id="aj-wa-tel" type="tel" inputmode="tel" autocomplete="off" placeholder="3844 56-2605">','Con código de área, sin 0 ni 15. Lleva datos de ejemplo.')}
+    <div class="actions start"><button class="btn" type="submit">Mandar prueba</button></div></form>`;
+  $('#aj-wa-auto',box).addEventListener('change',async e=>{
+    try{await saveAjustes({waAuto:e.target.checked});toast(e.target.checked?'El recibo se manda solo por WhatsApp':'Apagado: el recibo ya no se manda solo');}
+    catch(err){e.target.checked=!e.target.checked;dbError(err);}
+  });
+  $('#aj-wa-test',box).addEventListener('submit',async e=>{
+    e.preventDefault();const b=$('button',e.target);b.disabled=true;
+    try{await NET.api('POST','/api/whatsapp/prueba',{tel:$('#aj-wa-tel',box).value});toast('Mensaje enviado: mirá tu WhatsApp');}
+    catch(err){toast(err.message||'No se pudo enviar','bad');}
+    b.disabled=false;
+  });
+}
 VIEWS.ajustes={
   mount(el){
     const cicField=(cy,k,l)=>F(l,`aj-c${cy}${k}`,`<input id="aj-c${cy}${k}" type="number" min="1" max="28" inputmode="numeric" value="${cicloCfg(cy)[k]}">`);
@@ -158,6 +192,8 @@ VIEWS.ajustes={
       <div class="grid2">${F('Sitio web','aj-r-web',`<input id="aj-r-web" value="${esc((S.ajustes.recibo||{}).web||'')}" autocomplete="off">`)}${F('Punto de venta','aj-r-pv',`<input id="aj-r-pv" value="${esc((S.ajustes.recibo||{}).pv||'')}" inputmode="numeric" autocomplete="off" placeholder="00004">`)}</div>
       ${F('Alias para pagar (uno por línea)','aj-r-ali',`<textarea id="aj-r-ali" rows="3">${esc(((S.ajustes.recibo||{}).alias||[]).join('\n'))}</textarea>`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar datos del recibo</button></div></form></div>
+    <div class="card"><h2>Recibo por WhatsApp</h2><p class="muted small">Cada vez que un técnico cobra en la calle, el cliente recibe su recibo por WhatsApp sin que nadie haga nada. La oficina ve el recibo y si salió o no.</p>
+      <div id="aj-wa-body"><div class="hint">Mirando la conexión…</div></div></div>
     <div class="card"><h2>Ciclos de cobro y promesas</h2><p class="muted small">Cada cliente paga en uno de los dos ciclos. Si el día de corte cae sábado, domingo o feriado, el corte pasa al siguiente día hábil.</p>
       <form class="form" id="aj-cic" novalidate>
       ${[1,2].map(cy=>`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Ciclo ${cy}</legend><div class="grid2">${cicField(cy,'desde','Paga desde el día')}${cicField(cy,'hasta','Paga hasta el día')}</div>${cicField(cy,'corte','Se corta el día')}</fieldset>`).join('')}
@@ -188,6 +224,7 @@ VIEWS.ajustes={
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
+    ajWhatsApp($('#aj-wa-body',el));
     $('#aj-pre',el).addEventListener('submit',async e=>{e.preventDefault();
       const pi=Math.round(num($('#aj-pi',el).value)||0),pr=Math.round(num($('#aj-pr',el).value)||0);
       if(pi<=0||pr<=0||pi>1e7||pr>1e7)return toast('Cargá los dos precios (números mayores que cero)','bad');

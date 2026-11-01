@@ -120,6 +120,20 @@ const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reclamo', 'otro'];   /
 const PRECIO_KEYS = { instalacion: 'precioInstalacion', reinstalacion: 'precioReinstalacion' };
 const PRECIO_DEF = { instalacion: 65000, reinstalacion: 35000 };
 const pesos = n => '$ ' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+/* ----- recibo por WhatsApp: números, textos y topes (el envío está más abajo, en la clase) ----- */
+const WA_CONC = { mensualidad: 'Mensualidad', deuda_anterior: 'Deuda anterior', instalacion: 'Instalación', reinstalacion: 'Reinstalación (mudanza)', reconexion: 'Reconexión', reclamo: 'Reclamo o visita técnica', otro: 'Otro' };
+const WA_MAX_NUM_DIA = 3, WA_MAX_DIA = 400;   // avisos automáticos por día: por número de cliente y en total (freno ante un uso indebido)
+/* número de WhatsApp de Argentina: 54 + 9 + código de área + número (13 cifras); '' si no sirve */
+function waNumero(tel) {
+  let d = String(tel == null ? '' : tel).replace(/\D/g, '').replace(/^0+/, '');
+  if (!d) return '';
+  if (!d.startsWith('54')) d = '54' + (d.startsWith('9') ? '' : '9') + d;
+  else if (d.length === 12 && d[2] !== '9') d = '549' + d.slice(2);
+  return /^549\d{10}$/.test(d) ? d : '';
+}
+/* los textos de una plantilla no admiten saltos de línea ni quedar vacíos */
+const waTxt = (s, n) => String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, n) || '-';
+const dmyAR = f => /^\d{4}-\d{2}-\d{2}$/.test(f || '') ? f.slice(8) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '-';
 const METODOS_PAGO = ['efectivo', 'transferencia', 'mercadopago', 'otro'];
 /* quien cobra en la calle y recibe una transferencia tiene que adjuntar la foto del comprobante */
 const COMP_METODOS = ['transferencia'];
@@ -178,6 +192,7 @@ function guard(u, p, coll, existing, patch, ctx) {
           } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
         if (u.role === 'admin' || p.cobrar) delete nw.comp;   /* el comprobante lo adjunta quien cobra en la calle */
+        delete nw.wa;   /* el estado del aviso por WhatsApp lo escribe solo el servidor */
         nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();
         continue;
       }
@@ -487,7 +502,7 @@ export class YapurDB extends DurableObject {
     if (coll === 'pagos') return canReadPagos(u, p) ? data : null;
     if (coll === 'ajustes') {
       if (id !== 'general') return u.role === 'admin' ? data : null;
-      const d = Object.assign({}, data, { perfiles: this.perfilesView() });
+      const d = Object.assign({}, data, { perfiles: this.perfilesView(), waActivo: this.waActivo() });
       if (!p.precios && Array.isArray(d.servicios)) d.servicios = d.servicios.map(s => { const c = Object.assign({}, s); delete c.precio; delete c.hist; return c; });
       return d;
     }
@@ -550,17 +565,22 @@ export class YapurDB extends DurableObject {
     const bad = canWrite(u, p, coll, op);
     if (bad) throw httpErr(403, bad, 'permission_denied');
     if (coll === 'ajustes' && id !== 'general') throw httpErr(400, 'Ruta inválida.');
-    let out;
+    let out, waKeys = [];
     this.tx(() => {
       const existing = this.readDoc(coll, id);
       if (coll === 'ajustes') {
-        data = Object.assign({}, data); delete data.perfiles;
+        data = Object.assign({}, data); delete data.perfiles; delete data.waActivo;
         /* una pantalla desactualizada que guarda otros ajustes no tiene que borrar los precios fijos */
         if (op === 'set' && existing) for (const k of Object.values(PRECIO_KEYS)) if (!(k in data) && k in existing) data[k] = existing[k];
       }
       const why = guard(u, p, coll, existing, data, this);
       if (why) throw httpErr(403, why, 'permission_denied');
       if (coll === 'red') { const inUse = this.redInUse(existing, data.items); if (inUse) throw httpErr(409, inUse, 'failed_precondition'); }
+      /* cobro de quien cobra en la calle: el recibo le llega al cliente por WhatsApp (queda «pendiente» hasta que se envíe) */
+      if (coll === 'pagos' && u.role !== 'admin' && !p.cobrar && p.cobrarCampo && this.waActivo()) {
+        waKeys = Object.keys(data.items).filter(k => isPlain(data.items[k]) && !(existing && isPlain(existing.items) && k in existing.items));
+        for (const k of waKeys) data.items[k].wa = { e: 'pendiente', ts: Date.now(), tel: null, err: null, id: null, n: 0 };
+      }
       const next = op === 'set' || !existing ? data : deepMerge(existing, data);
       const s = JSON.stringify(next);
       /* la base de Cloudflare admite hasta 2 MB por fila: se mide en bytes, no en letras */
@@ -578,6 +598,7 @@ export class YapurDB extends DurableObject {
     const sendOp = coll === 'ajustes' ? 'set' : op;
     const payload = coll === 'ajustes' ? out.next : out.patch;
     this.broadcastDoc(coll, id, sendOp, payload, out.seq);
+    if (waKeys.length) this.waAvisar(id, waKeys);
     this.snapshotSoon();
     return { ok: true, seq: out.seq, op: sendOp, data: this.viewData(u, p, coll, id, payload) };
   }
@@ -694,6 +715,159 @@ export class YapurDB extends DurableObject {
       }
     }
     return { docs, desde, hoy };
+  }
+
+  /* ===== recibo por WhatsApp (WhatsApp Business de Meta) =====
+     Solo anda si en Cloudflare están cargados los secretos WA_TOKEN y WA_PHONE_ID. Cuando un técnico cobra en la calle, el servidor le manda al
+     cliente un mensaje con la plantilla aprobada por WhatsApp (WA_TEMPLATE, por defecto «recibo_cobro», en WA_LANG, por defecto es_AR).
+     El resultado queda en el propio cobro (campo «wa»): pendiente, enviado, error o sin_tel. Ninguna clave sale del servidor. */
+  waConfig() {
+    const e = this.env, token = String(e.WA_TOKEN || '').trim(), phone = String(e.WA_PHONE_ID || '').trim();
+    if (!token || !/^\d{5,25}$/.test(phone)) return null;
+    const rm = Number(e.WA_RETRY_MS);
+    return {
+      token, phone, tpl: String(e.WA_TEMPLATE || 'recibo_cobro').trim(), lang: String(e.WA_LANG || 'es_AR').trim(),
+      base: String(e.WA_API || 'https://graph.facebook.com').replace(/\/+$/, '') + '/' + String(e.WA_VER || 'v23.0').trim(),
+      retryMs: e.WA_RETRY_MS !== undefined && e.WA_RETRY_MS !== '' && isFinite(rm) && rm >= 0 ? rm : 2000
+    };
+  }
+  waActivo() { return !!this.waConfig() && (this.readDoc('ajustes', 'general') || {}).waAuto !== false; }
+  /* un mensaje con la plantilla; devuelve { ok, id } o { ok:false, temp (vale reintentar), error } */
+  async waLlamar(cfg, to, vars) {
+    const body = { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'template',
+      template: { name: cfg.tpl, language: { code: cfg.lang }, components: [{ type: 'body', parameters: vars.map(v => ({ type: 'text', text: v })) }] } };
+    let res;
+    try {
+      res = await fetch(cfg.base + '/' + cfg.phone + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + cfg.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+    } catch (e) { return { ok: false, temp: true, error: 'No se pudo conectar con WhatsApp.' }; }
+    let j = null;
+    try { j = await res.json(); } catch (e) { /* sin cuerpo */ }
+    if (res.ok && j && Array.isArray(j.messages) && j.messages[0] && j.messages[0].id) return { ok: true, id: String(j.messages[0].id).slice(0, 120) };
+    const er = j && isPlain(j.error) ? j.error : {}, det = isPlain(er.error_data) && er.error_data.details ? ' ' + er.error_data.details : '';
+    const txt = (String(er.message || 'Respuesta ' + res.status) + det).split(cfg.token).join('***').replace(/\s+/g, ' ').slice(0, 220);
+    return { ok: false, temp: res.status === 429 || res.status >= 500, error: '(' + (er.code || res.status) + ') ' + txt };
+  }
+  /* tope diario de avisos: por número y en total */
+  waCupo(to, manual) {
+    const k = 'wa:' + ymd(), r = this.q1('SELECT v FROM meta WHERE k=?', k);
+    let d = null;
+    try { d = r ? JSON.parse(r.v) : null; } catch (e) { d = null; }
+    if (!isPlain(d) || !isPlain(d.n)) d = { t: 0, n: {} };
+    if (d.t >= WA_MAX_DIA || (!manual && (d.n[to] || 0) >= WA_MAX_NUM_DIA)) return false;
+    d.t++; d.n[to] = (d.n[to] || 0) + 1;
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, JSON.stringify(d));
+    this.sql.exec('DELETE FROM meta WHERE k LIKE ? AND k<>?', 'wa:%', k);   // solo queda el contador de hoy
+    return true;
+  }
+  /* anota el estado del aviso en los cobros del recibo y se lo avisa a las pantallas abiertas */
+  waMarcar(docId, ks, wa) {
+    let seq = 0;
+    this.tx(() => {
+      const d = this.readDoc('pagos', docId);
+      if (!d || !isPlain(d.items)) return;
+      let hay = false;
+      for (const k of ks) if (isPlain(d.items[k])) { d.items[k].wa = wa; hay = true; }
+      if (!hay) return;
+      this.putDoc('pagos', docId, JSON.stringify(d));
+      this.SEQ++; seq = this.SEQ;
+    });
+    if (!seq) return;
+    const patch = { items: {} };
+    for (const k of ks) patch.items[k] = { wa };
+    this.broadcastDoc('pagos', docId, 'merge', patch, seq);
+  }
+  /* manda el recibo de un cobro (o de varios del mismo recibo) y deja anotado cómo salió */
+  async waRecibo(docId, ks, manual) {
+    const cfg = this.waConfig();
+    const d = this.readDoc('pagos', docId), its = ks.map(k => d && isPlain(d.items) ? d.items[k] : null).filter(isPlain);
+    if (!cfg) return { e: 'error', err: 'El WhatsApp automático no está configurado.' };
+    if (!its.length) return { e: 'error', err: 'No se encontró el cobro.' };
+    const vivos = its.filter(i => !i.anulado);
+    const now = Date.now(), fin = (e, o) => { const wa = Object.assign({ e, ts: Date.now(), tel: null, err: null, id: null, n: 0 }, o); this.waMarcar(docId, ks, wa); return wa; };
+    if (!vivos.length) return fin('error', { err: 'El recibo está anulado: no se envía.' });
+    const cl = this.clienteDe(vivos[0].c);
+    let to = '';
+    for (const t of [cl && cl.tel, cl && cl.tel2]) { to = waNumero(t); if (to) break; }
+    if (!to) return fin('sin_tel', { err: !cl ? 'No se encontró al cliente.' : (cl.tel || cl.tel2) ? 'El teléfono del cliente no sirve para WhatsApp (tiene que tener el código de área, sin 0 ni 15).' : 'El cliente no tiene teléfono cargado.' });
+    if (!this.waCupo(to, manual)) return fin('error', { tel: to, err: 'Se llegó al máximo de avisos por WhatsApp de hoy para este número. Probá mañana o mandalo a mano.' });
+    this.waMarcar(docId, ks, { e: 'pendiente', ts: now, tel: to, err: null, id: null, n: 0 });
+    const total = vivos.reduce((t, i) => t + (Number(i.monto) || 0), 0), conc = [...new Set(vivos.map(i => WA_CONC[i.concepto] || 'Pago'))].join(', ');
+    const vars = [waTxt(String(cl.nombre || '').split(/\s+/).slice(0, 3).join(' '), 60), pesos(total), waTxt(conc, 60), waTxt(vivos[0].recibo, 40), dmyAR(vivos[0].fecha)];
+    let r = null, n = 0;
+    while (n < 3) {
+      r = await this.waLlamar(cfg, to, vars); n++;
+      if (r.ok || !r.temp || n >= 3) break;
+      await new Promise(res => setTimeout(res, cfg.retryMs * (n === 1 ? 1 : 3)));
+    }
+    return r.ok ? fin('enviado', { tel: to, id: r.id, n }) : fin('error', { tel: to, err: r.error, n });
+  }
+  /* en segundo plano: el cobro ya está guardado y el técnico no espera a WhatsApp */
+  waAvisar(docId, keys) {
+    (async () => {
+      try {
+        const d = this.readDoc('pagos', docId), by = {};
+        for (const k of keys) { const it = d && isPlain(d.items) ? d.items[k] : null; if (isPlain(it)) (by[it.recibo || k] = by[it.recibo || k] || []).push(k); }
+        for (const ks of Object.values(by)) await this.waRecibo(docId, ks, false);
+      } catch (e) { console.error('Aviso por WhatsApp falló:', e && e.message); }
+    })();
+  }
+  /* los cobros de un recibo, tal como están guardados: [{ doc, keys }] */
+  waBuscar(recibo) {
+    if (!/^[A-Za-z0-9-]{4,40}$/.test(String(recibo || ''))) return [];
+    const key = '"recibo":' + JSON.stringify(recibo), out = [];
+    for (const r of this.q('SELECT id,data FROM docs WHERE coll=? AND data LIKE ?', 'pagos', '%' + key + '%')) {
+      const its = JSON.parse(r.data).items || {}, keys = Object.keys(its).filter(k => isPlain(its[k]) && its[k].recibo === recibo);
+      if (keys.length) out.push({ doc: r.id, keys });
+    }
+    return out;
+  }
+  /* la oficina reintenta (o repite) el aviso de un recibo, o de todos los que fallaron en los últimos días */
+  async waReenviar(u, body) {
+    const p = effPerms(u);
+    if (u.role !== 'admin' && !p.cobrar && !p.caja) throw httpErr(403, 'Tu usuario no puede reenviar recibos.', 'permission_denied');
+    if (!this.waConfig()) throw httpErr(409, 'El WhatsApp automático no está configurado.', 'failed_precondition');
+    const b = isPlain(body) ? body : {};
+    if (b.todos === true) {
+      const desde = ymd(Date.now() - 14 * 864e5), lotes = [];
+      const docs = [];
+      for (const y of new Set([desde.slice(0, 4), ymd().slice(0, 4)])) docs.push(...this.q('SELECT id,data FROM docs WHERE coll=? AND id LIKE ? ORDER BY id DESC', 'pagos', y + '-%'));
+      for (const r of docs) {
+        const its = JSON.parse(r.data).items || {}, by = {};
+        for (const k of Object.keys(its)) {
+          const it = its[k];
+          if (!isPlain(it) || it.anulado || !isPlain(it.wa) || it.fecha < desde) continue;
+          if (it.wa.e === 'error' || (it.wa.e === 'pendiente' && Date.now() - (it.wa.ts || 0) > 5 * 60e3)) (by[it.recibo || k] = by[it.recibo || k] || []).push(k);
+        }
+        for (const ks of Object.values(by)) lotes.push({ doc: r.id, keys: ks });
+      }
+      const hechos = lotes.slice(0, 25);
+      let ok = 0;
+      for (const l of hechos) { const wa = await this.waRecibo(l.doc, l.keys, true); if (wa.e === 'enviado') ok++; }
+      return { ok: true, intentados: hechos.length, enviados: ok, quedan: Math.max(0, lotes.length - hechos.length) };
+    }
+    const hay = this.waBuscar(b.recibo);
+    if (!hay.length) throw httpErr(404, 'No se encontró el recibo.');
+    const wa = await this.waRecibo(hay[0].doc, hay[0].keys, true);
+    return { ok: wa.e === 'enviado', wa };
+  }
+  /* estado del WhatsApp automático (solo el administrador) */
+  waEstado() {
+    const cfg = this.waConfig(), a = this.readDoc('ajustes', 'general') || {};
+    const r = this.q1('SELECT v FROM meta WHERE k=?', 'wa:' + ymd());
+    let hoy = 0;
+    try { hoy = r ? Number(JSON.parse(r.v).t) || 0 : 0; } catch (e) { hoy = 0; }
+    return { configurado: !!cfg, auto: a.waAuto !== false, plantilla: cfg ? cfg.tpl : String(this.env.WA_TEMPLATE || 'recibo_cobro'), idioma: cfg ? cfg.lang : String(this.env.WA_LANG || 'es_AR'), hoy };
+  }
+  /* mensaje de prueba al número que elige el administrador (con datos de ejemplo) */
+  async waPrueba(body) {
+    const cfg = this.waConfig();
+    if (!cfg) throw httpErr(409, 'Todavía no está cargada la conexión con WhatsApp en Cloudflare.', 'failed_precondition');
+    const to = waNumero(isPlain(body) ? body.tel : '');
+    if (!to) throw httpErr(400, 'Escribí un número de celular con código de área, sin 0 ni 15 (por ejemplo 3844 56-2605).');
+    if (!this.waCupo(to, true)) throw httpErr(429, 'Se llegó al máximo de mensajes de hoy.');
+    const r = await this.waLlamar(cfg, to, ['Prueba', pesos(1), 'Mensaje de prueba', 'R-PRUEBA', dmyAR(ymd())]);
+    if (!r.ok) throw httpErr(422, 'WhatsApp no aceptó el mensaje: ' + r.error);
+    return { ok: true };
   }
 
   /* ----- tiempo real (SSE) ----- */
@@ -1245,6 +1419,9 @@ export class YapurDB extends DurableObject {
       const a = await this.needAuth(request);
       return send(200, this.misCobros(a.user, Math.max(1, Math.min(31, parseInt(url.searchParams.get('dias') || '7', 10) || 7))));
     }
+    if (p === '/api/whatsapp' && m === 'GET') { await this.needAdmin(request); return send(200, this.waEstado()); }
+    if (p === '/api/whatsapp/prueba' && m === 'POST') { await this.needAdmin(request); return send(200, await this.waPrueba(readBody(raw, 2e3))); }
+    if (p === '/api/recibos/reenviar' && m === 'POST') { const a = await this.needAuth(request); return send(200, await this.waReenviar(a.user, readBody(raw, 2e3))); }
     if (p === '/api/ubicacion/estado' && m === 'GET') return send(200, this.ubicEstado((await this.needAuth(request)).user));
     if (p === '/api/ubicacion/acepto' && m === 'POST') {
       const a = await this.needAuth(request);
