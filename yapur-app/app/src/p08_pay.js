@@ -251,29 +251,34 @@ function fotoJpeg(file){
         if(d.length*0.75>440e3)mal(new Error('La foto es demasiado grande. Sacala de nuevo más cerca del comprobante.'));else ok(d);
       }catch(e){URL.revokeObjectURL(url);mal(e);}
     };
-    img.onerror=()=>{URL.revokeObjectURL(url);mal(new Error('No se pudo leer la foto. Elegí una imagen (JPG o PNG).'));};
+    img.onerror=()=>{URL.revokeObjectURL(url);mal(new Error('No se pudo leer la foto. Sacala de nuevo o elegí otra imagen (JPG o PNG).'));};
     img.src=url;
   });
 }
 function compHTML(px){
   return `<div class="fgroup" id="${px}-comp" hidden><div class="legend">Comprobante de la transferencia *</div>
-    <div class="hint">Sacale una foto al comprobante con la cámara del celular (o usá la captura que te mandó el cliente) y elegila acá. Sin la foto no se registra el cobro.</div>
-    <div class="actions start"><button class="btn small" type="button" id="${px}-comp-b">Elegir la foto</button><input id="${px}-comp-f" type="file" hidden></div>
+    <div class="hint">Sacale una foto al comprobante con la cámara, o elegí la captura que te mandó el cliente. Sin la foto no se registra el cobro.</div>
+    <div class="actions start"><button class="btn small primary" type="button" id="${px}-comp-k">Sacar foto con la cámara</button><button class="btn small" type="button" id="${px}-comp-b">Elegir una foto</button>
+      <input id="${px}-comp-c" type="file" accept="image/*" capture="environment" hidden><input id="${px}-comp-f" type="file" hidden></div>
     <img id="${px}-comp-img" class="comp-thumb" alt="Foto del comprobante" hidden><div class="hint" id="${px}-comp-st"></div></div>`;
 }
 function mountComp(el,px,getMetodo){
-  const box=$('#'+px+'-comp',el),f=$('#'+px+'-comp-f',el),img=$('#'+px+'-comp-img',el),st=$('#'+px+'-comp-st',el);
+  const box=$('#'+px+'-comp',el),f=$('#'+px+'-comp-f',el),cam=$('#'+px+'-comp-c',el),img=$('#'+px+'-comp-img',el),st=$('#'+px+'-comp-st',el);
   let id=null,busy=false;
+  /* «Sacar foto con la cámara» abre la cámara directo (atributo capture); «Elegir una foto» abre el selector de archivos */
+  $('#'+px+'-comp-k',el).addEventListener('click',()=>cam.click());
   $('#'+px+'-comp-b',el).addEventListener('click',()=>f.click());
-  f.addEventListener('change',async()=>{
-    const file=f.files&&f.files[0];f.value='';if(!file)return;
+  const subir=async inp=>{
+    const file=inp.files&&inp.files[0];inp.value='';if(!file)return;
     busy=true;id=null;img.hidden=true;st.className='hint';st.textContent='Subiendo la foto…';
     try{
       const d=await fotoJpeg(file),r=await NET.api('POST','/api/comprobante',{img:d},{timeout:60000});
-      id=r.id;img.src=d;img.hidden=false;st.className='hint ok';st.textContent='Foto lista. Si te equivocaste, elegí otra.';
+      id=r.id;img.src=d;img.hidden=false;st.className='hint ok';st.textContent='Foto lista. Si salió mal, sacala o elegila de nuevo.';
     }catch(e){st.className='hint bad';st.textContent=e.network?'No hay conexión: no se pudo subir la foto. Probá de nuevo.':(e.message||'No se pudo subir la foto.');}
     finally{busy=false;}
-  });
+  };
+  f.addEventListener('change',()=>subir(f));
+  cam.addEventListener('change',()=>subir(cam));
   /* antes de registrar el cobro: devuelve el texto del problema, o '' si está todo bien */
   const falta=()=>!pideComp(getMetodo())?'':busy?'Esperá: se está subiendo la foto del comprobante':id?'':'Adjuntá la foto del comprobante de la transferencia';
   return {sync:()=>{box.hidden=!pideComp(getMetodo());},id:()=>pideComp(getMetodo())?id:null,falta};

@@ -9,9 +9,10 @@ for (const f of ['index.html', 'sw.js', 'version.json', 'manifest.webmanifest', 
   const a = fs.readFileSync(path.join(tmp, f)), b = fs.existsSync(path.join(__dirname, '..', 'worker', 'public', f)) ? fs.readFileSync(path.join(__dirname, '..', 'worker', 'public', f)) : null;
   if (!b || !a.equals(b)) { bad++; console.log('FAIL worker/public/' + f + ' no coincide con lo que arma app/build.js (corré: node yapur-app/app/build.js)'); } else console.log('ok   ' + f + ' al día');
 }
-/* Los celulares Android tachan los archivos cuyo tipo no coincide con `accept` (un CSV bajado del chat suele venir sin tipo): los selectores de archivo no filtran. */
+/* Los celulares Android tachan los archivos cuyo tipo no coincide con `accept` (un CSV bajado del chat suele venir sin tipo): los selectores de archivo no filtran.
+   Única excepción: el de «Sacar foto con la cámara» (capture), que lleva accept="image/*" porque Chrome solo abre la cámara directo con ese tipo; una foto siempre trae su tipo. */
 const html = fs.readFileSync(path.join(tmp, 'index.html'), 'utf8'), files = html.match(/<input[^>]*type="file"[^>]*>/g) || [];
-if (!files.length || files.some(t => /\baccept=/.test(t))) { bad++; console.log('FAIL los selectores de archivo no pueden llevar accept (el celular tacha el archivo): ' + files.join(' ')); } else console.log('ok   ' + files.length + ' selectores de archivo sin filtro de tipo');
+if (!files.length || files.some(t => /\baccept=/.test(t) && !(/\bcapture="environment"/.test(t) && /\baccept="image\/\*"/.test(t)))) { bad++; console.log('FAIL los selectores de archivo no pueden llevar accept (el celular tacha el archivo): ' + files.join(' ')); } else console.log('ok   ' + files.length + ' selectores de archivo sin filtro de tipo');
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${bad ? 0 : 8} ok, ${bad} con fallas`);
 process.exit(bad ? 1 : 0);

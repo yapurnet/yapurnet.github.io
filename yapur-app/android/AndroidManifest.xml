@@ -50,6 +50,13 @@
             android:name="ar.net.yapur.gestion.UbicacionService"
             android:exported="false"
             android:foregroundServiceType="location"/>
+        <!-- La foto del comprobante con la cámara: la cámara del celular guarda la foto en un archivo temporal de la app.
+             No hace falta el permiso CAMERA (y NO hay que agregarlo: con el permiso declarado, Android exige concederlo antes de abrir la cámara). -->
+        <provider
+            android:name="ar.net.yapur.gestion.FotoProvider"
+            android:authorities="ar.net.yapur.gestion.fotos"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
         <receiver
             android:name="ar.net.yapur.gestion.UbicacionReceptor"
             android:exported="false">
