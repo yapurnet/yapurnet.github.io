@@ -55,7 +55,7 @@ async def main():
         pm = await pg.evaluate("['65mil','65 mil pesos','$65.000','65000','$ 1.250,50','1,5 mil','sin numero',\"(Efectivo) 65mil pesos que es el costo\"].map(parseMonto)")
         check('montos: 65mil, 65 mil, 65.000, 65000, 1.250 (sin centavos), 1,5 mil, sin número', pm == [65000, 65000, 65000, 65000, 1250, 1500, None, 65000], pm)
         pg2 = await pg.evaluate("[parsePago('Transferencia 20.000 reconexión'),parsePago('mercado pago 5000 visita técnica'),parsePago('efectivo'),parsePago('18000')]")
-        check('pago: método y concepto según el texto, vacío si no hay monto', pg2[0]['metodo'] == 'transferencia' and pg2[0]['concepto'] == 'reconexion' and pg2[1]['metodo'] == 'mercadopago' and pg2[1]['concepto'] == 'reclamo' and pg2[2] is None and pg2[3]['metodo'] == 'efectivo' and pg2[3]['concepto'] == 'instalacion', pg2)
+        check('pago: método y concepto según el texto, vacío si no hay monto', pg2[0]['metodo'] == 'transferencia' and pg2[0]['concepto'] == 'otro' and pg2[1]['metodo'] == 'mercadopago' and pg2[1]['concepto'] == 'reclamo' and pg2[2] is None and pg2[3]['metodo'] == 'efectivo' and pg2[3]['concepto'] == 'instalacion', pg2)
         r = await pg.evaluate("(t)=>parseReporte(t)", REPORTE)
         check('reporte: nombre, DNI, IP y pago (con emojis y renglones en blanco)', r['nombre'] == 'Ana Ester Paz' and r['dni'] == '28354900' and r['ip'] == '10.20.43.9' and r['pago']['monto'] == 65000 and r['pago']['metodo'] == 'efectivo' and r['pago']['concepto'] == 'instalacion', r)
         r2 = await pg.evaluate("parseReporte('Nombre y apellido: Juan Gil\\nTeléfono: 3844 55-1111\\nDirección: Calle 5 123\\nLocalidad: Añatuya\\nPlan: plan 100\\nIP: IP fija 10.20.44.3/32\\nDNI: 30.111.222')")

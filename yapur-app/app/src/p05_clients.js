@@ -256,7 +256,7 @@ function parseMonto(t){
 function parsePago(t){
   const n=norm(t),monto=parseMonto(t);if(!monto)return null;
   return {monto,metodo:/transfer|cbu|alias/.test(n)?'transferencia':/mercado\s*pago/.test(n)?'mercadopago':'efectivo',
-    concepto:/reconex/.test(n)?'reconexion':/reclamo|visita/.test(n)?'reclamo':'instalacion',nota:String(t).trim().slice(0,160)};
+    concepto:/reconex/.test(n)?'otro':/reclamo|visita/.test(n)?'reclamo':'instalacion',nota:String(t).trim().slice(0,160)};
 }
 function parseReporte(txt){
   const out={};

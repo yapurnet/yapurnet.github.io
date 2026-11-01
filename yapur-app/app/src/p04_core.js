@@ -40,7 +40,14 @@ const TECNOS={fibra:'Fibra óptica',wireless:'Antena wireless'};
 const TIPOS_ORD={instalacion:'Instalación',falla:'Falla o reparación',cambio_plan:'Cambio de plan',reconexion:'Reconexión',retiro:'Retiro de equipo',visita:'Visita técnica'};
 const EST_ORD={pendiente:'Pendiente',en_camino:'En camino',en_curso:'En curso',hecha:'Hecha',cancelada:'Cancelada'};
 const METODOS={efectivo:'Efectivo',transferencia:'Transferencia',mercadopago:'Mercado Pago',otro:'Otro'};
+/* «Reconexión» ya no se cobra (solo la deuda, que la cobra la oficina): queda el nombre para los recibos viejos, pero no se ofrece al cobrar */
 const CONCEPTOS={mensualidad:'Mensualidad',deuda_anterior:'Deuda anterior',instalacion:'Instalación',reinstalacion:'Reinstalación (mudanza)',reconexion:'Reconexión',reclamo:'Reclamo o visita técnica',otro:'Otro'};
+/* precios fijos de la instalación y de la reinstalación: los carga solo el administrador (Ajustes); el técnico cobra exactamente esos */
+const PRECIOS_FIJOS_DEF={instalacion:65000,reinstalacion:35000};
+function precioFijo(con,aj){
+  const k=con==='instalacion'?'precioInstalacion':con==='reinstalacion'?'precioReinstalacion':null;if(!k)return null;
+  const v=Number((aj||S.ajustes||{})[k]);return isFinite(v)&&v>0?Math.round(v):PRECIOS_FIJOS_DEF[con];
+}
 
 /* ===== estado global ===== */
 const S={
@@ -69,7 +76,7 @@ const PERMS=[
   ['caja','Ver la caja del día y los morosos','','Dinero'],
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
-  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reclamo, reconexión u otro cobro. No cobra mensualidades. Queda a su nombre y suma a la caja del día.','Dinero'],
+  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones. Queda a su nombre y suma a la caja del día.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']

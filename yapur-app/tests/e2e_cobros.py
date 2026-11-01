@@ -1,4 +1,4 @@
-# Cobros del técnico en la calle (instalaciones, reclamos, reconexiones) y cierre de caja por cobrador.
+# Cobros del técnico en la calle (instalación y reinstalación a precio fijo, reclamos, otros; la reconexión no se cobra) y cierre de caja por cobrador.
 # Chromium real contra el servidor de verdad (workerd).
 import asyncio, base64, json, os, re, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
@@ -70,8 +70,8 @@ async def main():
         'd': {'nombre': 'Darío Instalar', 'estado': 'pendiente', 'planId': 'p1', 'dir': 'Calle 4', 'tel': '3844000004'},
         'e': {'nombre': 'Elena Suspendida', 'estado': 'suspendido', 'corteMora': '2026-10-20', 'extras': ['multimedia', 'multimedia_net'], 'planId': 'p1', 'dir': 'Calle 5', 'tel': '3844000005', 'desde': cur}}.items():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
-    for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id']), ('o5', 'e', pedro['id']), ('o6', 'a', pedro['id'])):
-        api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid in ('o1', 'o6') else ('visita' if oid == 'o4' else 'falla'), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
+    for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id']), ('o5', 'e', pedro['id']), ('o6', 'a', pedro['id']), ('o7', 'e', pedro['id'])):
+        api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid in ('o1', 'o6') else ('visita' if oid == 'o4' else ('reconexion' if oid == 'o7' else 'falla')), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         async def nuevo():
@@ -98,22 +98,25 @@ async def main():
         check('el cobro no muestra lo cobrado antes a ese cliente (el técnico no ve los pagos)', await pg.query_selector('#cb-prev') is None)
         check('en efectivo no se pide la foto del comprobante', await pg.evaluate("document.querySelector('#cb-comp').hidden"))
         check('la fecha del cobro es hoy y no se puede cambiar', await pg.evaluate("document.querySelector('#cb-fecha').disabled") is True and await pg.input_value('#cb-fecha') == hoy)
-        await pg.fill('#cb-monto', '15000')
+        check('«Instalación» viene con el precio fijo ($ 65.000) y el técnico no puede cambiarlo', await pg.input_value('#cb-monto') == '65000' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is True, await pg.input_value('#cb-monto'))
+        check('y se lo dice: precio fijo, lo define el administrador', 'Precio fijo: $ 65.000' in (await pg.inner_text('#cb-sum')).replace('\xa0', ' ') and 'administrador' in (await pg.inner_text('#cb-sum')).replace('\xa0', ' '), (await pg.inner_text('#cb-sum')).replace('\xa0', ' '))
+        check('no existe «Reconexión» entre lo que cobra el técnico', 'Reconexión' not in botones, botones)
+        await pg.evaluate("document.querySelector('#cb-monto').readOnly = false; document.querySelector('#cb-monto').value = '1000'")   # aunque lo fuerce desde afuera
         await pg.fill('#cb-nota-o', 'Instalación completa')
         await pg.click('#cb-go')
         await pg.wait_for_selector('.rc', timeout=8000)
         rec = await pg.inner_text('.rc')
-        check('muestra el recibo con el concepto y el total', 'Instalación' in rec and '15.000' in rec and 'Darío Instalar' in rec, rec)
+        check('muestra el recibo con el concepto y el total', 'Instalación' in rec and '65.000' in rec and '1.000' not in rec.replace('65.000', '') and 'Darío Instalar' in rec, rec)
         await pg.click('.sheet [data-close]')
         mis = pagos_hoy(pedro_tok := api('POST', '/api/login', {'usuario': 'pedro', 'clave': 'pedro123'})[1]['token'])
-        check('el servidor lo guardó a nombre del técnico', len(mis) == 1 and mis[0]['por'] == pedro['id'] and mis[0]['porNombre'] == 'Pedro' and mis[0]['concepto'] == 'instalacion' and mis[0]['monto'] == 15000 and mis[0]['fecha'] == hoy, mis)
-        await pg.wait_for_function("document.querySelector('#mc-body').textContent.includes('15.000')", timeout=5000)
+        check('el servidor lo guardó a nombre del técnico', len(mis) == 1 and mis[0]['por'] == pedro['id'] and mis[0]['porNombre'] == 'Pedro' and mis[0]['concepto'] == 'instalacion' and mis[0]['monto'] == 65000 and mis[0]['fecha'] == hoy, mis)
+        await pg.wait_for_function("document.querySelector('#mc-body').textContent.includes('65.000')", timeout=5000)
         check('«Mis cobros» muestra lo cobrado hoy', 'Cobrado hoy' in await pg.inner_text('#mc-body'))
         # la ficha de ese cliente no muestra pagos ni cuánto se le cobró
         await pg.evaluate("openClient('d')")
         await pg.wait_for_selector('.sheet [data-act=cobrar]')
         sh = await pg.inner_text('.sheet')
-        check('la ficha del cliente no muestra lo cobrado ni los pagos', await pg.query_selector('#fc-cobros') is None and 'Lo cobrado' not in sh and '15.000' not in sh and 'cobró Pedro' not in sh, sh[:300])
+        check('la ficha del cliente no muestra lo cobrado ni los pagos', await pg.query_selector('#fc-cobros') is None and 'Lo cobrado' not in sh and '65.000' not in sh and 'cobró Pedro' not in sh, sh[:300])
         check('el cliente por instalar se ve como «Por instalar»', 'Por instalar' in sh)
         await pg.click('.sheet [data-close]')
 
@@ -144,7 +147,7 @@ async def main():
         check('al tocarlo se abre la foto que subió', await pg.evaluate("document.querySelector('#rc-comp-img').naturalWidth") <= 1400)
         await pg.click('.sheet [data-close]')
         mis = pagos_hoy(pedro_tok)
-        check('quedan 2 cobros del técnico (15.000 efectivo + 3.500 transferencia)', sorted((m['monto'], m['metodo']) for m in mis) == [(3500, 'transferencia'), (15000, 'efectivo')], mis)
+        check('quedan 2 cobros del técnico (65.000 efectivo + 3.500 transferencia)', sorted((m['monto'], m['metodo']) for m in mis) == [(3500, 'transferencia'), (65000, 'efectivo')], mis)
         check('el servidor guardó el cobro por transferencia con su foto y el de efectivo sin foto', all(bool(m.get('comp')) == (m['metodo'] == 'transferencia') for m in mis), mis)
 
         # 3) desde la ficha de un cliente activo no puede cobrar mensualidad
@@ -155,10 +158,15 @@ async def main():
         await pg.click('.sheet [data-act=cobrar]'); await pg.wait_for_selector('#cb-go')
         check('no puede marcar meses de mensualidad', await pg.query_selector('#cb-mens:not([hidden])') is None)
         botones = await pg.evaluate("[...document.querySelectorAll('#cb-con button')].map(b=>b.textContent.trim())")
-        check('a un cliente ya instalado no se le ofrece «Instalación»: se ofrece «Reinstalación (mudanza)»', botones == ['Reinstalación (mudanza)', 'Reconexión', 'Reclamo o visita técnica', 'Otro'], botones)
+        check('a un cliente ya instalado no se le ofrece «Instalación»: se ofrece «Reinstalación (mudanza)»', botones == ['Reinstalación (mudanza)', 'Reclamo o visita técnica', 'Otro'], botones)
         check('y viene marcado «Reclamo o visita técnica», no una instalación', await pg.evaluate("document.querySelector('#cb-con [aria-pressed=true]').textContent") == 'Reclamo o visita técnica')
         check('explica que si se mudó se cobra la reinstalación', 'ya está instalado' in await pg.inner_text('.sheet') and 'Reinstalación (mudanza)' in await pg.inner_text('.sheet'))
-        await pg.click('#cb-con [data-con=reinstalacion]'); await pg.fill('#cb-monto', '20000'); await pg.fill('#cb-nota-o', 'Mudanza a calle 9')
+        await pg.click('#cb-con [data-con=reinstalacion]'); await pg.fill('#cb-nota-o', 'Mudanza a calle 9')
+        check('«Reinstalación» viene con el precio fijo ($ 35.000) y bloqueado', await pg.input_value('#cb-monto') == '35000' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is True and 'Precio fijo: $ 35.000' in (await pg.inner_text('#cb-sum')).replace('\xa0', ' '), await pg.input_value('#cb-monto'))
+        await pg.click('#cb-con [data-con=otro]')
+        check('al pasar a «Otro» el monto se libera (queda vacío) y deja de ser fijo', await pg.input_value('#cb-monto') == '' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is False and 'Precio fijo' not in (await pg.inner_text('#cb-sum')).replace('\xa0', ' '))
+        await pg.click('#cb-con [data-con=reinstalacion]')
+        check('y al volver a «Reinstalación» vuelve el precio fijo', await pg.input_value('#cb-monto') == '35000' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is True)
         await pg.select_option('#cb-met', 'transferencia')
         check('en «Cobrar» también aparece el pedido de la foto al elegir transferencia', not await pg.evaluate("document.querySelector('#cb-comp').hidden"))
         n_antes = len(pagos_hoy(pedro_tok))
@@ -171,15 +179,24 @@ async def main():
         await pg.select_option('#cb-met', 'transferencia')
         check('y vuelve con la foto ya cargada al elegir transferencia de nuevo', not await pg.evaluate("document.querySelector('#cb-comp').hidden") and not await pg.evaluate("document.querySelector('#cb-comp-img').hidden"))
         await pg.click('#cb-go'); await pg.wait_for_selector('.rc', timeout=8000)
-        check('cobra la reinstalación (mudanza) y el recibo lo dice', 'Reinstalación' in await pg.inner_text('.rc') and '20.000' in await pg.inner_text('.rc'), await pg.inner_text('.rc'))
+        check('cobra la reinstalación (mudanza) y el recibo lo dice', 'Reinstalación' in await pg.inner_text('.rc') and '35.000' in await pg.inner_text('.rc'), await pg.inner_text('.rc'))
         await pg.click('.sheet [data-close]')
         mis = pagos_hoy(pedro_tok)
-        check('el servidor guardó la reinstalación a nombre del técnico', any(m['concepto'] == 'reinstalacion' and m['monto'] == 20000 and m['por'] == pedro['id'] for m in mis), mis)
+        check('el servidor guardó la reinstalación a nombre del técnico', any(m['concepto'] == 'reinstalacion' and m['monto'] == 35000 and m['por'] == pedro['id'] for m in mis), mis)
         # el cierre de una orden de instalación sobre un cliente ya instalado (mudanza) propone reinstalación
         await pg.evaluate("openFinishOrder(S.ordenes.get('o6'))")
         await pg.wait_for_selector('#ff-cobro')
         optsc = await pg.evaluate("[...document.querySelectorAll('#ff-con option')].map(o=>o.value)")
-        check('al cerrar una instalación sobre un cliente instalado propone «Reinstalación» y no ofrece «Instalación»', await pg.input_value('#ff-con') == 'reinstalacion' and 'instalacion' not in optsc, optsc)
+        check('al cerrar una instalación sobre un cliente instalado propone «Reinstalación» y no ofrece «Instalación»', await pg.input_value('#ff-con') == 'reinstalacion' and 'instalacion' not in optsc and 'reconexion' not in optsc, optsc)
+        await pg.check('#ff-cobro')
+        check('al cerrar la orden, la reinstalación viene con el precio fijo y bloqueado', await pg.input_value('#ff-monto') == '35000' and await pg.evaluate("document.querySelector('#ff-monto').readOnly") is True and 'Precio fijo: $ 35.000' in (await pg.inner_text('#ff-fijo')).replace('\xa0', ' '), await pg.input_value('#ff-monto'))
+        await pg.select_option('#ff-con', 'otro')
+        check('si elige «Otro» el monto queda libre', await pg.input_value('#ff-monto') == '' and await pg.evaluate("document.querySelector('#ff-monto').readOnly") is False)
+        await pg.click('.sheet [data-close]')
+        # una reconexión no se cobra: la orden se cierra sin la opción de cobrar
+        await pg.evaluate("openFinishOrder(S.ordenes.get('o7'))")
+        await pg.wait_for_selector('#ff-res')
+        check('al cerrar una orden de reconexión no se ofrece cobrar', await pg.query_selector('#ff-cobro') is None)
         await pg.click('.sheet [data-close]')
         # el técnico no se entera de quién está activo o suspendido por falta de pago
         await pg.evaluate("openClient('e')")
@@ -228,7 +245,7 @@ async def main():
         filas = await pg3.evaluate("[...document.querySelectorAll('#cb-caja table tbody tr')].map(r=>[...r.cells].map(c=>c.textContent.trim()))")
         por = {f[0]: f for f in filas}
         check('la caja separa lo que cobró cada persona', set(por) == {'Pedro', 'Laura'}, filas)
-        check('Pedro: 3 recibos (instalación 15.000 en efectivo, reclamo 3.500 y reinstalación 20.000 por transferencia): efectivo 15.000, otros medios 23.500, total 38.500', por['Pedro'][1] == '3' and '15.000' in por['Pedro'][2] and '23.500' in por['Pedro'][3] and '38.500' in por['Pedro'][4], por['Pedro'])
+        check('Pedro: 3 recibos (instalación 65.000 en efectivo, reclamo 3.500 y reinstalación 35.000 por transferencia): efectivo 65.000, otros medios 38.500, total 103.500', por['Pedro'][1] == '3' and '65.000' in por['Pedro'][2] and '38.500' in por['Pedro'][3] and '103.500' in por['Pedro'][4], por['Pedro'])
         check('en la caja, los cobros por transferencia del técnico llevan «Con comprobante»', caja.count('Con comprobante') == 2, caja.count('Con comprobante'))
         rid_t = await pg3.evaluate("[...S.pagos.values()].find(p => p.por && p.metodo === 'transferencia' && p.concepto === 'reinstalacion').recibo")
         await pg3.evaluate("openReceipt(%s)" % json.dumps(rid_t))
@@ -241,7 +258,7 @@ async def main():
         check('la oficina sí ve los servicios adicionales del cliente', 'Multimedia' in row_l and 'Multimedia Net' in row_l, row_l)
         check('la oficina sí ve si el cliente está activo o suspendido', await pg3.evaluate("S.clientes.get('a').estado === 'activo' && S.clientes.get('e').estado === 'suspendido'"))
         check('Laura: 1 recibo de 20.000 en efectivo', por['Laura'][1] == '1' and '20.000' in por['Laura'][2] and '20.000' in por['Laura'][4], por['Laura'])
-        check('el total de la caja del día suma todo (58.500)', '58.500' in caja, caja[:200])
+        check('el total de la caja del día suma todo (123.500)', '123.500' in caja, caja[:200])
         check('cada cobro dice quién lo hizo', 'cobró Pedro' in caja and 'cobró Laura' in caja)
 
         # 5b) el administrador mira la app como la ve Pedro: «Mis cobros» muestra solo lo de Pedro y tampoco ve el estado de los clientes
@@ -252,7 +269,7 @@ async def main():
         await pg5.click('#tabs [data-tab=miscobros]')
         await pg5.wait_for_selector('#mc-body .kpi')
         mc = await pg5.inner_text('#mc-body')
-        check('en la vista como Pedro, «Mis cobros» suma solo lo de Pedro (38.500) y no lo de la oficina', '38.500' in mc and '58.500' not in mc and 'Laura' not in mc, mc[:300])
+        check('en la vista como Pedro, «Mis cobros» suma solo lo de Pedro (103.500) y no lo de la oficina', '103.500' in mc and '123.500' not in mc and 'Laura' not in mc, mc[:300])
         chips5 = await pg5.evaluate("['a', 'e'].map(id => { const d = document.createElement('div'); d.innerHTML = clientRow(S.clientes.get(id)); return d.textContent; })")
         check('y en esa vista la lista de clientes no muestra Activo, Suspendido ni Multimedia', not any(ESTADO_PAGO.search(c) or 'ultimedia' in c for c in chips5), chips5)
         await ctx5.close()
@@ -270,6 +287,29 @@ async def main():
         check('abierta con los datos del celular no dice «sin permiso»: avisa que está cargando los cobros', 'No tenés permiso' not in txt and 'Cargando los cobros' in txt, txt)
         await pg3.wait_for_function("document.querySelector('#cb-caja') && document.querySelector('#cb-caja').textContent.includes('Por cobrador')", timeout=15000)
         check('al llegar la sincronización muestra la caja completa y sin errores', await pg3.evaluate("!S.errors.pagos") and 'Pedro' in await pg3.inner_text('#cb-caja'))
+
+        # 7) el administrador cambia los precios en Ajustes: llegan solos al técnico, que cobra el nuevo; por afuera el viejo se rechaza
+        ctx7 = await nuevo(); pg7 = await login(ctx7, 'mauro', 'claveSegura1')
+        await pg7.click('#tabs [data-tab=ajustes]'); await pg7.wait_for_selector('#aj-pi')
+        check('en Ajustes el administrador ve «Precios de instalación» con 65000 y 35000', await pg7.input_value('#aj-pi') == '65000' and await pg7.input_value('#aj-pr') == '35000')
+        await pg7.fill('#aj-pi', '0'); await pg7.click('#aj-pre button[type=submit]')
+        await pg7.wait_for_function("document.querySelector('#toastRoot').textContent.includes('mayores que cero')", timeout=4000)
+        check('un precio en cero no se guarda', await pg7.evaluate("S.ajustes.precioInstalacion") == 65000)
+        await pg7.fill('#aj-pi', '70.000'); await pg7.fill('#aj-pr', '38000'); await pg7.click('#aj-pre button[type=submit]')
+        await pg7.wait_for_function("S.ajustes.precioInstalacion === 70000 && S.ajustes.precioReinstalacion === 38000", timeout=6000)
+        await pg.wait_for_function("S.ajustes.precioInstalacion === 70000", timeout=8000)
+        check('el técnico recibe el precio nuevo sin recargar la app', await pg.evaluate("precioFijo('instalacion') === 70000 && precioFijo('reinstalacion') === 38000"))
+        await pg.evaluate("openCobro('d')"); await pg.wait_for_selector('#cb-go')
+        check('y el cobro ya viene con $ 70.000, bloqueado', await pg.input_value('#cb-monto') == '70000' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is True)
+        await pg.click('#cb-go'); await pg.wait_for_selector('.rc', timeout=8000)
+        check('cobra al precio nuevo y el recibo lo dice', '70.000' in await pg.inner_text('.rc'))
+        await pg.click('.sheet [data-close]')
+        check('el servidor guardó 70.000', any(m['concepto'] == 'instalacion' and m['monto'] == 70000 for m in pagos_hoy(pedro_tok)), pagos_hoy(pedro_tok))
+        st, j = api('PATCH', '/api/doc/pagos/' + hoy[:4] + '-s00', {'data': {'items': {'x2': {'c': 'd', 'concepto': 'instalacion', 'monto': 65000, 'metodo': 'efectivo', 'fecha': hoy, 'recibo': 'RX2'}}}}, pedro_tok)
+        check('por afuera, el precio viejo (o cualquier otro) se rechaza y dice cuál es el vigente', st == 403 and '70.000' in (j or {}).get('error', ''), (st, j))
+        st, j = api('PUT', '/api/doc/ajustes/general', {'data': {'empresa': 'x', 'precioInstalacion': 1}}, pedro_tok)
+        check('y el técnico no puede cambiar los precios por afuera', st == 403, (st, j))
+        await ctx7.close()
         await ctx.close(); await br.close()
     print('\nERRORES:', 'ninguno' if not ERR else ERR)
     print(f'{sum(res)} ok, {len(res) - sum(res)} con fallas')

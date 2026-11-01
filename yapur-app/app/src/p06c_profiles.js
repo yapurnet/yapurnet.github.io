@@ -1,7 +1,7 @@
 /* ===== ajustes y usuarios del equipo (solo administrador) ===== */
 async function saveAjustes(patch){
   const next=Object.assign({},S.ajustes,patch);
-  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null});
+  await S.db.doc('ajustes/general').set({empresa:next.empresa,diaVenc:next.diaVenc||10,ciclos:next.ciclos||null,feriados:Array.isArray(next.feriados)?next.feriados:null,servicios:Array.isArray(next.servicios)?next.servicios:null,promesaMax:Number(next.promesaMax)||10,recibo:next.recibo&&typeof next.recibo==='object'?next.recibo:null,precioInstalacion:precioFijo('instalacion',next),precioReinstalacion:precioFijo('reinstalacion',next)});
 }
 function permsBoxHTML(base,cur){
   const defs=PERM_DEF[base];let g='',html='';
@@ -143,6 +143,11 @@ VIEWS.ajustes={
     el.innerHTML=`<div class="card"><h2>Empresa</h2><form class="form" id="aj-emp" novalidate>
       ${F('Nombre que se muestra arriba','aj-nombre',`<input id="aj-nombre" value="${esc(S.ajustes.empresa)}">`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar</button></div></form></div>
+    <div class="card"><h2>Precios de instalación</h2><p class="muted small">Son los montos que cobra el técnico en la calle: él no puede cambiarlos ni poner otro importe. Solo vos podés modificarlos. La reconexión no se cobra.</p>
+      <form class="form" id="aj-pre" novalidate><div class="grid2">
+      ${F('Instalación','aj-pi',`<input id="aj-pi" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('instalacion'))}">`)}
+      ${F('Reinstalación (mudanza)','aj-pr',`<input id="aj-pr" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('reinstalacion'))}">`,'Suele ser la mitad de la instalación, redondeada.')}</div>
+      <div class="actions start"><button class="btn primary" type="submit">Guardar precios</button></div></form></div>
     <div class="card"><h2>Datos del recibo</h2><p class="muted small">Es lo que sale arriba y abajo de cada recibo, como en tu recibo de papel. Se carga una sola vez.</p>
       <form class="form" id="aj-rec" novalidate>
       ${F('Nombre comercial (arriba del recibo)','aj-r-ley',`<input id="aj-r-ley" value="${esc((S.ajustes.recibo||{}).leyenda||'')}" autocomplete="off" placeholder="Soluciones Informáticas">`)}
@@ -183,6 +188,10 @@ VIEWS.ajustes={
       const nombre=$('#aj-nombre',el).value.trim();
       if(!nombre)return toast('Falta el nombre','bad');
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
+    $('#aj-pre',el).addEventListener('submit',async e=>{e.preventDefault();
+      const pi=Math.round(num($('#aj-pi',el).value)||0),pr=Math.round(num($('#aj-pr',el).value)||0);
+      if(pi<=0||pr<=0||pi>1e7||pr>1e7)return toast('Cargá los dos precios (números mayores que cero)','bad');
+      try{await saveAjustes({precioInstalacion:pi,precioReinstalacion:pr});toast('Precios guardados: instalación '+fmtMoney(pi)+' · reinstalación '+fmtMoney(pr));}catch(err){dbError(err);}});
     $('#aj-rec',el).addEventListener('submit',async e=>{e.preventDefault();
       const v=id=>$('#aj-r-'+id,el).value.trim().slice(0,200);
       const recibo={leyenda:v('ley'),razon:v('raz'),cuit:v('cuit'),iibb:v('iibb'),dom:v('dom'),tel:v('tel'),web:v('web'),pv:v('pv'),alias:$('#aj-r-ali',el).value.split(/\r?\n/).map(x=>x.trim().slice(0,80)).filter(Boolean).slice(0,6)};

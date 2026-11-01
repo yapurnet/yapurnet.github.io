@@ -222,7 +222,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
     let first=true;
     S.db.doc('ajustes/general').onSnapshot(snap=>{
       const d=snap.exists?snap.data():null;
-      S.ajustes=Object.assign({empresa:'YAPUR.NET',diaVenc:10,perfiles:[],ciclos:null,feriados:null,servicios:null,promesaMax:10},d||{},{tecnicos:[]});
+      S.ajustes=Object.assign({empresa:'YAPUR.NET',diaVenc:10,perfiles:[],ciclos:null,feriados:null,servicios:null,promesaMax:10,precioInstalacion:PRECIOS_FIJOS_DEF.instalacion,precioReinstalacion:PRECIOS_FIJOS_DEF.reinstalacion},d||{},{tecnicos:[]});
       if(!Array.isArray(S.ajustes.perfiles))S.ajustes.perfiles=[];
       deriveTecnicos();delete S.errors.ajustes;S.loaded.ajustes=true;
       if(first){first=false;res();}else{rebuildDerived();onAjustesChanged();}
