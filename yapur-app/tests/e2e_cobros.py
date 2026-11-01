@@ -1,4 +1,4 @@
-# Cobros del técnico en la calle (instalación y reinstalación a precio fijo, reclamos, otros; la reconexión no se cobra) y cierre de caja por cobrador.
+# Cobros del técnico en la calle (instalación y reinstalación a precio fijo, reclamos, otros; la reconexión la cobra solo la oficina y solo con deuda) y cierre de caja por cobrador.
 # Chromium real contra el servidor de verdad (workerd).
 import asyncio, base64, json, os, re, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
@@ -70,6 +70,8 @@ async def main():
         'd': {'nombre': 'Darío Instalar', 'estado': 'pendiente', 'planId': 'p1', 'dir': 'Calle 4', 'tel': '3844000004'},
         'e': {'nombre': 'Elena Suspendida', 'estado': 'suspendido', 'corteMora': '2026-10-20', 'extras': ['multimedia', 'multimedia_net'], 'planId': 'p1', 'dir': 'Calle 5', 'tel': '3844000005', 'desde': cur}}.items():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
+    # Elena debe: tiene deuda anterior pendiente (el resto de los clientes están al día o por instalar)
+    api('PATCH', '/api/doc/clientes/' + shard('e'), {'data': {'items': {'e': {'deudaAnt': {'m': 15000, 'det': 'Meses anteriores'}}}}}, TA)
     for oid, cid, tec in (('o1', 'd', pedro['id']), ('o2', 'a', pedro['id']), ('o3', 'a', sin['id']), ('o4', 'a', pedro['id']), ('o5', 'e', pedro['id']), ('o6', 'a', pedro['id']), ('o7', 'e', pedro['id'])):
         api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {oid: {'tipo': 'instalacion' if oid in ('o1', 'o6') else ('visita' if oid == 'o4' else ('reconexion' if oid == 'o7' else 'falla')), 'clientId': cid, 'estado': 'en_curso', 'prioridad': 'normal', 'fecha': hoy, 'creado': hoy, 'tecnico': tec}}}}, TA)
     async with async_playwright() as p:
@@ -193,10 +195,10 @@ async def main():
         await pg.select_option('#ff-con', 'otro')
         check('si elige «Otro» el monto queda libre', await pg.input_value('#ff-monto') == '' and await pg.evaluate("document.querySelector('#ff-monto').readOnly") is False)
         await pg.click('.sheet [data-close]')
-        # una reconexión no se cobra: la orden se cierra sin la opción de cobrar
+        # el técnico no cobra la reconexión: la orden se cierra sin la opción de cobrar (aunque el cliente deba)
         await pg.evaluate("openFinishOrder(S.ordenes.get('o7'))")
         await pg.wait_for_selector('#ff-res')
-        check('al cerrar una orden de reconexión no se ofrece cobrar', await pg.query_selector('#ff-cobro') is None)
+        check('al cerrar una orden de reconexión el técnico no puede cobrar', await pg.query_selector('#ff-cobro') is None)
         await pg.click('.sheet [data-close]')
         # el técnico no se entera de quién está activo o suspendido por falta de pago
         await pg.evaluate("openClient('e')")
@@ -236,6 +238,21 @@ async def main():
         check('la oficina sí ve «Mensualidad» como concepto', 'Mensualidad' in await pg3.inner_text('#cb-con'))
         await pg3.fill('#cb-monto', '20000'); await pg3.click('#cb-go')
         await pg3.wait_for_selector('.rc', timeout=8000)
+        await pg3.click('.sheet [data-close]')
+        # la reconexión solo se cobra si el cliente tiene deuda (y solo desde la oficina)
+        await pg3.evaluate("openCobro('e')"); await pg3.wait_for_selector('#cb-go')
+        check('la oficina puede cobrar «Reconexión» a un cliente con deuda', 'Reconexión' in await pg3.inner_text('#cb-con'), await pg3.inner_text('#cb-con'))
+        await pg3.click('#cb-con [data-con=reconexion]')
+        check('la reconexión es de monto libre y avisa que se cobra antes de cargar el pago de la deuda', await pg3.input_value('#cb-monto') == '' and await pg3.evaluate("document.querySelector('#cb-monto').readOnly") is False and 'antes que el pago de la deuda' in await pg3.inner_text('#cb-sum'), await pg3.inner_text('#cb-sum'))
+        await pg3.click('.sheet [data-close]')
+        await pg3.evaluate("openCobro('a')"); await pg3.wait_for_selector('#cb-go')
+        check('a un cliente al día no se le ofrece «Reconexión»', 'Reconexión' not in await pg3.inner_text('#cb-con'), await pg3.inner_text('#cb-con'))
+        await pg3.click('.sheet [data-close]')
+        await pg3.evaluate("openFinishOrder(S.ordenes.get('o7'))"); await pg3.wait_for_selector('#ff-res')
+        check('al cerrar una reconexión de un cliente con deuda, la oficina puede cobrar y viene como «Reconexión»', await pg3.query_selector('#ff-cobro') is not None and await pg3.input_value('#ff-con') == 'reconexion')
+        await pg3.click('.sheet [data-close]')
+        await pg3.evaluate("openFinishOrder({id: 'xr', tipo: 'reconexion', clientId: 'a', estado: 'pendiente'})"); await pg3.wait_for_selector('#ff-res')
+        check('al cerrar una reconexión de un cliente al día no se ofrece cobrar', await pg3.query_selector('#ff-cobro') is None)
         await pg3.click('.sheet [data-close]')
         await pg3.click('#tabs [data-tab=cobranzas]')
         await pg3.click('#cb-sub [data-s=caja]')

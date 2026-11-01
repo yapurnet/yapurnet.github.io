@@ -383,7 +383,7 @@ const PERMS=[
   ['caja','Ver la caja del día y los morosos','','Dinero'],
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
-  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones. Queda a su nombre y suma a la caja del día.','Dinero'],
+  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones (la reconexión la cobra la oficina, solo si el cliente tiene deuda). Queda a su nombre y suma a la caja del día.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']
@@ -591,6 +591,8 @@ function cutState(c){
 }
 /* suspendido por mora en la app y ya sin motivo para seguir cortado */
 const aReconectar=c=>c.estado==='suspendido'&&!!c.corteMora&&['ok','plazo','vencido','promesa'].includes(cutState(c).k);
+/* «Reconexión» se cobra solo si el cliente tiene deuda (deuda anterior pendiente o meses vencidos). Lo cobra la oficina: el técnico no ve la deuda y el servidor no lo deja cobrarla */
+const conDeuda=c=>!!c&&(deudaAntRest(c)>0||billing(c,true).vencidos>0);
 function cutLine(c){
   const s=cutState(c),b=s.b;if(!b.aplica||b.price<=0)return null;
   if(s.k==='suspendido')return {cls:'bad',txt:`Suspendido por falta de pago${c.corteMora?' desde el '+dmy(c.corteMora):''}. Debe ${fmtMoney(b.deuda)}.`};
@@ -2182,7 +2184,7 @@ VIEWS.ajustes={
     el.innerHTML=`<div class="card"><h2>Empresa</h2><form class="form" id="aj-emp" novalidate>
       ${F('Nombre que se muestra arriba','aj-nombre',`<input id="aj-nombre" value="${esc(S.ajustes.empresa)}">`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar</button></div></form></div>
-    <div class="card"><h2>Precios de instalación</h2><p class="muted small">Son los montos que cobra el técnico en la calle: él no puede cambiarlos ni poner otro importe. Solo vos podés modificarlos. La reconexión no se cobra.</p>
+    <div class="card"><h2>Precios de instalación</h2><p class="muted small">Son los montos que cobra el técnico en la calle: él no puede cambiarlos ni poner otro importe. Solo vos podés modificarlos. La reconexión no la cobra el técnico: la oficina la cobra solo si el cliente tiene deuda.</p>
       <form class="form" id="aj-pre" novalidate><div class="grid2">
       ${F('Instalación','aj-pi',`<input id="aj-pi" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('instalacion'))}">`)}
       ${F('Reinstalación (mudanza)','aj-pr',`<input id="aj-pr" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('reinstalacion'))}">`,'Suele ser la mitad de la instalación, redondeada.')}</div>
@@ -3018,9 +3020,9 @@ function openOrderForm({id,clientId}){
     });
   }});
 }
-/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión no se cobra: si el cliente debe, paga la deuda en la oficina */
-const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo'};
-const puedeCobrarOrden=(c,o)=>!!c&&!!o&&o.tipo!=='reconexion'&&(can('cobrar')||can('cobrarCampo'));
+/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión solo se cobra si el cliente tiene deuda y la cobra la oficina: el técnico nunca */
+const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo',reconexion:'reconexion'};
+const puedeCobrarOrden=(c,o)=>!!c&&!!o&&(o.tipo==='reconexion'?can('cobrar')&&conDeuda(c):(can('cobrar')||can('cobrarCampo')));
 function cobroOrdenHTML(o,c){
   const lista=conceptosCobro(c,soloCampo());
   let con0=CONC_ORD[o.tipo]||'otro';
@@ -3876,7 +3878,7 @@ function openAnular(recibo){
    Se aplica a quien cobra en la calle; el servidor lo controla igual. */
 const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
 function conceptosCobro(c,campo){
-  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&k!=='reconexion'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(k==='reconexion'?!campo&&conDeuda(c):(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion'))));
 }
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
@@ -3917,7 +3919,8 @@ function openCobro(clientId,con1,pre){
       }else{
         const pf=precioFijo(con);
         h.className='hint';
-        h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
+        if(con==='reconexion')h.textContent='Se cobra porque el cliente tiene deuda. Cargá la reconexión antes que el pago de la deuda: cuando la deuda queda en cero ya no se puede cobrar.';
+        else h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
       }
     };
     /* instalación y reinstalación: el monto lo pone el sistema (el técnico no puede cambiarlo; la oficina lo ve ya completado y puede ajustarlo) */
@@ -4388,7 +4391,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='cea56fe2a4';
+const BUILD='fa306b86c3';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

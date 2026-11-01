@@ -115,7 +115,7 @@ function canWrite(u, p, coll, op) {
 }
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
-const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reclamo', 'otro'];   // la reconexión no se cobra (solo la deuda, y eso lo cobra la oficina)
+const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reclamo', 'otro'];   // la reconexión no la cobra el técnico (la cobra la oficina, y solo si el cliente tiene deuda)
 /* Precios fijos: los define el administrador en Ajustes; quien cobra en la calle no puede cambiarlos. Si todavía no se cargaron rigen estos. */
 const PRECIO_KEYS = { instalacion: 'precioInstalacion', reinstalacion: 'precioReinstalacion' };
 const PRECIO_DEF = { instalacion: 65000, reinstalacion: 35000 };

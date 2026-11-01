@@ -76,7 +76,7 @@ const PERMS=[
   ['caja','Ver la caja del día y los morosos','','Dinero'],
   ['anular','Anular recibos','','Dinero'],
   ['promesas','Dar promesas de pago','Posponer el corte unos días a un cliente que no llega a pagar.','Dinero'],
-  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones. Queda a su nombre y suma a la caja del día.','Dinero'],
+  ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones (la reconexión la cobra la oficina, solo si el cliente tiene deuda). Queda a su nombre y suma a la caja del día.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']
@@ -284,6 +284,8 @@ function cutState(c){
 }
 /* suspendido por mora en la app y ya sin motivo para seguir cortado */
 const aReconectar=c=>c.estado==='suspendido'&&!!c.corteMora&&['ok','plazo','vencido','promesa'].includes(cutState(c).k);
+/* «Reconexión» se cobra solo si el cliente tiene deuda (deuda anterior pendiente o meses vencidos). Lo cobra la oficina: el técnico no ve la deuda y el servidor no lo deja cobrarla */
+const conDeuda=c=>!!c&&(deudaAntRest(c)>0||billing(c,true).vencidos>0);
 function cutLine(c){
   const s=cutState(c),b=s.b;if(!b.aplica||b.price<=0)return null;
   if(s.k==='suspendido')return {cls:'bad',txt:`Suspendido por falta de pago${c.corteMora?' desde el '+dmy(c.corteMora):''}. Debe ${fmtMoney(b.deuda)}.`};

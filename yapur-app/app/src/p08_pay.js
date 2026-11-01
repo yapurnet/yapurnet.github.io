@@ -141,7 +141,7 @@ function openAnular(recibo){
    Se aplica a quien cobra en la calle; el servidor lo controla igual. */
 const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
 function conceptosCobro(c,campo){
-  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&k!=='reconexion'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(k==='reconexion'?!campo&&conDeuda(c):(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion'))));
 }
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
@@ -182,7 +182,8 @@ function openCobro(clientId,con1,pre){
       }else{
         const pf=precioFijo(con);
         h.className='hint';
-        h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
+        if(con==='reconexion')h.textContent='Se cobra porque el cliente tiene deuda. Cargá la reconexión antes que el pago de la deuda: cuando la deuda queda en cero ya no se puede cobrar.';
+        else h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
       }
     };
     /* instalación y reinstalación: el monto lo pone el sistema (el técnico no puede cambiarlo; la oficina lo ve ya completado y puede ajustarlo) */
