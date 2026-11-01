@@ -86,6 +86,37 @@ function gpsStart(onProgress){
   timer=setTimeout(()=>finish(),25000);
   return {promise,stop:()=>finish()};
 }
+/* Posición de un lugar fijo (la base): en vez de quedarse con UNA lectura, junta varias y las promedia dando más peso a las más precisas.
+   Una sola lectura de un celular puede estar corrida varios metros; el promedio de 10 ronda bastante mejor el punto real.
+   Termina con 10 lecturas, 20 s después de la primera, 30 s en total, o cuando se la frena. Devuelve {lat,lng,acc,n}:
+   acc es la mejor precisión que informó el GPS (no se divide por la raíz de n: las lecturas seguidas se parecen entre sí y eso sería prometer de más). */
+function gpsPromedio(onProgress){
+  const S=[];let done=false,lastErr=null,id=null,t1=null,t2=null,res,rej;
+  const promise=new Promise((a,b)=>{res=a;rej=b;});
+  const finish=err=>{
+    if(done)return;done=true;
+    try{if(id!==null)navigator.geolocation.clearWatch(id);}catch(e){}
+    clearTimeout(t1);clearTimeout(t2);
+    if(!S.length)return rej(err||lastErr||{code:3});
+    const best=Math.min(...S.map(x=>x.acc)),use=S.filter(x=>x.acc<=Math.max(30,best*2));
+    let w=0,la=0,ln=0;
+    for(const x of use){const k=1/(Math.max(x.acc,3)**2);w+=k;la+=x.lat*k;ln+=x.lng*k;}
+    res({lat:la/w,lng:ln/w,acc:best,n:use.length});
+  };
+  if(!navigator.geolocation){done=true;rej({code:0});return {promise,stop(){}};}
+  try{
+    id=navigator.geolocation.watchPosition(p=>{
+      const c=p.coords,r={lat:c.latitude,lng:c.longitude,acc:Number(c.accuracy)||0};
+      if(!isFinite(r.lat)||!isFinite(r.lng))return;
+      S.push(r);
+      if(S.length===1)t2=setTimeout(()=>finish(),20000);
+      if(onProgress)onProgress({n:S.length,acc:Math.min(...S.map(x=>x.acc))});
+      if(S.length>=10)finish();
+    },e=>{lastErr=e;if(e&&e.code===1)finish(e);},{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  }catch(e){done=true;rej({code:0});return {promise,stop(){}};}
+  t1=setTimeout(()=>finish(),30000);
+  return {promise,stop:()=>finish()};
+}
 function gpsErrorText(e){
   const c=e&&e.code;
   if(c===0)return 'Este navegador no permite usar el GPS.';

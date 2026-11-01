@@ -889,7 +889,8 @@ export class YapurDB extends DurableObject {
        · INGRESO: la primera posición del día dentro del radio de la base.
        · REGRESO: cada vez que, después de haber salido, vuelve a entrar al radio. El último regreso del día es el fin de la jornada
          (los técnicos vuelven a la base a guardar los vehículos); si sale otra vez, ese regreso deja de ser el último.
-     Para que una posición pegada al borde del radio no cuente como entrar y salir, se «sale» recién a 1,5 veces el radio.
+     Para que una posición pegada al borde del radio no cuente como entrar y salir, se «sale» recién a 1,5 veces el radio. Una posición cuya precisión es peor que el radio (o que 50 m)
+     no se usa para decidir nada.
      La hora es la del servidor (o la de la posición, que el servidor limita a los últimos 15 minutos). Si el técnico nunca pasa por la base, puede
      tocar «Iniciar jornada» (queda marcado como manual, con la distancia a la base). Solo se guardan horas y distancias, nunca coordenadas.
      El técnico ve un aviso en su pantalla hasta que toca «Entendido» (queda anotado), pero el registro no depende de eso. */
@@ -900,7 +901,7 @@ export class YapurDB extends DurableObject {
     if (!isPlain(b)) b = {};
     const lat = Number(b.lat), lng = Number(b.lng);
     const base = b.lat != null && b.lng != null && isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
-    const radio = Number.isInteger(b.radio) && b.radio >= 30 && b.radio <= 2000 ? b.radio : 150;
+    const radio = Number.isInteger(b.radio) && b.radio >= 20 && b.radio <= 2000 ? b.radio : 40;
     const tol = Number.isInteger(b.tol) && b.tol >= 0 && b.tol <= 120 ? b.tol : JORNADA_TOL;
     const dias = Array.isArray(b.dias) ? [...new Set(b.dias.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [1, 2, 3, 4, 5, 6];   // 0 = domingo
     return { base, radio, tol, dias };
@@ -921,7 +922,8 @@ export class YapurDB extends DurableObject {
   /* se llama con cada posición guardada, en orden */
   jornadaAuto(u, ts, lat, lng, acc) {
     const c = this.jornadaBase();
-    if (!c.base || (isFinite(acc) && acc > 300)) return;   // sin base, o una posición demasiado imprecisa para decir si está adentro o afuera
+    /* sin base, o una posición demasiado imprecisa para decir si está adentro o afuera: si el GPS dice «±80 m» y el radio es de 40, no sirve para ninguna de las dos cosas */
+    if (!c.base || (isFinite(acc) && acc > Math.max(c.radio, 50))) return;
     const dia = arTime(ts).fecha, d = distM(lat, lng, c.base.lat, c.base.lng), f = this.jornadaFila(u.id, dia), now = Date.now();
     if (!f) {
       if (d <= c.radio) this.sql.exec('INSERT OR IGNORE INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult) VALUES(?,?,?,?,?,1,?)', u.id, dia, Math.min(ts, now), 'base', d, ts);
@@ -1081,7 +1083,7 @@ export class YapurDB extends DurableObject {
       await this.needAdmin(request);
       const b = readBody(raw, 2e3), pos = this.jornadaPos(b), radio = Number(b.radio), tol = Number(b.tol);
       if (b.lat != null && b.lng != null && !pos) throw httpErr(400, 'La ubicación de la base no es válida.');
-      if (!Number.isInteger(radio) || radio < 30 || radio > 2000) throw httpErr(400, 'El radio tiene que estar entre 30 y 2000 metros.');
+      if (!Number.isInteger(radio) || radio < 20 || radio > 2000) throw httpErr(400, 'El radio tiene que estar entre 20 y 2000 metros.');
       if (!Number.isInteger(tol) || tol < 0 || tol > 120) throw httpErr(400, 'La tolerancia tiene que estar entre 0 y 120 minutos.');
       if (!Array.isArray(b.dias) || b.dias.some(d => !Number.isInteger(d) || d < 0 || d > 6)) throw httpErr(400, 'Los días de trabajo no son válidos.');
       this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'jornada_base', JSON.stringify({ lat: pos ? Math.round(pos.lat * 1e6) / 1e6 : null, lng: pos ? Math.round(pos.lng * 1e6) / 1e6 : null, radio, tol, dias: [...new Set(b.dias)].sort() }));
