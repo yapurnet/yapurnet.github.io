@@ -3996,7 +3996,7 @@ function compHTML(px){
   return `<div class="fgroup" id="${px}-comp" hidden><div class="legend">Comprobante de la transferencia *</div>
     <div class="hint">Sacale una foto al comprobante con la cámara, o elegí la captura que te mandó el cliente. Sin la foto no se registra el cobro.</div>
     <div class="actions start"><button class="btn small primary" type="button" id="${px}-comp-k">Sacar foto con la cámara</button><button class="btn small" type="button" id="${px}-comp-b">Elegir una foto</button>
-      <input id="${px}-comp-c" type="file" accept="image/*" capture="environment" hidden><input id="${px}-comp-f" type="file" accept="image/*" hidden></div>
+      <input id="${px}-comp-c" type="file" accept="image/*" capture="environment" hidden><input id="${px}-comp-f" type="file" hidden></div>
     <img id="${px}-comp-img" class="comp-thumb" alt="Foto del comprobante" hidden><div class="hint" id="${px}-comp-st"></div></div>`;
 }
 function mountComp(el,px,getMetodo){
@@ -4396,7 +4396,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='7b6718062b';
+const BUILD='e9770ef01d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

@@ -259,7 +259,7 @@ function compHTML(px){
   return `<div class="fgroup" id="${px}-comp" hidden><div class="legend">Comprobante de la transferencia *</div>
     <div class="hint">Sacale una foto al comprobante con la cámara, o elegí la captura que te mandó el cliente. Sin la foto no se registra el cobro.</div>
     <div class="actions start"><button class="btn small primary" type="button" id="${px}-comp-k">Sacar foto con la cámara</button><button class="btn small" type="button" id="${px}-comp-b">Elegir una foto</button>
-      <input id="${px}-comp-c" type="file" accept="image/*" capture="environment" hidden><input id="${px}-comp-f" type="file" accept="image/*" hidden></div>
+      <input id="${px}-comp-c" type="file" accept="image/*" capture="environment" hidden><input id="${px}-comp-f" type="file" hidden></div>
     <img id="${px}-comp-img" class="comp-thumb" alt="Foto del comprobante" hidden><div class="hint" id="${px}-comp-st"></div></div>`;
 }
 function mountComp(el,px,getMetodo){

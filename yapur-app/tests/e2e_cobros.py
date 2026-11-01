@@ -139,7 +139,7 @@ async def main():
         txt_ff = await pg.inner_text('#ff-comp')
         check('al terminar la orden se puede sacar la foto con la cámara o elegir una', 'Sacar foto con la cámara' in txt_ff and 'Elegir una foto' in txt_ff, txt_ff)
         attrs = await pg.evaluate("(() => { const c = document.querySelector('#ff-comp-c'), f = document.querySelector('#ff-comp-f'); return [c.type, c.getAttribute('capture'), c.accept, f.type, f.hasAttribute('capture'), f.accept]; })()")
-        check('«Sacar foto con la cámara» abre la cámara directo (capture) y «Elegir una foto» no', attrs == ['file', 'environment', 'image/*', 'file', False, 'image/*'], attrs)
+        check('«Sacar foto con la cámara» abre la cámara directo (capture) y «Elegir una foto» no', attrs == ['file', 'environment', 'image/*', 'file', False, ''], attrs)
         await pg.click('#fform button[type=submit]')
         await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('foto del comprobante')", timeout=4000)
         check('sin la foto no se cierra la orden ni se cobra nada', (await pg.evaluate("S.ordenes.get('o2').estado")) == 'en_curso' and len(pagos_hoy(pedro_tok)) == 1, pagos_hoy(pedro_tok))
