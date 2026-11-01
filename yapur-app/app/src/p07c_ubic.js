@@ -224,7 +224,7 @@ function tecRender(){
   const banner=sin.length?`<div class="notice" role="status" id="tu-alerta" style="margin-bottom:12px"><b>${sin.length===1?'1 técnico sin señal':sin.length+' técnicos sin señal'}:</b> ${sin.map(t=>esc(t.nombre)+(t.ultima?' ('+esc(haceTxt(t.ultima.ts))+')':' (no mandó nada hoy)')).join(', ')}.</div>`:'';
   const sinIng=list.filter(t=>tecSinIngreso(t,d));
   const bannerIng=sinIng.length?`<div class="notice bad" role="status" id="tu-ingreso" style="margin-bottom:12px"><b>Sin ingreso hoy:</b> ${sinIng.map(t=>esc(t.nombre)).join(', ')}.</div>`:'';
-  const jc=d.jornada||{tol:10,radio:150,base:null,dias:[1,2,3,4,5,6]},DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const jc=d.jornada||{tol:10,radio:40,base:null,dias:[1,2,3,4,5,6]},DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const jb=$('#tu-base');
   if(jb)jb.textContent=`Jornada: se espera el ingreso a las ${hz.desde}:00, con ${jc.tol} min de tolerancia, ${jc.dias.length?'de '+[1,2,3,4,5,6,0].filter(x=>jc.dias.includes(x)).map(x=>DN[x]).join(', '):'ningún día'}. ${jc.base?'Base cargada (radio '+jc.radio+' m): el ingreso y el fin salen solos.':'Todavía sin base: el control de jornada está apagado. Cargala con «Base y jornada».'}`;
   out.innerHTML=list.length?`${bannerIng}${banner}<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
@@ -247,15 +247,17 @@ function openHorarioUbic(){
     });}});
 }
 function openBaseJornada(){
-  const jc=(TU.data&&TU.data.jornada)||{base:null,radio:150,tol:10,dias:[1,2,3,4,5,6]};
+  const jc=(TU.data&&TU.data.jornada)||{base:null,radio:40,tol:10,dias:[1,2,3,4,5,6]};
   const DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   openModal({title:'Base y jornada',html:`<form class="form" id="jb-form" novalidate>
     <div class="hint">La base es el lugar al que los técnicos vuelven a guardar los vehículos. La primera vez en el día que el celular de un técnico (con la app abierta) aparece dentro del radio se anota su <b>ingreso</b>; la última vez que vuelve, su <b>fin</b>.</div>
+    <div class="hint"><b>Cargala parado en el galpón</b> donde se guardan los vehículos, al aire libre y sin moverte, no en el local de adelante: la ubicación que muestra Google Maps del negocio no sirve porque queda a unos metros.</div>
     ${F('Ubicación de la base','jb-geo',`<input id="jb-geo" autocomplete="off" placeholder="-27.7345, -62.4678" value="${jc.base?jc.base.lat+', '+jc.base.lng:''}">`)}
     <div class="actions start"><button class="btn small" type="button" id="jb-gps">Usar mi ubicación actual (GPS)</button></div>
-    <div class="hint" id="jb-st">Estando en la base, tocá el botón y se completa solo.</div>
-    <div class="grid2">${F('Radio (metros)','jb-radio',`<input id="jb-radio" type="number" min="30" max="2000" step="10" inputmode="numeric" value="${jc.radio}">`)}${F('Tolerancia (minutos)','jb-tol',`<input id="jb-tol" type="number" min="0" max="120" step="1" inputmode="numeric" value="${jc.tol}">`)}</div>
+    <div class="hint" id="jb-st">Tocá el botón: junta unas 10 lecturas (hasta 20 s) y las promedia. Esperá a que diga ±10 m o menos.</div>
+    <div class="grid2">${F('Radio (metros)','jb-radio',`<input id="jb-radio" type="number" min="20" max="2000" step="5" inputmode="numeric" value="${jc.radio}">`)}${F('Tolerancia (minutos)','jb-tol',`<input id="jb-tol" type="number" min="0" max="120" step="1" inputmode="numeric" value="${jc.tol}">`)}</div>
     <div class="field"><label>Días de trabajo (los otros no cuentan como falta)</label><div class="dias">${[1,2,3,4,5,6,0].map(x=>`<label><input type="checkbox" data-dia="${x}"${jc.dias.includes(x)?' checked':''}>${DN[x]}</label>`).join('')}</div></div>
+    <div class="hint">Radio de 40 m: alcanza para el galpón y el frente. Si un técnico que está adentro del galpón no figura en la base (el GPS se corre bajo techo), subilo a 60. Una lectura con precisión peor que el radio (o que 50 m) se ignora, así no cuenta una entrada o salida falsa.</div>
     <div class="hint">La hora esperada de ingreso es el «Desde» del horario de ubicación. Pasada la tolerancia se marca «tarde» o «sin ingreso».</div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button>${jc.base?'<button class="btn ghost" type="button" id="jb-quitar">Quitar la base</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`,
     onMount(el){
@@ -263,9 +265,13 @@ function openBaseJornada(){
       const say=(c,t)=>{st.className='hint '+c;st.textContent=t;};
       gb.addEventListener('click',async()=>{
         if(run){run.stop();return;}
-        gb.textContent='Buscando señal… (tocá para usar lo mejor hasta ahora)';say('','Esperando al GPS. Estando en la base, mejor al aire libre.');
-        run=gpsStart(b=>say('','Buscando… precisión actual ±'+Math.round(b.acc)+' m'));
-        try{const r=await run.promise;geo.value=r.lat.toFixed(6)+', '+r.lng.toFixed(6);say(r.acc<=30?'ok':'bad',r.acc<=30?'Ubicación tomada (±'+Math.round(r.acc)+' m). Guardá para dejarla como base.':'Ubicación tomada, pero poco precisa (±'+Math.round(r.acc)+' m). Salí a un lugar abierto y repetí.');}
+        gb.textContent='Tomando lecturas… (tocá para terminar ahora)';say('','Esperando al GPS. Quedate quieto en el galpón, mejor al aire libre.');
+        run=gpsPromedio(b=>say('','Lecturas: '+b.n+' · mejor precisión ±'+Math.round(b.acc)+' m'));
+        try{
+          const r=await run.promise;geo.value=r.lat.toFixed(6)+', '+r.lng.toFixed(6);
+          const t='Promedio de '+r.n+(r.n===1?' lectura':' lecturas')+' (±'+Math.round(r.acc)+' m). ';
+          say(r.acc<=15?'ok':'bad',r.acc<=15?t+'Guardá para dejarla como base.':t+'Es poco precisa para una base chica: salí a un lugar abierto y repetí, o subí el radio.');
+        }
         catch(e){say('bad',gpsErrorText(e));}
         finally{run=null;gb.textContent=label;}
       });
@@ -273,7 +279,7 @@ function openBaseJornada(){
         const radio=Number($('#jb-radio',el).value),tol=Number($('#jb-tol',el).value),dias=[...el.querySelectorAll('[data-dia]')].filter(c=>c.checked).map(c=>Number(c.dataset.dia));
         const body={radio,tol,dias};
         if(!quitar&&geo.value.trim()){const g=parseCoords(geo.value);if(!g)return toast('La ubicación de la base no se entiende: pegá dos números separados por coma','bad');body.lat=g.lat;body.lng=g.lng;}
-        if(!Number.isInteger(radio)||radio<30||radio>2000)return toast('El radio tiene que estar entre 30 y 2000 metros','bad');
+        if(!Number.isInteger(radio)||radio<20||radio>2000)return toast('El radio tiene que estar entre 20 y 2000 metros','bad');
         if(!Number.isInteger(tol)||tol<0||tol>120)return toast('La tolerancia tiene que estar entre 0 y 120 minutos','bad');
         try{await NET.api('POST','/api/jornada/base',body);toast(quitar?'Base quitada':'Guardado');closeModal();tecCargar();}catch(err){toast(err.message||'No se pudo guardar','bad');}
       };

@@ -38,20 +38,24 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
 
     /* sin configurar nada */
     r = await call('GET', '/api/ubicaciones', undefined, A);
-    t('sin configurar: no hay base, 150 m, 10 min de tolerancia y de lunes a sábado', r.s === 200 && r.j.jornada.base === null && r.j.jornada.radio === 150 && r.j.jornada.tol === 10 && JSON.stringify(r.j.jornada.dias) === '[1,2,3,4,5,6]', r.j.jornada);
+    t('sin configurar: no hay base, 40 m, 10 min de tolerancia y de lunes a sábado', r.s === 200 && r.j.jornada.base === null && r.j.jornada.radio === 40 && r.j.jornada.tol === 10 && JSON.stringify(r.j.jornada.dias) === '[1,2,3,4,5,6]', r.j.jornada);
 
     t('sin base cargada la jornada está apagada: nadie figura «sin_ingreso»', r.j.tecnicos.every(x => x.jornada.estado === 'sin_base'), r.j.tecnicos.map(x => x.jornada.estado));
     r = await call('GET', '/api/jornada', undefined, P);
     t('y el técnico lo sabe (hayBase = false)', r.j.hayBase === false && r.j.fila === null, r.j);
 
     /* quién puede cargar la base */
-    const cfg = { lat: BASEPOS.lat, lng: BASEPOS.lng, radio: 150, tol: 10, dias: [0, 1, 2, 3, 4, 5, 6] };
+    const cfg = { lat: BASEPOS.lat, lng: BASEPOS.lng, radio: 40, tol: 10, dias: [0, 1, 2, 3, 4, 5, 6] };
     r = await call('POST', '/api/jornada/base', cfg, P);
     t('el técnico no puede cargar la base', r.s === 403, r);
     r = await call('POST', '/api/jornada/base', cfg, O);
     t('la oficina tampoco: solo el administrador', r.s === 403, r);
     r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { radio: 5 }), A);
-    t('un radio de 5 m no se acepta (30 a 2000)', r.s === 400, r);
+    t('un radio de 5 m no se acepta (20 a 2000)', r.s === 400, r);
+    r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { radio: 19 }), A);
+    t('un radio de 19 m tampoco', r.s === 400, r);
+    r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { radio: 2001 }), A);
+    t('ni uno de 2001 m', r.s === 400, r);
     r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { lat: 'x' }), A);
     t('una ubicación inválida no se acepta', r.s === 400, r);
     r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { dias: [7] }), A);
@@ -59,7 +63,11 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { tol: 500 }), A);
     t('una tolerancia de 500 min no se acepta', r.s === 400, r);
     r = await call('POST', '/api/jornada/base', cfg, A);
-    t('el administrador carga la base', r.s === 200 && r.j.base.lat === BASEPOS.lat && r.j.radio === 150 && r.j.dias.length === 7, r);
+    t('el administrador carga la base', r.s === 200 && r.j.base.lat === BASEPOS.lat && r.j.radio === 40 && r.j.dias.length === 7, r);
+    r = await call('POST', '/api/jornada/base', Object.assign({}, cfg, { radio: 20 }), A);
+    t('un radio de 20 m (el mínimo) sí se acepta', r.s === 200 && r.j.radio === 20, r);
+    r = await call('POST', '/api/jornada/base', cfg, A);
+    t('y vuelve a 40 m', r.s === 200 && r.j.radio === 40, r);
 
     /* el técnico ve solo lo suyo */
     r = await call('GET', '/api/jornada', undefined, P);
@@ -76,7 +84,7 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     r = await call('POST', '/api/ubicacion', { pts: [{ lat: BASEPOS.lat + 0.0003, lng: BASEPOS.lng, acc: 12, ts: tsBase }] }, P);
     t('el servidor guarda la posición', r.s === 200 && r.j.guardados === 1, r);
     r = await call('GET', '/api/jornada', undefined, P);
-    t('la primera posición dentro de la base inicia la jornada con esa hora, origen «base» y la distancia, sin necesidad de haber visto el aviso', r.j.fila && r.j.fila.ingreso === tsBase && r.j.fila.origen === 'base' && r.j.fila.dist > 20 && r.j.fila.dist <= 150 && r.j.fila.regreso === null && r.j.enterado === false, r.j);
+    t('la primera posición dentro de la base inicia la jornada con esa hora, origen «base» y la distancia, sin necesidad de haber visto el aviso', r.j.fila && r.j.fila.ingreso === tsBase && r.j.fila.origen === 'base' && r.j.fila.dist > 20 && r.j.fila.dist <= 40 && r.j.fila.regreso === null && r.j.enterado === false, r.j);
     r = await call('POST', '/api/jornada/acepto', {}, P);
     t('el técnico toca «Entendido» y queda constancia', r.s === 200 && r.j.enterado === true && r.j.fila.ingreso === tsBase, r);
     await call('POST', '/api/ubicacion', { pts: [{ lat: BASEPOS.lat, lng: BASEPOS.lng, acc: 8, ts: now - 60e3 }] }, P);
@@ -92,7 +100,7 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     await call('POST', '/api/jornada/acepto', {}, L);
     await call('POST', '/api/ubicacion', { pts: [{ lat: BASEPOS.lat, lng: BASEPOS.lng, acc: 900, ts: now - 100e3 }] }, L);
     r = await call('GET', '/api/jornada', undefined, L);
-    t('con precisión peor de 300 m no se anota el ingreso', r.j.fila === null, r.j);
+    t('con precisión peor de 50 m no se anota el ingreso', r.j.fila === null, r.j);
 
     /* lo que ve la oficina */
     const ws = Date.parse(arFecha(Date.now()) + 'T00:00:00-03:00') + desde * 3600e3;
@@ -118,7 +126,7 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     await call('POST', '/api/ubicacion/acepto', {}, N);
     await call('POST', '/api/jornada/acepto', {}, N);
     const m = 60e3, ahora = Date.now(), tsN0 = ahora - 14 * m;
-    const ENTRE = { lat: BASEPOS.lat + 0.0017, lng: BASEPOS.lng };   // unos 190 m: fuera del radio (150) pero dentro de 1,5 veces
+    const ENTRE = { lat: BASEPOS.lat + 0.0005, lng: BASEPOS.lng };   // unos 55 m: fuera del radio (40) pero dentro de 1,5 veces (60)
     const post = (tk, lat, lng, ts, acc) => call('POST', '/api/ubicacion', { pts: [{ lat, lng, acc: acc || 10, ts }] }, tk);
     const fila = async tk => (await call('GET', '/api/jornada', undefined, tk)).j.fila;
     await post(N, BASEPOS.lat, BASEPOS.lng, tsN0);   // llega a la base: ingreso
@@ -129,13 +137,13 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     t('seguir en la base no cambia nada', f.ingreso === tsN0 && f.regreso === null, f);
     await post(N, ENTRE.lat, ENTRE.lng, ahora - 13 * m);
     f = await fila(N);
-    t('un punto a 190 m (entre el radio y 1,5 veces) todavía no cuenta como salida', f.enBase === true, f);
+    t('un punto a 55 m (entre el radio y 1,5 veces) todavía no cuenta como salida', f.enBase === true, f);
     await post(N, LEJOS.lat, LEJOS.lng, ahora - 12 * m);
     f = await fila(N);
     t('un punto lejos: salió de la base', f.enBase === false && f.regreso === null, f);
     await post(N, ENTRE.lat, ENTRE.lng, ahora - 11 * m);
     f = await fila(N);
-    t('a 190 m todavía no cuenta como haber vuelto', f.enBase === false && f.regreso === null, f);
+    t('a 55 m todavía no cuenta como haber vuelto', f.enBase === false && f.regreso === null, f);
     const tsVuelta1 = ahora - 10 * m;
     await post(N, BASEPOS.lat, BASEPOS.lng, tsVuelta1);
     f = await fila(N);
@@ -153,7 +161,7 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     await post(N, LEJOS.lat, LEJOS.lng, ahora - 6 * m, 900);
     await post(N, BASEPOS.lat, BASEPOS.lng, ahora - 5 * m, 900);
     f = await fila(N);
-    t('una posición con precisión peor de 300 m no cuenta para entrar ni para salir', f.enBase === false && f.regreso === tsVuelta1, f);
+    t('una posición con precisión peor de 50 m no cuenta para entrar ni para salir', f.enBase === false && f.regreso === tsVuelta1, f);
     const tsVuelta2 = ahora - 2 * m;
     await post(N, BASEPOS.lat + 0.0002, BASEPOS.lng, tsVuelta2);
     f = await fila(N);
@@ -167,6 +175,23 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     r = await call('POST', '/api/ubicacion', { pts: [{ lat: LEJOS.lat, lng: LEJOS.lng, acc: 8, ts: Date.now() }] }, N);
     t('la ubicación sigue llegando después del regreso (el envío lo corta solo el horario)', r.s === 200, r);
 
+    /* la precisión que se exige depende del radio: con 40 m, una lectura de «±60 m» no dice si está adentro o afuera */
+    await call('POST', '/api/users', { usuario: 'rita', nombre: 'Rita', role: 'tecnico', clave: 'rita11' }, A);
+    const R = (await call('POST', '/api/login', { usuario: 'rita', clave: 'rita11' })).j.token;
+    await call('POST', '/api/ubicacion/acepto', {}, R);
+    await post(R, BASEPOS.lat, BASEPOS.lng, ahora - 9 * m, 60);
+    f = await fila(R);
+    t('con radio de 40 m, una lectura de ±60 m en la base no inicia la jornada', f === null, f);
+    await post(R, BASEPOS.lat, BASEPOS.lng, ahora - 8 * m, 45);
+    f = await fila(R);
+    t('una de ±45 m sí (se acepta hasta 50 m aunque el radio sea más chico)', f && f.ingreso === ahora - 8 * m && f.origen === 'base' && f.enBase === true, f);
+    await post(R, LEJOS.lat, LEJOS.lng, ahora - 7 * m, 80);
+    f = await fila(R);
+    t('una lectura lejana pero de ±80 m no cuenta como salida', f.enBase === true, f);
+    await post(R, LEJOS.lat, LEJOS.lng, ahora - 6 * m, 15);
+    f = await fila(R);
+    t('una lejana y precisa (±15 m) sí', f.enBase === false, f);
+
     /* días que no se trabaja, días pasados y futuros */
     await call('POST', '/api/jornada/base', Object.assign({}, cfg, { dias: [1, 2, 3, 4, 5] }), A);
     r = await call('GET', '/api/ubicaciones?dia=2001-01-06', undefined, A);
@@ -177,7 +202,7 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     t('un día futuro no es falta: «esperando»', r.j.tecnicos.every(x => x.jornada.estado === 'esperando'), r.j.tecnicos.map(x => x.jornada.estado));
 
     /* sacar la base: ya no hay ingreso automático, pero sí manual */
-    r = await call('POST', '/api/jornada/base', { radio: 150, tol: 10, dias: [1, 2, 3, 4, 5, 6] }, A);
+    r = await call('POST', '/api/jornada/base', { radio: 40, tol: 10, dias: [1, 2, 3, 4, 5, 6] }, A);
     t('se puede quitar la base (queda sin ubicación)', r.s === 200 && r.j.base === null, r);
     r = await call('GET', '/api/jornada', undefined, J);
     t('sin base, el técnico lo sabe (hayBase = false)', r.j.hayBase === false, r.j);

@@ -33,7 +33,7 @@ async def main():
         api('POST', '/api/users', {'usuario': u, 'nombre': n, 'role': 'tecnico', 'clave': u + '11', 'tel': tel}, TA)
     now_ms = int(time.time() * 1000); desde = max(0, ar_hora(now_ms) - 2)
     api('POST', '/api/ubicacion/horario', {'desde': desde, 'hasta': 24}, TA)
-    st, j = api('POST', '/api/jornada/base', {'lat': BASEPOS[0], 'lng': BASEPOS[1], 'radio': 150, 'tol': 10, 'dias': [0, 1, 2, 3, 4, 5, 6]}, TA)
+    st, j = api('POST', '/api/jornada/base', {'lat': BASEPOS[0], 'lng': BASEPOS[1], 'radio': 40, 'tol': 10, 'dias': [0, 1, 2, 3, 4, 5, 6]}, TA)
     check('el administrador carga la base', st == 200 and j['base']['lat'] == BASEPOS[0], (st, j))
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
@@ -112,16 +112,43 @@ async def main():
         await ap.wait_for_selector('#jb-form')
         check('el cuadro muestra la base actual', BASEPOS[0].__str__()[:8] in await ap.input_value('#jb-geo'), await ap.input_value('#jb-geo'))
         await ap.fill('#jb-geo', '')
+        check('sin tocar nada, el radio que se ofrece es el de la base (40 m)', await ap.input_value('#jb-radio') == '40')
+        # el GPS simulado entrega la posición que tenga puesta al empezar a mirar: se pone primero una que no estorbe y se espera a que llegue
+        async def lecturas():
+            return await ap.evaluate("+((document.querySelector('#jb-st').innerText.match(/Lecturas: (\\d+)/) || [0, 0])[1])")
+        async def poner(d, a):
+            n0 = await lecturas()
+            await actx.set_geolocation({'latitude': BASEPOS[0] + d, 'longitude': BASEPOS[1], 'accuracy': a})
+            await ap.wait_for_function("n0 => +((document.querySelector('#jb-st').innerText.match(/Lecturas: (\\d+)/) || [0, 0])[1]) > n0", arg=n0, timeout=8000)
+        # 1) una toma imprecisa (±60 m): se completa pero avisa que no sirve para una base chica
+        await actx.set_geolocation({'latitude': BASEPOS[0] + 0.0004, 'longitude': BASEPOS[1], 'accuracy': 60})
         await ap.click('#jb-gps')
-        await ap.wait_for_timeout(400); await actx.set_geolocation({'latitude': BASEPOS[0] + 0.0002, 'longitude': BASEPOS[1], 'accuracy': 5})
-        await ap.wait_for_function("document.querySelector('#jb-geo').value !== ''", timeout=12000)
+        await ap.wait_for_timeout(800)
+        await poner(0.00041, 60)
+        await ap.click('#jb-gps')   # tocar de nuevo termina con lo que haya
+        await ap.wait_for_function("/Promedio de \\d lecturas? \\(±60 m\\)/.test(document.querySelector('#jb-st').innerText)", timeout=8000)
+        check('una toma de ±60 m se avisa como poco precisa', 'poco precisa' in await ap.inner_text('#jb-st') and 'bad' in (await ap.get_attribute('#jb-st', 'class')))
+        # 2) una toma buena: varias lecturas, se promedian y queda la precisión informada. Una lectura mala (±200 m) se descarta.
+        await ap.fill('#jb-geo', '')
+        await actx.set_geolocation({'latitude': BASEPOS[0] + 0.0009, 'longitude': BASEPOS[1], 'accuracy': 200})
+        await ap.click('#jb-gps')
+        await ap.wait_for_timeout(800)
+        pts = [(0.00020, 6), (0.00022, 5), (0.00018, 8)]
+        for d, a in pts:
+            await poner(d, a)
+        check('mientras toma lecturas muestra cuántas lleva y la mejor precisión', '±5 m' in await ap.inner_text('#jb-st'), await ap.inner_text('#jb-st'))
+        await ap.click('#jb-gps')
+        await ap.wait_for_function("document.querySelector('#jb-st').innerText.includes('Promedio de 3 lecturas')", timeout=8000)
         geo = await ap.input_value('#jb-geo')
         lat, lng = [float(x) for x in geo.split(',')]
-        check('«Usar mi ubicación actual» completa la base con el GPS', abs(lat - (BASEPOS[0] + 0.0002)) < 1e-4 and abs(lng - BASEPOS[1]) < 1e-4, geo)
+        w = [1 / (max(a, 3) ** 2) for _, a in pts]
+        esperado = BASEPOS[0] + sum(d * k for (d, _), k in zip(pts, w)) / sum(w)
+        check('la base queda en el promedio de las lecturas, con más peso a las más precisas', abs(lat - esperado) < 2e-6 and abs(lng - BASEPOS[1]) < 1e-6, (geo, esperado))
+        check('con ±5 m se da por buena', 'ok' in (await ap.get_attribute('#jb-st', 'class')) and 'Guardá' in await ap.inner_text('#jb-st'), await ap.inner_text('#jb-st'))
         await ap.fill('#jb-radio', '5')
         await ap.click('#jb-form button[type=submit]')
         await ap.wait_for_timeout(500)
-        check('un radio de 5 m no se guarda y el cuadro sigue abierto', await ap.evaluate("!!document.querySelector('#jb-form')") and api('GET', '/api/ubicaciones', None, TA)[1]['jornada']['radio'] == 150)
+        check('un radio de 5 m no se guarda y el cuadro sigue abierto', await ap.evaluate("!!document.querySelector('#jb-form')") and api('GET', '/api/ubicaciones', None, TA)[1]['jornada']['radio'] == 40)
         await ap.fill('#jb-radio', '200')
         await ap.click('[data-dia="0"]')   # el domingo se desmarca
         await ap.click('#jb-form button[type=submit]')
