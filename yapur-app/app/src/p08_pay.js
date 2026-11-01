@@ -83,8 +83,12 @@ function printReceipt(d){
 function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
   const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c),pc=ps.find(x=>x.comp);
+  const w=(ps.find(x=>x.wa)||{}).wa||null,oficina=can('cobrar')||can('caja'),solo=soloCampo();
+  const sale=solo&&S.ajustes.waActivo&&!waFalla(w);   /* al técnico le sale solo: no tiene que mandarlo él (el cliente lo recibiría dos veces) */
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
-    <div class="actions start" style="margin-top:12px">${d.anulado?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
+    ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
+    ${oficina||solo?waEstadoHTML(w):''}
+    <div class="actions start" style="margin-top:12px">${d.anulado||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
     ${pc&&puedeVerComp(pc)?`<div class="actions start"><button class="btn" type="button" id="rc-comp">Ver comprobante de la transferencia</button></div><div class="hint" id="rc-comp-st"></div><img id="rc-comp-img" class="comp-full" alt="Comprobante de la transferencia" hidden>`:''}
@@ -95,6 +99,19 @@ function openReceipt(recibo){
     onMount(el){
       const bc=$('#rc-comp',el);if(bc)bc.addEventListener('click',()=>{bc.disabled=true;verComprobante(pc.comp,$('#rc-comp-img',el),$('#rc-comp-st',el)).finally(()=>{bc.disabled=false;});});
       const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
+      if(sale&&!d.anulado&&!w)setTimeout(async()=>{
+        if(!el.isConnected)return;
+        await loadMisCobros();
+        const w2=(paymentsOfReceipt(recibo).find(x=>x.wa)||{}).wa;
+        if(el.isConnected&&waFalla(w2)){closeModal();openReceipt(recibo);}
+      },3500);
+      const re=$('#rc-wa-re',el);
+      if(re)re.addEventListener('click',async()=>{
+        if(w&&w.e==='enviado'&&!await askConfirm('Ya se le mandó este recibo por WhatsApp. ¿Se lo mandamos de nuevo?','Volver a enviar'))return;
+        re.disabled=true;
+        try{const r=await NET.api('POST','/api/recibos/reenviar',{recibo});toast(r.ok?'Recibo enviado por WhatsApp':'No se pudo enviar: '+((r.wa&&r.wa.err)||'probá de nuevo'),r.ok?'':'bad');closeModal();}
+        catch(err){toast(err.message||'No se pudo reenviar','bad');re.disabled=false;}
+      });
       const wa=$('#rc-wa',el);
       if(wa&&wa.tagName==='BUTTON'){   /* sin teléfono cargado: se pide el número en el momento */
         const box=$('#rc-tel',el),inp=$('#rc-num',el),go=$('#rc-wa-go',el);
@@ -280,10 +297,33 @@ async function cobrarOtro(c,o){
   S.pagos.set(id,Object.assign({},item,{id,_doc:doc}));rebuildDerived();dataChanged('pagos');
   return recibo;
 }
+/* recibos de los técnicos que no llegaron a salir por WhatsApp: se ven y se reintentan desde acá */
+function cajaWaAviso(ok){
+  const malos=new Set(ok.filter(p=>waFalla(p.wa)).map(p=>p.recibo));
+  if(!malos.size)return '';
+  return `<div class="notice bad" style="margin-top:12px" id="cb-wa-aviso"><b>${malos.size===1?'1 recibo no llegó':malos.size+' recibos no llegaron'} al cliente por WhatsApp.</b> Abrí cada uno para ver el motivo (si falta el teléfono, cargalo en la ficha del cliente).${S.ajustes.waActivo?'<div class="actions start" style="margin-top:8px"><button class="btn small" type="button" id="cb-wa-re">Reintentar los que fallaron</button></div>':''}</div>`;
+}
+async function waReintentarTodos(b){
+  b.disabled=true;
+  try{const r=await NET.api('POST','/api/recibos/reenviar',{todos:true});toast(r.intentados?`Se reintentaron ${r.intentados}: ${r.enviados} ${r.enviados===1?'enviado':'enviados'}`:'No había nada para reintentar',r.intentados&&r.enviados<r.intentados?'bad':'');}
+  catch(err){toast(err.message||'No se pudo reintentar','bad');}
+  b.disabled=false;
+}
 function paymentRow(p){
   const c=S.clientes.get(p.c);
   return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
-    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}${p.comp?'<span class="chip info">Con comprobante</span>':''}</div></button>`;
+    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}${p.comp?'<span class="chip info">Con comprobante</span>':''}${waChip(p)}</div></button>`;
+}
+/* el aviso automático por WhatsApp de los cobros en la calle */
+const waChip=p=>!p.wa||p.anulado?'':p.wa.e==='enviado'?'<span class="chip ok">WhatsApp enviado</span>':p.wa.e==='pendiente'&&Date.now()-(p.wa.ts||0)<5*60e3?'<span class="chip">Enviando…</span>':'<span class="chip bad">WhatsApp: no se envió</span>';
+const waFalla=w=>!!w&&(w.e==='error'||w.e==='sin_tel'||(w.e==='pendiente'&&Date.now()-(w.ts||0)>=5*60e3));
+function waEstadoHTML(w){
+  if(!w)return '';
+  const d2=w.ts?new Date(w.ts):null,p2=n=>String(n).padStart(2,'0'),cuando=d2?p2(d2.getDate())+'/'+p2(d2.getMonth()+1)+' a las '+p2(d2.getHours())+':'+p2(d2.getMinutes()):'';
+  if(w.e==='enviado')return `<div class="notice ok" id="rc-wa-st">Enviado por WhatsApp${w.tel?' a +'+esc(w.tel):''}${cuando?' el '+esc(cuando):''}.</div>`;
+  if(w.e==='pendiente'&&!waFalla(w))return '<div class="notice info" id="rc-wa-st">Enviándose por WhatsApp…</div>';
+  if(w.e==='sin_tel')return `<div class="notice bad" id="rc-wa-st">No se envió por WhatsApp: ${esc(w.err||'el cliente no tiene teléfono')}</div>`;
+  return `<div class="notice bad" id="rc-wa-st">No se pudo enviar por WhatsApp${w.err?': '+esc(w.err):'.'}</div>`;
 }
 function deudaAntMsg(c,r){
   const d=c.deudaAnt&&c.deudaAnt.det;
@@ -461,6 +501,8 @@ async function loadMisCobros(){
     const j=await NET.api('GET','/api/mis-cobros?dias=7');
     (j.docs||[]).forEach(d=>{const it=(d.data||{}).items||{};for(const k in it)S.pagos.set(k,Object.assign({},it[k],{id:k,_doc:d.id}));});
     MC.err='';rebuildDerived();dataChanged('pagos');
+    /* el recibo por WhatsApp sale a los pocos segundos: se vuelve a mirar para mostrar si salió */
+    if([...S.pagos.values()].some(p=>p.wa&&p.wa.e==='pendiente'&&Date.now()-(p.wa.ts||0)<120e3)&&(MC.tries=(MC.tries||0)+1)<=8)setTimeout(loadMisCobros,4000);else MC.tries=0;
   }catch(e){MC.err=e&&e.network?'Sin conexión: se muestran los cobros que ya se cargaron.':'No se pudieron actualizar tus cobros.';dataChanged('pagos');}
 }
 VIEWS.miscobros={
@@ -491,6 +533,7 @@ VIEWS.cobranzas={
     el.innerHTML=`<div class="seg" id="cb-sub">${subs.map(([k,l])=>`<button type="button" data-s="${k}" aria-pressed="${CB.sub===k}">${l}</button>`).join('')}</div><div id="cb-body" class="wrap" style="padding:0"></div>`;
     $('#cb-sub',el).addEventListener('click',e=>{const b=e.target.closest('[data-s]');if(!b)return;CB.sub=b.dataset.s;$$('#cb-sub button',el).forEach(x=>x.setAttribute('aria-pressed',String(x===b)));this.draw(true);});
     $('#cb-body',el).addEventListener('click',e=>{
+      const wr=e.target.closest('#cb-wa-re');if(wr)return waReintentarTodos(wr);
       const r=e.target.closest('[data-receipt]');if(r)return openReceipt(r.dataset.receipt);
       const k=e.target.closest('[data-cobrar]');if(k)return openCobro(k.dataset.cobrar);
       const o=e.target.closest('[data-open-client]');if(o)return openClient(o.dataset.openClient);
@@ -526,6 +569,7 @@ VIEWS.cobranzas={
       const recs=new Set(ok.map(p=>p.recibo)).size;
       $('#cb-caja',body).innerHTML=`<div class="kpis"><div class="kpi"><span class="n">${fmtMoney(tot)}</span><span class="l">Total cobrado · ${recs} ${recs===1?'recibo':'recibos'}</span></div>
         ${Object.entries(METODOS).filter(([k])=>byM[k]).map(([k,v])=>`<div class="kpi"><span class="n">${fmtMoney(byM[k])}</span><span class="l">${v}</span></div>`).join('')}</div>
+        ${cajaWaAviso(ok)}
         ${cajaPorCobrador(ok)}
         <div class="list" style="margin-top:12px">${ps.length?ps.map(paymentRow).join(''):'<div class="empty"><b>Sin movimientos</b><span>No hay cobros registrados en esta fecha.</span></div>'}</div>`;
     }else if(CB.sub==='cortes'){

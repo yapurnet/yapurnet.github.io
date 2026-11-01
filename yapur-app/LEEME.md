@@ -93,6 +93,30 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Sin probar en un router real:** el script se armó con la sintaxis de RouterOS 6.4x/7.x pero **no se pudo correr en un MikroTik desde acá**. Probalo primero en uno chico (por ejemplo un nodo con IP fija). Si el router responde «not enough permissions», agregá el permiso `write` al script y a la programación (el script igual no escribe). El paso «Si algo falla» del mismo cuadro explica los demás casos.
 - Más adelante, cortar y reconectar desde el sistema se podría agregar como un script aparte que el router *consulta* (siempre del lado del router, sin dar acceso al sistema); hoy no existe.
 
+## Recibo por WhatsApp automático (cobros del técnico)
+
+Todo lo que cobra un técnico en la calle **genera un recibo** (con su número, a su nombre y en la caja del día) que la oficina ve en **Cobranzas → Caja del día** (cada fila dice «cobró Pedro» y abre el recibo), y **le llega solo al cliente por WhatsApp** apenas el técnico registra el cobro.
+
+- **Qué recibe el cliente:** un mensaje de la empresa con el nombre, el monto, el concepto, el número de recibo y la fecha («Hola Ana, recibimos tu pago de $ 65.000 por Instalación. Recibo N° R261101-AB3 del 01/11/2026. Gracias por elegir YAPUR.NET.»).
+- **Qué ve cada uno:** el técnico, en el recibo, lee «El recibo le llega solo al cliente por WhatsApp» (y ya no tiene el botón para mandarlo a mano, para que el cliente no lo reciba dos veces). La oficina ve en cada cobro un cartel **«WhatsApp enviado»**, **«Enviando…»** o **«WhatsApp: no se envió»**; en el recibo, a qué número y cuándo salió, o el motivo si falló, con **Reintentar envío** (y **Volver a enviar solo** si ya había salido).
+- **Si no sale:** el cobro queda igual registrado. Las causas más comunes: el cliente **no tiene teléfono** (o está mal escrito: tiene que llevar código de área, sin 0 ni 15 — se prueba también el segundo teléfono), o WhatsApp rechazó el mensaje. En la caja aparece un aviso rojo con **Reintentar los que fallaron** (los que no tienen teléfono se arreglan cargando el número en la ficha y tocando *Reintentar envío* en el recibo). Ante una falla pasajera de WhatsApp el servidor reintenta solo hasta 3 veces.
+- **Topes de seguridad:** hasta 3 avisos automáticos por día al mismo número y 400 en total por día (frena un uso indebido). La oficina puede reenviar a mano igual.
+- **Solo los cobros del técnico** se mandan solos. Los de la oficina y el administrador siguen como siempre: botón *Enviar por WhatsApp* del recibo.
+- **Apagarlo:** *Ajustes → Recibo por WhatsApp* → destildar «Mandar el recibo por WhatsApp cuando cobra un técnico». Ahí mismo está **Mandar prueba** (llega a tu celular con datos de ejemplo).
+- **Lo que NO se sabe:** «enviado» significa que WhatsApp aceptó el mensaje; no se registra si el cliente lo recibió o lo leyó.
+
+### Conectarlo (una sola vez, lo hacés vos)
+
+Usa la **API de WhatsApp Business de Meta**. Hace falta una cuenta de empresa en Meta, un número para enviar (conviene uno que no uses en tu WhatsApp común) y una plantilla aprobada. Meta cobra un valor chico por cada mensaje, y el cliente tiene que haber aceptado recibir avisos del negocio. La pantalla *Ajustes → Recibo por WhatsApp* muestra los mismos pasos:
+
+1. En developers.facebook.com creá una app «Empresa», agregale el producto **WhatsApp** y registrá el número. Anotá el **identificador del número de teléfono**.
+2. En business.facebook.com → *Configuración → Usuarios del sistema*: creá un usuario del sistema, asignale la app y generá un **token permanente** con el permiso `whatsapp_business_messaging`. (Los menús de Meta cambian de nombre seguido; si no los encontrás, buscalos con esas palabras.)
+3. En *WhatsApp Manager → Plantillas de mensajes* creá la plantilla **`recibo_cobro`**, categoría **Utilidad**, idioma **Español (Argentina)**, con este texto (el botón *Copiar el texto* de Ajustes lo copia): `Hola {{1}}, recibimos tu pago de {{2}} por {{3}}. Recibo N° {{4}} del {{5}}. Gracias por elegir YAPUR.NET.` Ejemplos que pide Meta: Ana Paz · $ 65.000 · Instalación · R261101-AB3 · 01/11/2026. Esperá a que la aprueben.
+4. En **Cloudflare → Workers y Pages → yapur → Configuración → Variables y secretos** agregá dos **Secretos** (tipo *Secret*, así un nuevo despliegue no los borra): **`WA_TOKEN`** (el token) y **`WA_PHONE_ID`** (el identificador del número). Guardá/desplegá.
+5. Volvé a *Ajustes → Recibo por WhatsApp*: tiene que decir **Conectado**. Mandate una prueba.
+
+El token y el identificador **no se escriben en la app ni en ningún archivo del repositorio** y el servidor nunca los devuelve: ni el administrador los ve en pantalla. Opcionales (mismo lugar, como secretos o variables): `WA_TEMPLATE` (nombre de la plantilla si usás otro, por defecto `recibo_cobro`), `WA_LANG` (por defecto `es_AR`), `WA_VER` (versión de la API de Meta, por defecto `v23.0`).
+
 ## Importar la lista de clientes (Excel) y el recibo con tu formato
 
 - **Importar clientes:** *Ajustes → Importar clientes (CSV)*. Además de las columnas de siempre, ahora lee **velocidad** (elige el plan cuya bajada coincide: 2,5 · 3,5 · 5 · 10…), **cobrar desde** (por cliente: `2026-11` o `11/2026`), **ciclo** (1 o 2) y **precio especial**. Si el precio del archivo es igual al del plan, no se guarda como precio especial (así los cambios de precio del plan siguen llegando a esos clientes); si es distinto, sí. Una velocidad que no tiene plan se avisa antes de importar: esos clientes quedan sin plan pero se cobran igual por su precio.
