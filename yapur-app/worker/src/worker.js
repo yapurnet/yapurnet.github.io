@@ -115,7 +115,11 @@ function canWrite(u, p, coll, op) {
 }
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
 const RT_FIELDS = { Q: { n: 7, min: 3 }, P: { n: 7, min: 2 }, F: { n: 3, min: 2 }, D: { n: 6, min: 2 } };
-const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reconexion', 'reclamo', 'otro'];
+const CAMPO_CONCEPTOS = ['instalacion', 'reinstalacion', 'reclamo', 'otro'];   // la reconexión no se cobra (solo la deuda, y eso lo cobra la oficina)
+/* Precios fijos: los define el administrador en Ajustes; quien cobra en la calle no puede cambiarlos. Si todavía no se cargaron rigen estos. */
+const PRECIO_KEYS = { instalacion: 'precioInstalacion', reinstalacion: 'precioReinstalacion' };
+const PRECIO_DEF = { instalacion: 65000, reinstalacion: 35000 };
+const pesos = n => '$ ' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const METODOS_PAGO = ['efectivo', 'transferencia', 'mercadopago', 'otro'];
 /* quien cobra en la calle y recibe una transferencia tiene que adjuntar la foto del comprobante */
 const COMP_METODOS = ['transferencia'];
@@ -125,6 +129,10 @@ const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'di
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch, ctx) {
+  if (coll === 'ajustes') {
+    for (const k of Object.values(PRECIO_KEYS)) if (k in patch && (!isNum(patch[k]) || patch[k] <= 0 || patch[k] > 1e7 || Math.round(patch[k]) !== patch[k])) return 'El precio no es válido: tiene que ser un número entero mayor que cero.';
+    return null;
+  }
   if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red') return null;
   const items = isPlain(patch.items) ? patch.items : null;
   if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' ? 'Formato inválido.' : null;
@@ -147,10 +155,14 @@ function guard(u, p, coll, existing, patch, ctx) {
       if (!isPlain(nw)) return 'Formato inválido.';
       if (!prev) {
         if (u.role !== 'admin' && !p.cobrar) {
-          /* quien solo cobra en la calle: instalaciones, reclamos y reconexiones, del día y por un monto válido (nunca mensualidades) */
+          /* quien solo cobra en la calle: instalaciones, reinstalaciones, reclamos y otros, del día y por un monto válido (nunca mensualidades ni reconexiones) */
           if (!p.cobrarCampo) return 'Tu usuario no puede registrar pagos.';
-          if (!CAMPO_CONCEPTOS.includes(nw.concepto) || nw.per) return 'Tu usuario solo puede cobrar instalaciones, reclamos, reconexiones y otros cobros, no mensualidades.';
+          if (!CAMPO_CONCEPTOS.includes(nw.concepto) || nw.per) return 'Tu usuario solo puede cobrar instalaciones, reinstalaciones, reclamos y otros cobros, no mensualidades ni reconexiones.';
           if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
+          /* instalación y reinstalación se cobran al precio fijo que cargó el administrador: no se puede poner otro monto */
+          const fijos = ctx && ctx.preciosFijos ? ctx.preciosFijos() : PRECIO_DEF;
+          if ((nw.concepto === 'instalacion' || nw.concepto === 'reinstalacion') && nw.monto !== fijos[nw.concepto])
+            return (nw.concepto === 'instalacion' ? 'La instalación' : 'La reinstalación') + ' se cobra a precio fijo: ' + pesos(fijos[nw.concepto]) + '. Lo define el administrador.';
           if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
           if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
           if (!METODOS_PAGO.includes(nw.metodo)) return 'El medio de pago no es válido.';
@@ -541,7 +553,11 @@ export class YapurDB extends DurableObject {
     let out;
     this.tx(() => {
       const existing = this.readDoc(coll, id);
-      if (coll === 'ajustes') { data = Object.assign({}, data); delete data.perfiles; }
+      if (coll === 'ajustes') {
+        data = Object.assign({}, data); delete data.perfiles;
+        /* una pantalla desactualizada que guarda otros ajustes no tiene que borrar los precios fijos */
+        if (op === 'set' && existing) for (const k of Object.values(PRECIO_KEYS)) if (!(k in data) && k in existing) data[k] = existing[k];
+      }
       const why = guard(u, p, coll, existing, data, this);
       if (why) throw httpErr(403, why, 'permission_denied');
       if (coll === 'red') { const inUse = this.redInUse(existing, data.items); if (inUse) throw httpErr(409, inUse, 'failed_precondition'); }
@@ -623,6 +639,13 @@ export class YapurDB extends DurableObject {
     return '{"seq":' + this.SEQ + ',"cols":{' + cols.join(',') + '}}';
   }
 
+  /* precios fijos de instalación y reinstalación (Ajustes; si falta alguno rige el de siempre) */
+  preciosFijos() {
+    const a = this.readDoc('ajustes', 'general') || {};
+    const out = {};
+    for (const k of Object.keys(PRECIO_KEYS)) { const v = Number(a[PRECIO_KEYS[k]]); out[k] = isFinite(v) && v > 0 ? Math.round(v) : PRECIO_DEF[k]; }
+    return out;
+  }
   /* el cliente tal como está guardado (los clientes viven repartidos en varios documentos) */
   clienteDe(cid) {
     const key = JSON.stringify(cid);

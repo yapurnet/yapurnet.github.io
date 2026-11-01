@@ -74,9 +74,9 @@ function openOrderForm({id,clientId}){
     });
   }});
 }
-/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reconexión, reclamo) */
-const CONC_ORD={instalacion:'instalacion',reconexion:'reconexion',falla:'reclamo',visita:'reclamo'};
-const puedeCobrarOrden=c=>!!c&&(can('cobrar')||can('cobrarCampo'));
+/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión no se cobra: si el cliente debe, paga la deuda en la oficina */
+const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo'};
+const puedeCobrarOrden=(c,o)=>!!c&&!!o&&o.tipo!=='reconexion'&&(can('cobrar')||can('cobrarCampo'));
 function cobroOrdenHTML(o,c){
   const lista=conceptosCobro(c,soloCampo());
   let con0=CONC_ORD[o.tipo]||'otro';
@@ -87,7 +87,8 @@ function cobroOrdenHTML(o,c){
     <div id="ff-cobro-box" hidden>
       <div class="grid2">${F('Concepto','ff-con',`<select id="ff-con">${Object.entries(CONCEPTOS).filter(([k])=>lista.includes(k)).map(([k,v])=>opt(k,v,k===con0)).join('')}</select>`)}
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
-      ${F('Monto cobrado','ff-monto','<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off">')}
+      ${F('Monto cobrado','ff-monto',`<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off"${precioFijo(con0)?` value="${precioFijo(con0)}"${soloCampo()?' readonly':''}`:''}>`,'')}
+      <div class="hint" id="ff-fijo">${precioFijo(con0)&&soloCampo()?'Precio fijo: '+fmtMoney(precioFijo(con0))+'. Lo define el administrador.':''}</div>
       ${soloCampo()?compHTML('ff'):''}
     </div></div>`;
 }
@@ -98,7 +99,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c)?cobroOrdenHTML(o,c):''}
+    ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):''}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
@@ -108,11 +109,18 @@ function openFinishOrder(o){
     const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>$('#ff-met',el).value):null;
     if(comp){$('#ff-met',el).addEventListener('change',comp.sync);comp.sync();}
     if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
+    /* al cambiar el concepto: instalación y reinstalación llevan su precio fijo (el técnico no lo puede cambiar) */
+    const selCon=$('#ff-con',el);
+    if(selCon)selCon.addEventListener('change',()=>{
+      const m=$('#ff-monto',el),pf=precioFijo(selCon.value),campo=soloCampo();
+      if(pf){m.value=pf;m.readOnly=campo;}else{if(m.readOnly)m.value='';m.readOnly=false;}
+      $('#ff-fijo',el).textContent=pf&&campo?'Precio fijo: '+fmtMoney(pf)+'. Lo define el administrador.':'';
+    });
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read?read():{empty:true};if(g.invalid)return toast('Revisá las coordenadas','bad');
       const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
-      const cobra=ckc&&ckc.checked,monto=cobra?num($('#ff-monto',el).value):0;
+      const cobra=ckc&&ckc.checked,fijoC=cobra&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(fijoC||num($('#ff-monto',el).value)):0;
       if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
       const sinFoto=cobra&&comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');   /* antes de cerrar la orden: si falta la foto no se cierra nada */
       try{

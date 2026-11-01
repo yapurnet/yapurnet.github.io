@@ -124,12 +124,12 @@ function openAnular(recibo){
    Se aplica a quien cobra en la calle; el servidor lo controla igual. */
 const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
 function conceptosCobro(c,campo){
-  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&k!=='reconexion'&&(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion')));
 }
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
-  const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reclamos, reconexiones y otros */
+  const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reinstalaciones, reclamos y otros (a precio fijo la instalación y la reinstalación) */
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
   const open=b.periods.filter(p=>p.rest>0);
   const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
@@ -162,23 +162,29 @@ function openCobro(clientId,con1,pre){
       }else if(con==='deuda_anterior'){
         const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
         h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
-      }else h.textContent='';
+      }else{
+        const pf=precioFijo(con);
+        h.className='hint';
+        h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
+      }
     };
+    /* instalación y reinstalación: el monto lo pone el sistema (el técnico no puede cambiarlo; la oficina lo ve ya completado y puede ajustarlo) */
+    const precio=()=>{const m=$('#cb-monto',el),pf=precioFijo(con);if(pf){m.value=pf;m.readOnly=!!campo;}else m.readOnly=false;};
     $('#cb-con',el).addEventListener('click',e=>{const x=e.target.closest('[data-con]');if(!x)return;con=x.dataset.con;manual=false;
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
-      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';sum();});
+      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';precio();sum();});
     $('#cb-mens',el).addEventListener('change',()=>{manual=false;sum();});
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
     if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
-    sum();
+    precio();sum();
     if(pre){   /* cobro ya completado (por ejemplo desde el reporte del técnico) */
       const bt=$('[data-con="'+pre.concepto+'"]',el);if(bt)bt.click();
       if(METODOS[pre.metodo]){$('#cb-met',el).value=pre.metodo;if(comp)comp.sync();}
       if(pre.monto)$('#cb-monto',el).value=pre.monto;if(pre.nota)$('#cb-nota-o',el).value=pre.nota;sum();
     }
     $('#cb-go',el).addEventListener('click',async()=>{
-      const monto=num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
+      const monto=campo&&precioFijo(con)?precioFijo(con):num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
       const sinFoto=comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');
       const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
       const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
@@ -265,7 +271,7 @@ async function verComprobante(id,img,st){
     img.src=URL.createObjectURL(await r.blob());img.hidden=false;st.textContent='';
   }catch(e){st.textContent=(e&&e.message)||'No se pudo abrir el comprobante.';}
 }
-/* cobro que no es mensualidad (instalación, reclamo, reconexión, otro): lo usan «Cobrar» y el cierre de una orden */
+/* cobro que no es mensualidad (instalación, reinstalación, reclamo, otro): lo usan «Cobrar» y el cierre de una orden */
 async function cobrarOtro(c,o){
   const fecha=o.fecha||todayStr(),recibo=newRecibo(fecha),id=newId(),doc=payShard(fecha,c.id);
   const item={c:c.id,metodo:o.metodo||'efectivo',fecha,hora:nowTime(),recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||'',concepto:o.concepto,per:null,monto:o.monto,nota:o.nota||''};
