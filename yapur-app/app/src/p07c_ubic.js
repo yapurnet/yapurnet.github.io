@@ -1,9 +1,12 @@
 /* ===== ubicación de los técnicos en horario laboral =====
    Los técnicos aceptan un aviso y, solo dentro del horario (por defecto de 8 a 20 h), la app manda su posición cada minuto.
    El servidor vuelve a controlar el horario con su reloj y borra todo a los 14 días. Quien tiene el permiso «verTecnicos» la ve en la pestaña Técnicos. */
-const UB={st:null,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,nat:false,started:false};
+const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,nat:false,started:false,refr:false};
 const arNow=()=>{const d=new Date(Date.now()-3*3600e3);return {fecha:d.toISOString().slice(0,10),h:d.getUTCHours()+d.getUTCMinutes()/60};};
-const ubDentro=()=>!!UB.st&&arNow().h>=UB.st.desde&&arNow().h<UB.st.hasta;
+/* tramos del día: [[8,20]] de corrido, o [[8,13],[17,22]] en un día cortado (con siesta). Los datos viejos traen solo desde/hasta. */
+const stTramos=s=>!s?[]:(s.tramos&&s.tramos.length?s.tramos:[[s.desde,s.hasta]]);
+const trTxt=tr=>tr.map(t=>t[0]+' a '+t[1]).join(' y de ');   /* «8 a 13 y de 17 a 22»: se usa como «de … h» */
+const ubDentro=()=>{const h=arNow().h;return stTramos(UB.st).some(t=>h>=t[0]&&h<t[1]);};
 const hhmm=ts=>new Date(ts).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
 const haceTxt=ts=>{
   const m=Math.max(0,Math.round((Date.now()-ts)/60000));
@@ -15,7 +18,7 @@ const haceTxt=ts=>{
 function ubicAviso(st){
   return new Promise(res=>{
     let done=false;const fin=v=>{if(!done){done=true;res(v);}};
-    openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>de ${st.desde} a ${st.hasta} h</b> mientras la app esté abierta o activa en tu celular.</p>
+    openModal({title:'Ubicación en horario laboral',html:`<p>La oficina puede ver dónde estás <b>hoy de ${trTxt(stTramos(st))} h</b> mientras la app esté abierta o activa en tu celular. Hay días de corrido y días con siesta: la app toma sola el horario de cada día.</p>
       <ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li></ul>
       <div class="actions"><button class="btn ghost" type="button" data-act="no">Ahora no</button><button class="btn primary" type="button" data-act="si">Entendido, aceptar</button></div>`,
       onMount(el){el.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;fin(b.dataset.act==='si');closeModal();});},
@@ -29,7 +32,7 @@ function ubicChip(){
   const dentro=ubDentro();
   c.className='chip '+(UB.denied?'bad':dentro?'ok':'quiet');
   c.textContent=UB.denied?'Ubicación sin permiso':dentro?'Ubicación activa':'Ubicación fuera de horario';
-  c.title=UB.denied?'Activá el permiso de ubicación de la app en el celular.':`Se comparte con la oficina de ${UB.st.desde} a ${UB.st.hasta} h.`;
+  c.title=UB.denied?'Activá el permiso de ubicación de la app en el celular.':`Se comparte con la oficina de ${trTxt(stTramos(UB.st))} h.`;
 }
 async function ubicFlush(){
   if(UB.sending||!UB.queue.length||!NET.online)return;
@@ -61,17 +64,32 @@ function ubicStop(){
   const b=window.YapurApp;if(UB.nat&&b&&typeof b.stopLocation==='function'){try{b.stopLocation();}catch(e){}}
   UB.nat=false;
 }
+/* el horario cambia de un día a otro (y la oficina puede cambiarlo): se vuelve a pedir al empezar el día y cada 10 minutos */
+async function ubicRefrescar(){
+  if(!UB.st||UB.refr||(Date.now()-UB.stTs<600e3&&UB.st.fecha===arNow().fecha))return;
+  UB.refr=true;
+  try{UB.st=await NET.api('GET','/api/ubicacion/estado',undefined,{noKick:true,timeout:15000});UB.stTs=Date.now();}catch(e){/* sin conexión: queda el último horario conocido */}
+  UB.refr=false;
+}
 function ubicLoop(){
   if(!UB.st||!UB.st.acepto||UB.denied&&!UB.nat){ubicChip();return;}
+  const b=window.YapurApp,tr=stTramos(UB.st);
   if(ubDentro()){
-    const b=window.YapurApp;
     if(b&&typeof b.startLocation==='function'){   /* en el APK, un servicio sigue enviando con la pantalla apagada */
-      try{UB.nat=String(b.startLocation(NET.token,UB.st.desde,UB.st.hasta)||'')==='ok';}catch(e){UB.nat=false;}
+      try{
+        UB.nat=String((typeof b.startLocationTramos==='function'
+          ?b.startLocationTramos(NET.token,tr.map(t=>t[0]+'-'+t[1]).join(','))
+          :b.startLocation(NET.token,tr[0][0],tr[tr.length-1][1]))||'')==='ok';
+      }catch(e){UB.nat=false;}
     }
     if(UB.nat){if(UB.watch!=null&&navigator.geolocation)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;}   /* ya manda el servicio: que no mande también la página */
     else ubicWatch();
     ubicFlush();
-  }else ubicStop();
+  }else{
+    /* en la siesta el servicio de la APK nueva queda en pausa solo (sin tomar posiciones) y retoma a la hora; no hay que pararlo */
+    const siesta=UB.nat&&b&&typeof b.startLocationTramos==='function'&&tr.length>1&&arNow().h<tr[tr.length-1][1];
+    if(!siesta)ubicStop();
+  }
   ubicChip();
 }
 async function ubicInit(){
@@ -84,9 +102,11 @@ async function ubicInit(){
     if(!await ubicAviso(UB.st))return;
     try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});}catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo más tarde.','bad');return;}
   }
+  UB.stTs=Date.now();
   ubicLoop();
-  setInterval(ubicLoop,60000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)ubicLoop();});
+  const tick=()=>ubicRefrescar().then(ubicLoop,ubicLoop);
+  setInterval(tick,60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
 }
 
 /* ----- jornada, lado del técnico: ingreso y fin del día, anotados solos al llegar y al volver a la base ----- */
@@ -98,18 +118,21 @@ function jornadaBarra(){
   const bar=$('#jrBar');if(!bar)return;
   const st=JR.st;
   if(!jrAplica()||!st||!st.aplica){bar.hidden=true;return;}
-  const f=st.fila,h=arNow().h;
+  const f=st.fila,h=arNow().h,tr2=stTramos(st.horario);
   let cls='',html;
   if(!st.hayBase&&!f){bar.hidden=true;return;}   /* mientras la oficina no cargue la base, la jornada está apagada */
   if(!st.enterado){
     cls='warn';html=`<span>Desde ahora se anota tu jornada: el <b>ingreso</b> cuando tu celular llega a la base y el <b>fin</b> cuando volvés a guardar el vehículo.</span><span class="jr-btns"><button class="btn small ghost" type="button" id="jr-info">Más info</button><button class="btn small" type="button" id="jr-ok">Entendido</button></span>`;
   }else if(!f){
-    if(h<st.horario.desde-1||h>=st.horario.hasta){bar.hidden=true;return;}
+    const tr=stTramos(st.horario);
+    if(h<tr[0][0]-1||h>=tr[tr.length-1][1]){bar.hidden=true;return;}
     cls='warn';html=`<span>Todavía no empezó tu jornada.${st.hayBase?' Se anota sola cuando tu celular llega a la base.':''}</span><button class="btn small" type="button" id="jr-ini">Iniciar jornada</button>`;
-  }else if(f.regreso&&f.enBase){
-    cls='quiet';html=`<span>Tu jornada comenzó a las <b>${hhmm(f.ingreso)}</b> y terminó a las <b>${hhmm(f.regreso)}</b> al volver a la base (${esc(durTxt((f.regreso-f.ingreso)/60000))}).</span>`;
+  }else if(tr2.length>1&&h>=tr2[0][1]&&h<tr2[1][0]){
+    cls='quiet';html=`<span>Tu mañana${f.regreso&&f.enBase?' terminó a las <b>'+hhmm(f.regreso)+'</b> al volver a la base':' terminó'}. Retomás a las <b>${tr2[1][0]}</b> h.</span>`;
+  }else if(f.regreso&&f.enBase&&!(f.ingreso2&&f.regreso<f.ingreso2)){
+    cls='quiet';html=`<span>Tu jornada comenzó a las <b>${hhmm(f.ingreso)}</b>${f.ingreso2?', retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''} y terminó a las <b>${hhmm(f.regreso)}</b> al volver a la base${tr2.length>1?'':' ('+esc(durTxt((f.regreso-f.ingreso)/60000))+')'}.</span>`;
   }else{
-    html=`<span>Tu jornada laboral comenzó a las <b>${hhmm(f.ingreso)}</b>${f.origen==='base'?' · en la base':''}.</span>`;
+    html=`<span>Tu jornada laboral comenzó a las <b>${hhmm(f.ingreso)}</b>${f.origen==='base'?' · en la base':''}${f.ingreso2?' · retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''}.</span>`;
   }
   bar.className='jrbar'+(cls?' '+cls:'');bar.innerHTML=html;bar.hidden=false;
   const b=$('#jr-ini',bar);if(b)b.addEventListener('click',jornadaIniciar);
@@ -177,6 +200,7 @@ function tecAvisoUrl(t){
 }
 const tecProblema=t=>t.estado==='sin_senal'||t.estado==='sin_datos';
 const tecSinIngreso=(t,d)=>d.dia===d.hoy&&!!t.jornada&&t.jornada.estado==='sin_ingreso';
+const tecSinRetomar=(t,d)=>d.dia===d.hoy&&!!t.jornada&&!!t.jornada.sinRetomar;
 /* ingreso y fin del día de un técnico: salen solos de si el celular estuvo en la base */
 function jornadaTec(t,d){
   const j=t.jornada;if(!j)return '';
@@ -185,9 +209,12 @@ function jornadaTec(t,d){
   if(j.ingreso){
     ch(j.tarde?'warn':'ok','Ingresó '+hhmm(j.ingreso)+(j.tarde?' · '+durTxt(j.atrasoMin)+' tarde':''));
     notas.push(j.origen==='base'?'Ingresó en la base':'Inició a mano'+(hasNum(j.dist)?', a '+fmtDist(j.dist)+' de la base':''));
-    if(j.regreso&&j.enBase)ch('quiet','Terminó '+hhmm(j.regreso)+' · jornada de '+durTxt((j.regreso-j.ingreso)/60000));
+    if(j.estado==='siesta')ch('quiet','En siesta'+(j.regreso&&j.enBase?' · volvió a la base a las '+hhmm(j.regreso):''));
+    else if(j.estado==='termino')ch('quiet','Terminó '+hhmm(j.regreso)+(j.cortado?'':' · jornada de '+durTxt((j.regreso-j.ingreso)/60000)));
     else if(j.estado==='sin_cierre')ch('warn',j.regreso?'Último regreso a la base '+hhmm(j.regreso)+', después no volvió':'No volvió a la base');
     else ch('quiet',j.enBase?'En la base':'Fuera de la base');
+    if(j.ingreso2)ch(j.tarde2?'warn':'ok','Retomó '+hhmm(j.ingreso2)+(j.tarde2?' · '+durTxt(j.atraso2Min)+' tarde':''));
+    else if(j.sinRetomar)ch('bad','No retomó a la tarde');
   }else if(j.estado==='sin_ingreso')ch('bad','Sin ingreso');
   else if(j.estado==='esperando'&&esHoy)ch('quiet','Todavía no ingresó');
   if(esHoy&&!j.enterado&&j.estado!=='no_laborable')notas.push('Todavía no tocó «Entendido» en el aviso de jornada');
@@ -216,18 +243,21 @@ function tecRender(){
   const d=TU.data;
   if(!d){out.innerHTML=TU.err?`<div class="notice bad">${esc(TU.err)}</div>`:'<div class="hint">Cargando…</div>';return;}
   const hz=d.horario;
-  $('#tu-horario').textContent=`Se comparte de ${hz.desde} a ${hz.hasta} h y se borra a los ${d.dias} días.`;
+  const tr=stTramos(hz);
+  $('#tu-horario').textContent=`${d.dia===d.hoy?'Hoy':'Ese día'} ${tr.length>1?'es cortado (con siesta): ':'es de corrido: '}se comparte de ${trTxt(tr)} h. Se borra a los ${d.dias} días.`;
   const dia=$('#tu-dia');if(dia&&dia.value!==d.dia)dia.value=d.dia;
-  const atn=t=>tecProblema(t)||tecSinIngreso(t,d);
+  const atn=t=>tecProblema(t)||tecSinIngreso(t,d)||tecSinRetomar(t,d);
   const list=[...d.tecnicos].sort((a,b)=>(atn(b)-atn(a))||((b.ultima?b.ultima.ts:0)-(a.ultima?a.ultima.ts:0))||a.nombre.localeCompare(b.nombre));
   const sin=list.filter(tecProblema);
   const banner=sin.length?`<div class="notice" role="status" id="tu-alerta" style="margin-bottom:12px"><b>${sin.length===1?'1 técnico sin señal':sin.length+' técnicos sin señal'}:</b> ${sin.map(t=>esc(t.nombre)+(t.ultima?' ('+esc(haceTxt(t.ultima.ts))+')':' (no mandó nada hoy)')).join(', ')}.</div>`:'';
   const sinIng=list.filter(t=>tecSinIngreso(t,d));
   const bannerIng=sinIng.length?`<div class="notice bad" role="status" id="tu-ingreso" style="margin-bottom:12px"><b>Sin ingreso hoy:</b> ${sinIng.map(t=>esc(t.nombre)).join(', ')}.</div>`:'';
+  const sinRet=list.filter(t=>tecSinRetomar(t,d));
+  const bannerRet=sinRet.length?`<div class="notice bad" role="status" id="tu-retoma" style="margin-bottom:12px"><b>Sin retomar a la tarde:</b> ${sinRet.map(t=>esc(t.nombre)).join(', ')}.</div>`:'';
   const jc=d.jornada||{tol:10,radio:40,base:null,dias:[1,2,3,4,5,6]},DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const jb=$('#tu-base');
-  if(jb)jb.textContent=`Jornada: se espera el ingreso a las ${hz.desde}:00, con ${jc.tol} min de tolerancia, ${jc.dias.length?'de '+[1,2,3,4,5,6,0].filter(x=>jc.dias.includes(x)).map(x=>DN[x]).join(', '):'ningún día'}. ${jc.base?'Base cargada (radio '+jc.radio+' m): el ingreso y el fin salen solos.':'Todavía sin base: el control de jornada está apagado. Cargala con «Base y jornada».'}`;
-  out.innerHTML=list.length?`${bannerIng}${banner}<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
+  if(jb)jb.textContent=`Jornada: se espera el ingreso a las ${tr[0][0]}:00${tr.length>1?' y la retoma a las '+tr[1][0]+':00':''}, con ${jc.tol} min de tolerancia, ${jc.dias.length?'de '+[1,2,3,4,5,6,0].filter(x=>jc.dias.includes(x)).map(x=>DN[x]).join(', '):'ningún día'}. ${jc.base?'Base cargada (radio '+jc.radio+' m): el ingreso y el fin salen solos.':'Todavía sin base: el control de jornada está apagado. Cargala con «Base y jornada».'}`;
+  out.innerHTML=list.length?`${bannerIng}${bannerRet}${banner}<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
 }
 async function tecCargar(){
   if(TU.busy)return;TU.busy=true;
@@ -235,16 +265,69 @@ async function tecCargar(){
   catch(e){TU.err=e&&e.message||'No se pudo cargar la ubicación de los técnicos.';}
   TU.busy=false;tecRender();
 }
+/* Horario de la ubicación y de la jornada: de corrido (un tramo) o cortado (mañana y tarde, con siesta), qué días es cada uno y días puntuales */
+const HZ_DIAS=[[1,'Lunes'],[2,'Martes'],[3,'Miércoles'],[4,'Jueves'],[5,'Viernes'],[6,'Sábado'],[0,'Domingo']];
+function planDe(){
+  const pl=(TU.data&&TU.data.plan)||null,hz=(TU.data&&TU.data.horario)||{desde:8,hasta:20};
+  return pl||{corrido:{desde:hz.desde,hasta:hz.hasta},cortado:null,dias:{0:'corrido',1:'corrido',2:'corrido',3:'corrido',4:'corrido',5:'corrido',6:'corrido'},fechas:{}};
+}
+async function guardarPlan(pl){
+  return NET.api('POST','/api/ubicacion/plan',{desde:pl.corrido.desde,hasta:pl.corrido.hasta,cortado:pl.cortado,dias:pl.dias,fechas:pl.fechas});
+}
 function openHorarioUbic(){
-  const hz=(TU.data&&TU.data.horario)||{desde:8,hasta:20};
-  openModal({title:'Horario de la ubicación',html:`<form class="form" id="hz-form" novalidate><div class="hint">Fuera de este horario el servidor no guarda nada, aunque el celular lo mande.</div>
-    <div class="grid2">${F('Desde (hora)','hz-d',`<input id="hz-d" type="number" min="0" max="23" step="1" inputmode="numeric" value="${hz.desde}">`)}${F('Hasta (hora)','hz-h',`<input id="hz-h" type="number" min="1" max="24" step="1" inputmode="numeric" value="${hz.hasta}">`)}</div>
+  const pl=planDe(),cor=pl.cortado||{m:[8,13],t:[17,22]},fechas=Object.assign({},pl.fechas),hoy=(TU.data&&TU.data.hoy)||arNow().fecha;
+  const num=(id,v,mn,mx)=>`<input id="${id}" type="number" min="${mn}" max="${mx}" step="1" inputmode="numeric" value="${v}">`;
+  openModal({title:'Horario de la ubicación',html:`<form class="form" id="hz-form" novalidate><div class="hint">Fuera de estos horarios el servidor no guarda nada, aunque el celular lo mande. El ingreso esperado es el «desde» del primer tramo del día.</div>
+    <div class="field"><label>De corrido (un solo tramo)</label><div class="grid2">${F('Desde (hora)','hz-d',num('hz-d',pl.corrido.desde,0,23))}${F('Hasta (hora)','hz-h',num('hz-h',pl.corrido.hasta,1,24))}</div></div>
+    <div class="field"><label><input type="checkbox" id="hz-c"${pl.cortado?' checked':''}> También hay días con horario cortado (siesta)</label></div>
+    <div id="hz-cbox"${pl.cortado?'':' hidden'}>
+      <div class="grid2">${F('Mañana desde','hz-m0',num('hz-m0',cor.m[0],0,23))}${F('Mañana hasta','hz-m1',num('hz-m1',cor.m[1],1,24))}</div>
+      <div class="grid2">${F('Tarde desde','hz-t0',num('hz-t0',cor.t[0],0,23))}${F('Tarde hasta','hz-t1',num('hz-t1',cor.t[1],1,24))}</div>
+      <div class="field"><label>Qué días se trabaja cortado</label><div class="dias">${HZ_DIAS.map(([n,l])=>`<label><input type="checkbox" data-dc="${n}"${pl.dias[n]==='cortado'?' checked':''}>${l}</label>`).join('')}</div></div>
+      <div class="field"><label>Un día puntual (por ejemplo, un día de mucho calor)</label>
+        <div class="grid2"><input id="hz-fd" type="date" aria-label="Día puntual" value="${hoy}"><select id="hz-fm" aria-label="Horario ese día"><option value="cortado">Cortado</option><option value="corrido">De corrido</option></select></div>
+        <div class="actions start"><button class="btn small" type="button" id="hz-fa">Agregar ese día</button></div>
+        <ul class="plain" id="hz-fl"></ul></div>
+    </div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar horario</button></div></form>`,
-    onMount(el){$('#hz-form',el).addEventListener('submit',async e=>{
-      e.preventDefault();const desde=Number($('#hz-d',el).value),hasta=Number($('#hz-h',el).value);
-      if(!Number.isInteger(desde)||!Number.isInteger(hasta)||desde<0||hasta>24||desde>=hasta)return toast('«Desde» tiene que ser menor que «hasta» (de 0 a 24)','bad');
-      try{await NET.api('POST','/api/ubicacion/horario',{desde,hasta});toast('Horario guardado');closeModal();tecCargar();}catch(err){toast(err.message||'No se pudo guardar','bad');}
-    });}});
+    onMount(el){
+      const caja=$('#hz-cbox',el),lista=$('#hz-fl',el),fmtF=f=>f.split('-').reverse().join('/');
+      const pintar=()=>{
+        const fs=Object.keys(fechas).filter(f=>f>=hoy).sort();
+        lista.innerHTML=fs.length?fs.map(f=>`<li>${esc(fmtF(f))}: <b>${fechas[f]==='cortado'?'cortado':'de corrido'}</b> <button class="btn small ghost" type="button" data-qf="${esc(f)}">Quitar</button></li>`).join(''):'<li class="muted">Ninguno. Los días se rigen por la lista de arriba.</li>';
+      };
+      pintar();
+      $('#hz-c',el).addEventListener('change',e=>{caja.hidden=!e.target.checked;});
+      $('#hz-fa',el).addEventListener('click',()=>{const f=$('#hz-fd',el).value;if(!/^\d{4}-\d{2}-\d{2}$/.test(f))return toast('Elegí el día','bad');fechas[f]=$('#hz-fm',el).value;pintar();});
+      lista.addEventListener('click',e=>{const b=e.target.closest('[data-qf]');if(!b)return;delete fechas[b.dataset.qf];pintar();});
+      $('#hz-form',el).addEventListener('submit',async e=>{
+        e.preventDefault();
+        const N=id=>Number($('#'+id,el).value),desde=N('hz-d'),hasta=N('hz-h'),usa=$('#hz-c',el).checked;
+        const ok=(a,b)=>Number.isInteger(a)&&Number.isInteger(b)&&a>=0&&b<=24&&a<b;
+        if(!ok(desde,hasta))return toast('De corrido: «desde» tiene que ser menor que «hasta» (de 0 a 24)','bad');
+        const nuevo={corrido:{desde,hasta},cortado:null,dias:{},fechas:{}};
+        for(const [n] of HZ_DIAS)nuevo.dias[n]='corrido';
+        if(usa){
+          const m=[N('hz-m0'),N('hz-m1')],t=[N('hz-t0'),N('hz-t1')];
+          if(!ok(m[0],m[1])||!ok(t[0],t[1]))return toast('Cortado: en la mañana y en la tarde «desde» tiene que ser menor que «hasta» (de 0 a 24)','bad');
+          if(m[1]>=t[0])return toast('La mañana tiene que terminar antes de que empiece la tarde','bad');
+          nuevo.cortado={m,t};
+          el.querySelectorAll('[data-dc]').forEach(c=>{nuevo.dias[Number(c.dataset.dc)]=c.checked?'cortado':'corrido';});
+          Object.assign(nuevo.fechas,fechas);
+        }
+        try{await guardarPlan(nuevo);toast('Horario guardado');closeModal();tecCargar();}catch(err){toast(err.message||'No se pudo guardar','bad');}
+      });
+    }});
+}
+/* atajo: pasar SOLO el día de hoy a cortado (o de corrido), sin tocar el resto */
+async function hoyCambiar(){
+  const d=TU.data;if(!d)return;
+  const pl=planDe();
+  if(!pl.cortado)return openHorarioUbic();
+  const esCortado=stTramos(d.horario).length>1&&d.dia===d.hoy,hoy=d.hoy,nuevo=esCortado?'corrido':'cortado';
+  if(d.dia!==d.hoy)return toast('Cambiá al día de hoy para usar este botón','bad');
+  const copia=JSON.parse(JSON.stringify(pl));copia.fechas[hoy]=nuevo;
+  try{await guardarPlan(copia);toast('Hoy queda '+(nuevo==='cortado'?'cortado':'de corrido'));tecCargar();}catch(err){toast(err.message||'No se pudo guardar','bad');}
 }
 function openBaseJornada(){
   const jc=(TU.data&&TU.data.jornada)||{base:null,radio:40,tol:10,dias:[1,2,3,4,5,6]};
@@ -258,7 +341,7 @@ function openBaseJornada(){
     <div class="grid2">${F('Radio (metros)','jb-radio',`<input id="jb-radio" type="number" min="20" max="2000" step="5" inputmode="numeric" value="${jc.radio}">`)}${F('Tolerancia (minutos)','jb-tol',`<input id="jb-tol" type="number" min="0" max="120" step="1" inputmode="numeric" value="${jc.tol}">`)}</div>
     <div class="field"><label>Días de trabajo (los otros no cuentan como falta)</label><div class="dias">${[1,2,3,4,5,6,0].map(x=>`<label><input type="checkbox" data-dia="${x}"${jc.dias.includes(x)?' checked':''}>${DN[x]}</label>`).join('')}</div></div>
     <div class="hint">Radio de 40 m: alcanza para el galpón y el frente. Si un técnico que está adentro del galpón no figura en la base (el GPS se corre bajo techo), subilo a 60. Una lectura con precisión peor que el radio (o que 50 m) se ignora, así no cuenta una entrada o salida falsa.</div>
-    <div class="hint">La hora esperada de ingreso es el «Desde» del horario de ubicación. Pasada la tolerancia se marca «tarde» o «sin ingreso».</div>
+    <div class="hint">La hora esperada de ingreso es el «Desde» del primer tramo del horario de ubicación (y, en un día cortado, la retoma es el «Desde» de la tarde). Pasada la tolerancia se marca «tarde» o «sin ingreso».</div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button>${jc.base?'<button class="btn ghost" type="button" id="jb-quitar">Quitar la base</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`,
     onMount(el){
       const geo=$('#jb-geo',el),st=$('#jb-st',el),gb=$('#jb-gps',el);let run=null;const label=gb.textContent;
@@ -292,12 +375,13 @@ VIEWS.tecnicos={
     el.innerHTML=`<div class="head-row"><h2>Técnicos</h2><button class="btn small" type="button" id="tu-act">Actualizar</button></div>
       <p class="muted small" id="tu-horario"></p>
       <p class="muted small" id="tu-base"></p>
-      <div class="toolbar"><div class="line"><input id="tu-dia" type="date" aria-label="Día" style="width:auto">${isAdmin()?'<button class="btn small ghost" type="button" id="tu-hz">Cambiar el horario</button><button class="btn small ghost" type="button" id="tu-bs">Base y jornada</button>':''}</div></div>
+      <div class="toolbar"><div class="line"><input id="tu-dia" type="date" aria-label="Día" style="width:auto">${isAdmin()?'<button class="btn small ghost" type="button" id="tu-hz">Cambiar el horario</button><button class="btn small ghost" type="button" id="tu-hoy">Hoy: cortado / de corrido</button><button class="btn small ghost" type="button" id="tu-bs">Base y jornada</button>':''}</div></div>
       <div id="tu-out"></div>
       <p class="muted small">La ubicación se toma solo en el horario indicado. En la app instalada sigue con la pantalla apagada una vez que el técnico la abrió; en el navegador, solo con la página abierta. Si pasan más de 10 minutos sin recibir nada, el técnico figura «Sin señal» y el tramo queda anotado. Cada técnico acepta un aviso antes de empezar.</p>`;
     $('#tu-act',el).addEventListener('click',()=>tecCargar());
     $('#tu-dia',el).addEventListener('change',e=>{TU.dia=e.target.value;TU.data=null;tecRender();tecCargar();});
     const hz=$('#tu-hz',el);if(hz)hz.addEventListener('click',openHorarioUbic);
+    const hh=$('#tu-hoy',el);if(hh)hh.addEventListener('click',hoyCambiar);
     const bs=$('#tu-bs',el);if(bs)bs.addEventListener('click',openBaseJornada);
     clearInterval(TU.timer);
     TU.timer=setInterval(()=>{if(S.tab==='tecnicos'&&!document.hidden&&TU.data&&TU.dia===TU.data.hoy)tecCargar();},60000);

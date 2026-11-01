@@ -122,7 +122,7 @@ async def main():
         await ap.fill('#hz-d', '8'); await ap.fill('#hz-h', '20')
         await ap.click('#hz-form button[type=submit]')
         await ap.wait_for_function("document.querySelector('#tu-horario').innerText.includes('de 8 a 20 h')", timeout=8000)
-        check('el horario nuevo queda en el servidor y en pantalla', lista(TA)['horario'] == {'desde': 8, 'hasta': 20})
+        check('el horario nuevo queda en el servidor y en pantalla', (lambda h: h['desde'] == 8 and h['hasta'] == 20 and h['tramos'] == [[8, 20]] and h['modo'] == 'corrido')(lista(TA)['horario']))
         # --- la oficina sin permiso no ve la pestaña; con permiso, sí
         octx = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
         await octx.route('**/fonts.g*/**', lambda r: r.abort())

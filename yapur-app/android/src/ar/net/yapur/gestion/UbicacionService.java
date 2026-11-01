@@ -26,9 +26,12 @@ import java.util.concurrent.Executors;
 
 /**
  * Comparte la posición del técnico con la oficina SOLO dentro del horario laboral (por defecto de 8 a 20 h, hora de Argentina).
+ * El horario puede ser de corrido (un tramo) o cortado (por ejemplo de 8 a 13 y de 17 a 22): en la siesta el servicio sigue vivo pero
+ * en pausa, sin pedirle nada al GPS, y retoma solo cuando empieza el tramo de la tarde. Un servicio de ubicación ya arrancado con la app
+ * abierta puede volver a pedir posiciones; arrancar uno nuevo desde segundo plano no se puede (ver más abajo), por eso no se lo detiene en la siesta.
  * Corre como servicio en primer plano, con la notificación «ubicación activa» a la vista, y por eso sigue con la pantalla apagada.
  * Se arranca únicamente desde la app abierta (MainActivity.Bridge.startLocation) y después de que el técnico aceptó el aviso.
- * Se detiene sola al terminar el horario, o si el servidor dice que la sesión ya no vale o que no aceptó el aviso.
+ * Se detiene sola al terminar el último tramo del día, o si el servidor dice que la sesión ya no vale o que no aceptó el aviso.
  * El servidor vuelve a controlar el horario con su propio reloj, así que este control es solo para no gastar batería de más.
  *
  * Se compila contra Android 6 (API 23): lo que es de versiones nuevas se llama por reflexión y solo en esas versiones.
@@ -36,6 +39,7 @@ import java.util.concurrent.Executors;
 public class UbicacionService extends Service implements LocationListener {
     static final String EXTRA_DESDE = "desde";
     static final String EXTRA_HASTA = "hasta";
+    static final String EXTRA_TRAMOS = "tramos";   // «8-13,17-22»; si falta, vale desde/hasta (versiones viejas de la página)
     private static final String CHANNEL = "ubicacion";
     private static final int NOTIF_ID = 4107;
     private static final int FOREGROUND_SERVICE_TYPE_LOCATION = 8;   // Android 10+
@@ -58,14 +62,18 @@ public class UbicacionService extends Service implements LocationListener {
     private ExecutorService net;
     private final ArrayList<String> cola = new ArrayList<String>();
     private long ultimo = 0;
-    private int desde = 8, hasta = 20;
+    private int[] ini = {8}, fin = {20};   // horas de inicio y fin de cada tramo del día
+    private boolean pausado = false;       // entre tramos (siesta): sin posiciones, pero el servicio sigue
     private boolean enviando = false;
 
     private final Runnable vigilar = new Runnable() {
         @Override
         public void run() {
-            if (!dentroDeHorario()) { stopSelf(); return; }
-            enviar();
+            if (pasoElFinal()) { stopSelf(); return; }
+            boolean dentro = dentroDeHorario();
+            if (dentro && pausado) { if (pedirPosiciones()) pausado = false; }      // empezó el tramo de la tarde
+            else if (!dentro && !pausado) { quitarPosiciones(); pausado = true; }    // empezó la siesta
+            if (!pausado) enviar();
             main.postDelayed(this, CADA_MS);
         }
     };
@@ -76,8 +84,11 @@ public class UbicacionService extends Service implements LocationListener {
     @Override
     public int onStartCommand(Intent it, int flags, int startId) {
         if (it != null) {
-            desde = it.getIntExtra(EXTRA_DESDE, 8);
-            hasta = it.getIntExtra(EXTRA_HASTA, 20);
+            String tr = it.getStringExtra(EXTRA_TRAMOS);
+            if (tr == null || !leerTramos(tr)) {
+                ini = new int[] { it.getIntExtra(EXTRA_DESDE, 8) };
+                fin = new int[] { it.getIntExtra(EXTRA_HASTA, 20) };
+            }
         }
         /* Android exige llamar a startForeground enseguida después de startForegroundService, aunque después no haya nada que hacer:
            por eso va primero, antes de cualquier salida (si no, en algunas versiones se cierra toda la aplicación). */
@@ -106,13 +117,55 @@ public class UbicacionService extends Service implements LocationListener {
 
     /* ---------- horario: hora de Argentina (UTC-3, sin horario de verano) ---------- */
 
-    private boolean dentroDeHorario() {
+    private double horaActual() {
         long ar = System.currentTimeMillis() - 3L * 3600000L;
-        double h = ((ar / 60000L) % 1440L) / 60.0;
-        return h >= desde && h < hasta;
+        return ((ar / 60000L) % 1440L) / 60.0;
+    }
+
+    private boolean dentroDeHorario() {
+        double h = horaActual();
+        for (int i = 0; i < ini.length; i++) if (h >= ini[i] && h < fin[i]) return true;
+        return false;
+    }
+
+    /* ya terminó el último tramo del día: ahí sí se detiene el servicio */
+    private boolean pasoElFinal() { return horaActual() >= fin[fin.length - 1]; }
+
+    /* «8-13,17-22» -> tramos; devuelve false (y no cambia nada) si no es un horario válido */
+    private boolean leerTramos(String s) {
+        try {
+            String[] p = s.split(",");
+            if (p.length < 1 || p.length > 2) return false;
+            int[] a = new int[p.length], b = new int[p.length];
+            for (int i = 0; i < p.length; i++) {
+                String[] x = p[i].split("-");
+                if (x.length != 2) return false;
+                a[i] = Integer.parseInt(x[0].trim());
+                b[i] = Integer.parseInt(x[1].trim());
+                if (a[i] < 0 || b[i] > 24 || a[i] >= b[i] || (i > 0 && a[i] < b[i - 1])) return false;
+            }
+            ini = a;
+            fin = b;
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private String textoHorario() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ini.length; i++) {
+            if (i > 0) sb.append(" y de ");
+            sb.append(ini[i]).append(" a ").append(fin[i]);
+        }
+        return sb.toString();
     }
 
     /* ---------- posiciones ---------- */
+
+    private void quitarPosiciones() {
+        try { if (lm != null) lm.removeUpdates(this); } catch (Throwable t) { /* ya estaba parado */ }
+    }
 
     private boolean pedirPosiciones() {
         boolean alguno = false;
@@ -128,7 +181,7 @@ public class UbicacionService extends Service implements LocationListener {
 
     @Override
     public void onLocationChanged(Location l) {
-        if (l == null) return;
+        if (l == null || pausado) return;
         long ahora = System.currentTimeMillis();
         if (ahora - ultimo < ENTRE_PUNTOS_MS) return;
         ultimo = ahora;
@@ -225,7 +278,7 @@ public class UbicacionService extends Service implements LocationListener {
         PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         b.setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("Gestión YAPUR: ubicación activa")
-            .setContentText("Se comparte con la oficina de " + desde + " a " + hasta + " h")
+            .setContentText("Se comparte con la oficina de " + textoHorario() + " h")
             .setOngoing(true)
             .setContentIntent(pi);
         return b.build();

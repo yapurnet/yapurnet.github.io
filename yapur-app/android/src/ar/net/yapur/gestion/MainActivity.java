@@ -429,14 +429,40 @@ public class MainActivity extends Activity {
            Devuelve «ok» cuando el servicio quedó andando; si no, la causa, y la página sigue con el GPS de la ventana. */
         @JavascriptInterface
         public String startLocation(String token, int desde, int hasta) {
+            if (desde < 0 || hasta > 24 || desde >= hasta) return "horario";
+            return arrancarUbicacion(token, desde, hasta, null);
+        }
+
+        /* Igual, pero con el horario del día en uno o dos tramos: «8-20» (de corrido) o «8-13,17-22» (cortado, con siesta).
+           En la siesta el servicio queda en pausa solo y retoma a la hora. */
+        @JavascriptInterface
+        public String startLocationTramos(String token, String tramos) {
+            if (tramos == null || !tramos.matches("[0-9]{1,2}-[0-9]{1,2}(,[0-9]{1,2}-[0-9]{1,2})?")) return "horario";
+            try {
+                String[] p = tramos.split(",");
+                int prevFin = 0;
+                for (int i = 0; i < p.length; i++) {
+                    String[] x = p[i].split("-");
+                    int a = Integer.parseInt(x[0]), b = Integer.parseInt(x[1]);
+                    if (a < 0 || b > 24 || a >= b || a < prevFin) return "horario";
+                    prevFin = b;
+                }
+                String[] primero = p[0].split("-"), ultimo = p[p.length - 1].split("-");
+                return arrancarUbicacion(token, Integer.parseInt(primero[0]), Integer.parseInt(ultimo[1]), tramos);
+            } catch (Throwable t) {
+                return "horario";
+            }
+        }
+
+        private String arrancarUbicacion(String token, int desde, int hasta, String tramos) {
             try {
                 if (token == null || token.length() < 8 || token.length() > 1000) return "token";
-                if (desde < 0 || hasta > 24 || desde >= hasta) return "horario";
                 if (!hasLocationPermission()) return "permiso";   // el permiso lo pide la página con el GPS de la ventana; al minuto vuelve a intentar
                 UbicacionService.token = token;
                 Intent it = new Intent(MainActivity.this, UbicacionService.class);
                 it.putExtra(UbicacionService.EXTRA_DESDE, desde);
                 it.putExtra(UbicacionService.EXTRA_HASTA, hasta);
+                if (tramos != null) it.putExtra(UbicacionService.EXTRA_TRAMOS, tramos);
                 if (Build.VERSION.SDK_INT >= 26) {
                     Context.class.getMethod("startForegroundService", Intent.class).invoke(MainActivity.this, it);
                 } else {
