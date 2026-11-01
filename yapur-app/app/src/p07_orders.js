@@ -74,9 +74,9 @@ function openOrderForm({id,clientId}){
     });
   }});
 }
-/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión no se cobra: si el cliente debe, paga la deuda en la oficina */
-const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo'};
-const puedeCobrarOrden=(c,o)=>!!c&&!!o&&o.tipo!=='reconexion'&&(can('cobrar')||can('cobrarCampo'));
+/* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión solo se cobra si el cliente tiene deuda y la cobra la oficina: el técnico nunca */
+const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo',reconexion:'reconexion'};
+const puedeCobrarOrden=(c,o)=>!!c&&!!o&&(o.tipo==='reconexion'?can('cobrar')&&conDeuda(c):(can('cobrar')||can('cobrarCampo')));
 function cobroOrdenHTML(o,c){
   const lista=conceptosCobro(c,soloCampo());
   let con0=CONC_ORD[o.tipo]||'otro';

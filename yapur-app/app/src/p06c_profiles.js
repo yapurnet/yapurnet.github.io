@@ -177,7 +177,7 @@ VIEWS.ajustes={
     el.innerHTML=`<div class="card"><h2>Empresa</h2><form class="form" id="aj-emp" novalidate>
       ${F('Nombre que se muestra arriba','aj-nombre',`<input id="aj-nombre" value="${esc(S.ajustes.empresa)}">`)}
       <div class="actions start"><button class="btn primary" type="submit">Guardar</button></div></form></div>
-    <div class="card"><h2>Precios de instalación</h2><p class="muted small">Son los montos que cobra el técnico en la calle: él no puede cambiarlos ni poner otro importe. Solo vos podés modificarlos. La reconexión no se cobra.</p>
+    <div class="card"><h2>Precios de instalación</h2><p class="muted small">Son los montos que cobra el técnico en la calle: él no puede cambiarlos ni poner otro importe. Solo vos podés modificarlos. La reconexión no la cobra el técnico: la oficina la cobra solo si el cliente tiene deuda.</p>
       <form class="form" id="aj-pre" novalidate><div class="grid2">
       ${F('Instalación','aj-pi',`<input id="aj-pi" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('instalacion'))}">`)}
       ${F('Reinstalación (mudanza)','aj-pr',`<input id="aj-pr" type="text" inputmode="numeric" autocomplete="off" value="${esc(precioFijo('reinstalacion'))}">`,'Suele ser la mitad de la instalación, redondeada.')}</div>

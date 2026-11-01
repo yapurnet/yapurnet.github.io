@@ -34,6 +34,12 @@ t('vencidos',b.vencidos===(curVenc?2:1)&&b.deuda===(curVenc?35000:15000),b);
 t('mes actual vence dia 10',b.periods[2].venc===curVenc,b.periods[2]);
 let bn=billing(c,true);t('con proximo mes suma un periodo',bn.periods.length===4&&bn.vencidos===b.vencidos,bn.periods.length);
 t('baja no factura',billing({id:'c2',estado:'baja',planId:'p1'}).periods.length===0);
+// reconexión: solo se cobra si el cliente tiene deuda
+t('conDeuda: con un mes vencido sin pagar',conDeuda(c)===true);
+t('conDeuda: al día (ni siquiera empezó a pagar)',conDeuda({id:'c5',estado:'activo',planId:'p1',desde:addMonths(cur,1)})===false);
+t('conDeuda: con deuda anterior pendiente',conDeuda({id:'c6',estado:'activo',planId:'p1',desde:addMonths(cur,1),deudaAnt:{m:5000,det:'x'}})===true);
+t('conDeuda: sin cliente o dado de baja sin deuda',conDeuda(null)===false&&conDeuda({id:'c7',estado:'baja',planId:'p1'})===false);
+t('conceptosCobro: la oficina con deuda ve «reconexion»; al día no; el técnico nunca',conceptosCobro(c,false).includes('reconexion')&&!conceptosCobro({id:'c5',estado:'activo',planId:'p1',desde:addMonths(cur,1)},false).includes('reconexion')&&!conceptosCobro(c,true).includes('reconexion'));
 t('precio especial manda',priceOf({planId:'p1',precio:15000})===15000&&priceOf({planId:'p1',precio:null})===20000);
 // reparto de pagos
 let al=allocate([{per:'2026-08',rest:15000},{per:'2026-09',rest:20000}],20000);
