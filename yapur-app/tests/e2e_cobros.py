@@ -48,8 +48,9 @@ async def foto(pg):
       for (let i = 0; i < 4000; i++) { x.fillStyle = 'rgb(' + (i * 7 % 255) + ',' + (i * 13 % 255) + ',' + (i * 29 % 255) + ')'; x.fillRect((i * 37) % 1600, (i * 91) % 1200, 6, 6); }
       return c.toDataURL('image/jpeg', 0.95); })()""")
     return {'name': 'comprobante.jpg', 'mimeType': 'image/jpeg', 'buffer': base64.b64decode(d.split(',')[1])}
-async def adjuntar(pg, px):
-    await pg.set_input_files('#%s-comp-f' % px, await foto(pg))
+async def adjuntar(pg, px, camara=False):
+    # la cámara y el selector de archivos son dos campos distintos que cargan la misma foto
+    await pg.set_input_files('#%s-comp-%s' % (px, 'c' if camara else 'f'), await foto(pg))
     await pg.wait_for_function("document.querySelector('#%s-comp-st').textContent.includes('Foto lista')" % px, timeout=15000)
 async def tabs(pg): return await pg.evaluate("[...document.querySelectorAll('#tabs .tab')].map(b=>b.textContent.replace(/\\d+$/,'').trim())")
 def pagos_hoy(tok):
@@ -135,10 +136,15 @@ async def main():
         check('en efectivo no se pide la foto del comprobante', await pg.evaluate("document.querySelector('#ff-comp').hidden"))
         await pg.select_option('#ff-met', 'transferencia')
         check('al elegir transferencia aparece «Comprobante de la transferencia»', not await pg.evaluate("document.querySelector('#ff-comp').hidden") and 'comprobante de la transferencia' in (await pg.inner_text('#ff-comp')).lower())
+        txt_ff = await pg.inner_text('#ff-comp')
+        check('al terminar la orden se puede sacar la foto con la cámara o elegir una', 'Sacar foto con la cámara' in txt_ff and 'Elegir una foto' in txt_ff, txt_ff)
+        attrs = await pg.evaluate("(() => { const c = document.querySelector('#ff-comp-c'), f = document.querySelector('#ff-comp-f'); return [c.type, c.getAttribute('capture'), c.accept, f.type, f.hasAttribute('capture'), f.accept]; })()")
+        check('«Sacar foto con la cámara» abre la cámara directo (capture) y «Elegir una foto» no', attrs == ['file', 'environment', 'image/*', 'file', False, 'image/*'], attrs)
         await pg.click('#fform button[type=submit]')
         await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('foto del comprobante')", timeout=4000)
         check('sin la foto no se cierra la orden ni se cobra nada', (await pg.evaluate("S.ordenes.get('o2').estado")) == 'en_curso' and len(pagos_hoy(pedro_tok)) == 1, pagos_hoy(pedro_tok))
-        await adjuntar(pg, 'ff')
+        await adjuntar(pg, 'ff', camara=True)
+        check('la foto sacada con la cámara se sube y queda lista', 'Foto lista' in await pg.inner_text('#ff-comp-st'))
         check('la foto se ve en miniatura antes de cobrar', not await pg.evaluate("document.querySelector('#ff-comp-img').hidden"))
         await pg.click('#fform button[type=submit]')
         await pg.wait_for_selector('.rc', timeout=8000)
@@ -171,6 +177,8 @@ async def main():
         check('y al volver a «Reinstalación» vuelve el precio fijo', await pg.input_value('#cb-monto') == '35000' and await pg.evaluate("document.querySelector('#cb-monto').readOnly") is True)
         await pg.select_option('#cb-met', 'transferencia')
         check('en «Cobrar» también aparece el pedido de la foto al elegir transferencia', not await pg.evaluate("document.querySelector('#cb-comp').hidden"))
+        txt_cb = await pg.inner_text('#cb-comp')
+        check('en «Cobrar» también están «Sacar foto con la cámara» y «Elegir una foto»', 'Sacar foto con la cámara' in txt_cb and 'Elegir una foto' in txt_cb and await pg.evaluate("document.querySelector('#cb-comp-c').getAttribute('capture') === 'environment' && !document.querySelector('#cb-comp-f').hasAttribute('capture')"), txt_cb)
         n_antes = len(pagos_hoy(pedro_tok))
         await pg.click('#cb-go')
         await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('foto del comprobante')", timeout=4000)

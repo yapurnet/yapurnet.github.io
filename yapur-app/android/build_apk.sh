@@ -81,6 +81,7 @@ done
 unzip -p "$OUT" classes.dex > "$WORK/check.dex"
 grep -aq "Lar/net/yapur/gestion/MainActivity;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae MainActivity" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/UbicacionService;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
+grep -aq "Lar/net/yapur/gestion/FotoProvider;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el proveedor de la foto del comprobante" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/UbicacionReceptor;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el receptor de arranque de la ubicación" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "$SERVER_URL" "$WORK/check.dex" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }
 # El servicio de ubicación: declarado, no exportado y del tipo «location» (Android 14 no deja arrancarlo sin esto), con sus permisos.
@@ -101,6 +102,14 @@ printf '%s\n' "$REC" | grep -Eq 'android:exported\(0x[0-9a-f]+\)=\(type 0x[0-9a-
 for ac in BOOT_COMPLETED MY_PACKAGE_REPLACED; do
   printf '%s\n' "$REC" | grep -q "android.intent.action.$ac" || { echo "ERROR: el receptor no escucha $ac" >&2; rm -f "$OUT"; exit 1; }
 done
+# La foto del comprobante con la cámara: el proveedor de archivos tiene que estar declarado, sin exportar y con permiso por enlace.
+# Y no se declara el permiso CAMERA: con él declarado, Android exigiría concederlo antes de abrir la cámara y la foto dejaría de abrirse.
+PRV="$(printf '%s\n' "$XML" | awk '/E: provider/ {f=1} f {print} /E: activity|E: service|E: receiver/ && f {exit}')"
+printf '%s\n' "$PRV" | grep -q 'ar.net.yapur.gestion.FotoProvider' || { echo "ERROR: el manifiesto no declara el proveedor de la foto del comprobante" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$PRV" | grep -q 'ar.net.yapur.gestion.fotos' || { echo "ERROR: el proveedor de fotos no tiene la autoridad esperada" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$PRV" | grep -Eq 'android:exported\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0x0$' || { echo "ERROR: el proveedor de fotos no debe estar exportado" >&2; rm -f "$OUT"; exit 1; }
+printf '%s\n' "$PRV" | grep -Eq 'android:grantUriPermissions\(0x[0-9a-f]+\)=\(type 0x[0-9a-f]+\)0xffffffff$' || { echo "ERROR: el proveedor de fotos tiene que dar permiso por enlace a la cámara (grantUriPermissions)" >&2; rm -f "$OUT"; exit 1; }
+if echo "$BADGE" | grep -q "^uses-permission: name='android.permission.CAMERA'"; then echo "ERROR: no declares el permiso CAMERA: Android obligaría a concederlo antes de abrir la cámara" >&2; rm -f "$OUT"; exit 1; fi
 if ! unzip -Zv "$OUT" resources.arsc | grep -q "compression method:.*stored"; then
   echo "ERROR: resources.arsc debe ir sin comprimir (Android 11+ lo exige)" >&2; rm -f "$OUT"; exit 1
 fi

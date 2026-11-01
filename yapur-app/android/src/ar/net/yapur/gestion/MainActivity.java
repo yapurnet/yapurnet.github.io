@@ -3,6 +3,7 @@ package ar.net.yapur.gestion;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -14,6 +15,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -47,6 +49,7 @@ public class MainActivity extends Activity {
     private static final int REQ_LOC = 3;
     private static final int REQ_NOTIF = 4;
     private static final int REQ_BG = 5;
+    private static final int REQ_FOTO = 6;
     private static final String OFFLINE = "file:///android_asset/offline.html";
     private static final String[] OPENABLE = {"http", "https", "tel", "mailto", "geo", "whatsapp", "waze", "sms", "smsto"};
 
@@ -212,6 +215,8 @@ public class MainActivity extends Activity {
         public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
             if (fileCb != null) { fileCb.onReceiveValue(null); fileCb = null; }
             fileCb = cb;
+            /* «Sacar foto con la cámara» (input con capture): se abre la cámara directo; si no se puede, cae al selector de archivos */
+            if (p.isCaptureEnabled() && abrirCamara()) return true;
             try {
                 startActivityForResult(p.createIntent(), REQ_FILE);
             } catch (Exception e) {
@@ -296,8 +301,39 @@ public class MainActivity extends Activity {
         return checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION") == PackageManager.PERMISSION_GRANTED;
     }
 
+    /* abre la cámara del celular para sacar la foto del comprobante; la foto se guarda en un archivo temporal de la app (FotoProvider) */
+    private File fotoArch;
+
+    private boolean abrirCamara() {
+        try {
+            File d = FotoProvider.dir(this);
+            File[] viejas = d.listFiles();
+            if (viejas != null) for (File x : viejas) x.delete();
+            fotoArch = new File(d, "comprobante_" + System.currentTimeMillis() + ".jpg");
+            Uri u = FotoProvider.uriDe(fotoArch);
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, u);
+            i.setClipData(ClipData.newRawUri("foto", u));
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(i, REQ_FOTO);
+            return true;
+        } catch (Exception e) {
+            fotoArch = null;
+            return false;
+        }
+    }
+
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
+        if (req == REQ_FOTO) {
+            if (fileCb != null) {
+                Uri[] r = null;
+                if (res == Activity.RESULT_OK && fotoArch != null && fotoArch.length() > 0) r = new Uri[]{FotoProvider.uriDe(fotoArch)};
+                fileCb.onReceiveValue(r);
+                fileCb = null;
+            }
+            return;
+        }
         if (req == REQ_FILE) {
             if (fileCb != null) {
                 Uri[] r = null;
