@@ -147,6 +147,27 @@ Anota **solo**, sin que el técnico toque nada, a qué hora empezó y a qué hor
 - **Después de volver a la base la ubicación se sigue compartiendo hasta el final del horario** (de corrido, hasta las 20 h; cortado, hasta el final de la tarde); no se corta sola al terminar. Si no querés ver el camino a casa del técnico, bajá el «Hasta» del horario.
 - Se guardan **90 días**, y solo la hora, el origen (base o manual) y la distancia a la base: **no se guardan coordenadas** en este registro. No entra en las copias de seguridad, igual que la ubicación.
 
+## Horas trabajadas (para pagar por hora)
+
+Sale de la jornada de arriba, sin cargar nada: no hace falta APK nuevo. En **Técnicos → Horas trabajadas** ves, por técnico, **una casilla por día** de la semana (lunes a domingo, en horas:minutos) y el **total de la semana**. Con las flechas pasás a otras semanas (hasta 90 días atrás). Tocando una casilla ves el detalle del día: los tramos y cómo se contó. Abajo, **«Copiar el resumen»** (para pegarlo en WhatsApp) y **«Descargar CSV»** (una fila por día, con las horas en h:mm y en decimal, por ejemplo 8,50, y el total de cada técnico).
+
+**Cómo se cuenta un día:** desde que el celular llega a la base (el ingreso) hasta la última vez que vuelve a ella. Si sale a trabajar y vuelve a la base, ese rato **cuenta** (es tiempo de trabajo). En un día **cortado** se cuenta cada tramo por separado y **la siesta no se cuenta**: la mañana va del ingreso a la última vez que estuvo en la base antes del corte (o hasta el final del tramo, si cortó sin pasar por la base), y la tarde, de la retoma a su último regreso.
+
+**Los días que hay que mirar:**
+- **Sin cerrar** (amarillo): el técnico ingresó pero no se lo vio volver a la base (se quedó sin batería, cerró la app, no pasó por la base). Se cuenta hasta la última posición recibida, que puede ser menos de lo que trabajó. Hay un cartel arriba con la cantidad de días así.
+- **En curso** (verde): el día de hoy, que sigue sumando.
+- **Corregido** (con asterisco): lo cargó la oficina a mano.
+
+**Corregir un día** (solo el administrador): tocás la casilla → **«Corregir las horas»** y cargás a qué hora empezó y terminó (un par de horas por tramo), con el motivo, que queda anotado junto con quién lo cambió. Sirve también para cargar un día en el que no hubo registro. Lo que cargues **reemplaza** el cálculo automático de ese día; con **«Volver al cálculo automático»** se saca la corrección y vuelve lo que midió el celular (no se pierde nada).
+
+**Qué ve el técnico:** en la barra de arriba, **«Hoy 5 h 10 min · semana 21 h»** y el botón **«Mis horas»** con cada día de la semana. Si un día figura «Sin cerrar» o no le cierra, le avisa a la oficina. No puede corregir nada. Los demás perfiles de oficina no ven las horas salvo que tengan el permiso de ver técnicos.
+
+**Límites, para no pagar de más ni de menos:**
+- Es el tiempo que **el celular estuvo reportando** entre el ingreso y el último regreso a la base, no una prueba de que la persona trabajó: un celular olvidado, o un técnico que se queda en el galpón, sigue sumando. Por eso conviene revisar el resumen antes de pagar.
+- Si el horario de ubicación termina antes de que el técnico vuelva a la base (por ejemplo, el horario es hasta las 20 y vuelve a las 20:30), ese regreso **no se registra** y el día queda «Sin cerrar». Conviene que el «Hasta» del horario sea más tarde que el fin real de la jornada.
+- Las horas se guardan **90 días**, igual que la jornada, y no entran en las copias de seguridad: **descargá el CSV de cada semana o quincena al liquidar**.
+- La exactitud de cada hora es la de la jornada (±1 minuto en la hora y los metros del GPS del teléfono).
+
 ## Cliente nuevo desde el reporte del técnico
 
 En **Clientes → Nuevo cliente**, arriba, está **Completar con el reporte del técnico**: pegás el texto que manda el técnico por WhatsApp y toca **Completar los datos**.
