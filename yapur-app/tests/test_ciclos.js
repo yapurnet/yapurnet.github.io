@@ -152,7 +152,7 @@ reset();setToday('2026-10-05');
 const cx=mk('sx',{extras:['multimedia']});S.clientes.set('sx',cx);pay('sx','2026-08',35000);pay('sx','2026-09',20000);rebuildDerived();
 const bx=billing(cx);
 t('facturacion: el mes pagado solo con el plan deja el servicio pendiente',bx.price===35000&&bx.periods.find(p=>p.per==='2026-09').rest===15000&&bx.periods.find(p=>p.per==='2026-08').rest===0,bx.periods.map(p=>[p.per,p.rest]));
-t('el recibo no lleva el plan ni los servicios del cliente',(()=>{S.pagos.set('rx',{id:'rx',c:'sx',concepto:'mensualidad',per:'2026-10',monto:35000,fecha:'2026-10-05',hora:'10:00',recibo:'Rrx',metodo:'efectivo'});S.clientes.set('sx',cx);S.ajustes.empresa='Y';const tx=receiptText('Rrx');return tx.includes('Abono')&&!tx.includes('Servicio')&&!tx.includes('Hogar')&&!tx.includes('Multimedia');})());
+t('el recibo no lleva el plan ni los servicios del cliente',(()=>{S.pagos.set('rx',{id:'rx',c:'sx',concepto:'mensualidad',per:'2026-10',monto:35000,fecha:'2026-10-05',hora:'10:00',recibo:'Rrx',metodo:'efectivo'});S.clientes.set('sx',cx);S.ajustes.empresa='Y';const tx=receiptText('Rrx');return tx.includes('Abono')&&!tx.includes('Servicio:')&&!tx.includes('Hogar')&&!tx.includes('Multimedia');})());
 // --- precios con vigencia por mes: un aumento no cambia los meses ya cobrados ---
 reset();setToday('2026-10-05');S.ajustes.servicios=null;
 S.planes.set('p1',{id:'p1',nombre:'Hogar',bajada:50,subida:25,precio:20000});
