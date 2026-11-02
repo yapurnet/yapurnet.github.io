@@ -17,6 +17,9 @@ FIXTURE = """() => {
   S.ajustes.empresa = 'YAPUR.NET';
   S.ajustes.recibo = {leyenda: 'YAPUR.NET', razon: 'YAPUR Miguel Matias', cuit: '20325478307', iibb: '20325478307', dom: 'Lavalle 157', tel: 'Mauro: 3844-562605 / Brenda: 3844-589351', web: 'https://yapurnet.github.io', pv: '', alias: ['mauroyapur', 'myapur70.mp']};
   S.planes.set('p1', {id: 'p1', nombre: 'Hogar 150', bajada: 150, subida: 50, precio: 18000});
+  S.clientes.set('c2', {id: 'c2', nombre: 'Ciclo Dos', codigo: '8', planId: 'p1', ciclo: 2, tel: '3844000002'});
+  S.pagos.set('d1', {id: 'd1', c: 'c2', concepto: 'mensualidad', per: '2026-11', monto: 18000, fecha: '2026-11-14', hora: '10:00', recibo: 'R261114-CI2', metodo: 'efectivo'});
+  S.pagos.set('d2', {id: 'd2', c: 'c2', concepto: 'mensualidad', per: '2026-12', monto: 18000, fecha: '2026-11-14', hora: '10:01', recibo: 'R261114-CI3', metodo: 'efectivo'});
   S.clientes.set('c1', {id: 'c1', nombre: 'Saslaver Ana Fiorela', codigo: '7', dni: '35843319', dir: 'Alte Brown', planId: 'p1', ciclo: 1, tel: '3844562605', extras: ['multimedia']});
   const pg = (id, per, recibo, hora) => S.pagos.set(id, {id, c: 'c1', concepto: 'mensualidad', per, monto: 18000, fecha: '2026-11-02', hora, recibo, metodo: 'efectivo'});
   pg('r1', '2026-11', 'R261102-J2R', '17:57');
@@ -52,6 +55,12 @@ async def main():
         check('noviembre: desde 01/11/2026 hasta 01/12/2026, vence el 10/12/2026', await per('R261102-J2R') == {'desde': '2026-11-01', 'hasta': '2026-12-01', 'vto': '2026-12-10'}, await per('R261102-J2R'))
         check('diciembre: pasa al año siguiente (01/12/2026 al 01/01/2027, vence el 10/01/2027)', await per('R261102-DIC') == {'desde': '2026-12-01', 'hasta': '2027-01-01', 'vto': '2027-01-10'}, await per('R261102-DIC'))
         check('dos meses juntos: desde el primero hasta el 1 del mes siguiente al último', await per('R261102-DOS') == {'desde': '2026-10-01', 'hasta': '2026-12-01', 'vto': '2026-12-10'}, await per('R261102-DOS'))
+        check('ciclo 2, noviembre: desde 13/11/2026 hasta 13/12/2026, vence el 20/12/2026', await per('R261114-CI2') == {'desde': '2026-11-13', 'hasta': '2026-12-13', 'vto': '2026-12-20'}, await per('R261114-CI2'))
+        check('ciclo 2, diciembre: pasa al año siguiente (13/12/2026 al 13/01/2027, vence el 20/01/2027)', await per('R261114-CI3') == {'desde': '2026-12-13', 'hasta': '2027-01-13', 'vto': '2027-01-20'}, await per('R261114-CI3'))
+        await pg.evaluate("openReceipt('R261114-CI2')"); await pg.wait_for_selector('.rc')
+        rc2 = re.sub(r'\s+', ' ', await pg.inner_text('.rc'))
+        check('el recibo del ciclo 2 dice «desde: 13/11/2026 hasta: 13/12/2026 · Vto. para el pago: 20/12/2026»', 'Período facturado desde: 13/11/2026 hasta: 13/12/2026 · Vto. para el pago: 20/12/2026' in rc2, rc2)
+        await pg.click('.sheet [data-close]')
         await pg.evaluate("openReceipt('R261102-J2R')"); await pg.wait_for_selector('.rc')
         rc = re.sub(r'\s+', ' ', await pg.inner_text('.rc'))
         check('el recibo dice «Período facturado desde: 01/11/2026 hasta: 01/12/2026 · Vto. para el pago: 10/12/2026»', 'Período facturado desde: 01/11/2026 hasta: 01/12/2026 · Vto. para el pago: 10/12/2026' in rc, rc)

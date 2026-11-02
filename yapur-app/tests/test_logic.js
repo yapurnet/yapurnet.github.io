@@ -58,6 +58,8 @@ t('recibo con datos: punto de venta, cliente, condiciones y alias',rt2.includes(
 t('recibo: período facturado del 1 al 1 del mes siguiente y vencimiento el 10 del mes siguiente',rt2.includes('Período facturado: 01/09/2026 al 01/10/2026 · Vto. para el pago: 10/10/2026')&&rt2.includes('Abono Mensual Servicio de Internet (septiembre de 2026)'),rt2);
 const rh=receiptHTML(receiptData('R261019-ABC'));
 t('recibo HTML: tabla con el servicio, total y alias',rh.includes('Producto / Servicio')&&rh.includes('Importe total')&&rh.includes('Alias: mi.alias')&&!rh.includes('ANULADO'),rh.slice(0,200));
+S.clientes.set('c1',{id:'c1',nombre:'Cliente Prueba',codigo:'7',ciclo:2});
+t('recibo del ciclo 2: período del 13 al 13 y vencimiento el 20 del mes siguiente',receiptText('R261019-ABC').includes('Período facturado: 13/09/2026 al 13/10/2026 · Vto. para el pago: 20/10/2026'),receiptText('R261019-ABC'));
 S.clientes.set('c1',{id:'c1',nombre:'<b>Hack</b> & Cía',codigo:'7'});
 t('recibo HTML: escapa lo que viene de los datos',!receiptHTML(receiptData('R261019-ABC')).includes('<b>Hack</b>')&&receiptHTML(receiptData('R261019-ABC')).includes('&lt;b&gt;Hack'));
 S.pagos.set('r2',{id:'r2',c:'c1',concepto:'instalacion',nota:'Cable y ficha',monto:10000,fecha:'2026-10-19',hora:'13:50',recibo:'R261019-XYZ',metodo:'transferencia',anulado:true});
