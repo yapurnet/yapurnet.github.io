@@ -944,7 +944,7 @@ const NET=(function(){
   /* en la app de Android los enlaces de WhatsApp, mapas y llamadas se abren afuera, sin sacar a la persona de la app */
   if(native){
     document.addEventListener('click',e=>{
-      const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;
+      const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented||a.hasAttribute('data-wa-img'))return;   /* data-wa-img: el recibo por WhatsApp lo maneja su propio botón (manda la imagen) */
       const h=a.getAttribute('href')||'';
       if(/^(https?:|geo:|tel:|whatsapp:|waze:|intent:|mailto:|sms:)/i.test(h)&&(a.target==='_blank'||!h.startsWith(location.origin))&&typeof bridge.openUrl==='function'){
         e.preventDefault();bridge.openUrl(h);
@@ -3755,14 +3755,15 @@ function receiptData(recibo){
   const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
   let periodo=null;
   if(mens.length){
-    const a=mens[0].per,z=mens[mens.length-1].per;
-    periodo={desde:a+'-01',hasta:z+'-'+pad(daysIn(z)),vto:z+'-'+pad(Math.min(cicloCfg(cicloOf(c)).hasta,daysIn(z)))};
+    /* el mes pagado va del 1 al 1 del mes siguiente, y el pago vence el día de vencimiento del ciclo del mes siguiente (ej.: noviembre → 01/11 al 01/12, vto. 10/12) */
+    const a=mens[0].per,z=addMonths(mens[mens.length-1].per,1);
+    periodo={desde:a+'-01',hasta:z+'-01',vto:z+'-'+pad(Math.min(cicloCfg(cicloOf(c)).hasta,daysIn(z)))};
   }
   return {
     nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
     emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
       tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
-    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final',servicio:c&&mens.length&&servicioTxt(c)!=='Sin plan'?servicioTxt(c):''},
+    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
     lineas:ps.map(p=>({
       desc:p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''),
       cant:1,cond:cond(p),unit:Number(p.monto)||0})),
@@ -3786,7 +3787,6 @@ function receiptText(recibo){
   L.push('');
   d.lineas.forEach(l=>L.push(l.desc+(l.cant>1?'  x'+l.cant:'')+'  '+fmtMoney(l.unit*l.cant)));
   L.push('','IMPORTE TOTAL: '+fmtMoney(d.total));
-  if(c.servicio)L.push('Servicio: '+c.servicio);
   if(e.alias.length)L.push('',...e.alias.map(a=>'Alias: '+a));
   if(d.anulado)L.push('','*** RECIBO ANULADO ***');
   return L.join('\n');
@@ -3806,14 +3806,120 @@ function receiptHTML(d){
     <table><thead><tr><th>Producto / Servicio</th><th class="r w1">Cant.</th><th class="cp w2">Condición de pago</th><th class="r w3">Precio unit.</th><th class="r w3">Subtotal</th></tr></thead><tbody>
       ${d.lineas.map(l=>`<tr><td>${esc(l.desc)}</td><td class="r">${l.cant}</td><td class="cp">${esc(l.cond)}</td><td class="r">${esc(fmtMoney(l.unit))}</td><td class="r">${esc(fmtMoney(l.unit*l.cant))}</td></tr>`).join('')}</tbody></table>
     <div class="tot"><span>Importe total:</span><span>${esc(fmtMoney(d.total))}</span></div>
-    ${c.servicio||e.alias.length?`<div class="al">${c.servicio?`<div>Servicio: ${esc(c.servicio)}</div>`:''}${e.alias.map(a=>`<div>Alias: ${esc(a)}</div>`).join('')}</div>`:''}
+    ${e.alias.length?`<div class="al">${e.alias.map(a=>`<div>Alias: ${esc(a)}</div>`).join('')}</div>`:''}
     ${d.anulado?'<div class="an">ANULADO</div>':''}</div>`;
 }
+/* el recibo como imagen, igual que el papel: es lo que se manda por WhatsApp (un texto largo se ve feo y no parece un recibo) */
+function receiptCanvas(d){
+  const W=620,M=14,K=2,e=d.emisor,c=d.cliente,FONT='"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif',LN='#222';
+  const render=(x,paint)=>{
+    let y=0;
+    const font=(s,b)=>{x.font=(b?'700 ':'400 ')+s+'px '+FONT;};
+    /* parte un texto con tramos en negrita ([[texto,negrita],…]) en renglones del ancho w */
+    const wrap=(segs,w,s)=>{
+      const out=[];let cur=[],cx=0;
+      segs.forEach(([t,b])=>String(t).split(' ').forEach(p=>{
+        if(p==='')return;font(s,b);
+        const pw=x.measureText(p).width,sp=cx?x.measureText(' ').width:0;
+        if(cx&&cx+sp+pw>w){out.push(cur);cur=[];cx=0;}
+        const px=cx?cx+x.measureText(' ').width:0;cur.push([p,b,px]);cx=px+pw;
+      }));
+      if(cur.length)out.push(cur);return out;
+    };
+    const text=(lines,x0,y0,s,lh)=>{if(paint)lines.forEach((ln,i)=>ln.forEach(([t,b,px])=>{font(s,b);x.textBaseline='middle';x.textAlign='left';x.fillStyle='#111';x.fillText(t,x0+px,y0+i*lh+lh/2);}));return lines.length*lh;};
+    const rule=(yy,col)=>{if(paint){x.fillStyle=col||LN;x.fillRect(0,yy,W,1);}};
+    const P=10;
+    /* encabezado: emisor | RECIBO | original, no válido como factura */
+    const hl=wrap([[e.leyenda||e.razon,true]],250,17);let hh=hl.length*22;
+    const hr=e.leyenda?wrap([[e.razon,false]],250,13):[];hh+=hr.length*17;
+    text(hl,P,y+P,17,22);text(hr,P,y+P+hl.length*22,13,17);
+    if(paint){x.textBaseline='middle';x.fillStyle='#111';font(18,true);x.textAlign='center';x.fillText('RECIBO',W/2+10,y+P+11);
+      font(10.5,false);x.textAlign='right';x.fillText('ORIGINAL',W-P,y+P+8);font(10.5,true);x.fillText('NO VÁLIDO COMO FACTURA',W-P,y+P+23);}
+    y+=Math.max(hh,38)+P*2;rule(y);y+=1;
+    /* datos del emisor y del comprobante */
+    const ident=[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / '),cont=[e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / ');
+    const b1=[];
+    if(ident)b1.push([[ident,false]]);if(e.dom)b1.push([[e.dom,false]]);if(cont)b1.push([[cont,false]]);
+    b1.push([...(e.pv?[['Punto de venta: ',false],[e.pv,true],[' · ',false]]:[]),['Comp. Nro: ',false],[d.nro,true],[' · Fecha de emisión: ',false],[dmy(d.fecha),true],[d.hora?' '+d.hora:'',false]]);
+    y+=7;b1.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
+    /* cliente */
+    const b2=[[['Cliente: ',false],[c.nombre,true],[c.codigo?' (#'+c.codigo+')':'',false]]];
+    if(c.dni)b2.push([['DNI / CUIT: '+c.dni,false]]);if(c.dir)b2.push([['Dirección: '+c.dir,false]]);
+    b2.push([['Condición de venta: '+d.cond+' · Condición frente al IVA: '+c.iva,false]]);
+    if(d.periodo)b2.push([['Período facturado desde: '+dmy(d.periodo.desde)+' hasta: '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto),false]]);
+    y+=7;b2.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
+    /* tabla: producto | cantidad | condición de pago | precio | subtotal */
+    const cols=[[0,.36,'l'],[.36,.08,'r'],[.44,.2,'l'],[.64,.18,'r'],[.82,.18,'r']].map(([a,w,al])=>({x:Math.round(a*W),w:Math.round(w*W),al}));
+    const heads=['PRODUCTO / SERVICIO','CANT.','CONDICIÓN DE PAGO','PRECIO UNIT.','SUBTOTAL'];
+    if(paint){x.fillStyle='#eee';x.fillRect(0,y,W,24);}
+    if(paint)heads.forEach((h,i)=>{const k=cols[i];font(9.5,true);x.textBaseline='middle';x.fillStyle='#333';x.textAlign=k.al==='r'?'right':'left';x.fillText(h,k.al==='r'?k.x+k.w-8:k.x+8,y+12);});
+    y+=24;rule(y,'#ccc');y+=1;
+    d.lineas.forEach(l=>{
+      const dl=wrap([[l.desc,false]],cols[0].w-16,12.5),rh=Math.max(dl.length*17,17)+10;
+      text(dl,cols[0].x+8,y+5,12.5,17);
+      if(paint){x.fillStyle='#111';x.textBaseline='middle';font(12.5,false);
+        x.textAlign='right';x.fillText(String(l.cant),cols[1].x+cols[1].w-8,y+5+8.5);
+        x.textAlign='left';x.fillText(l.cond,cols[2].x+8,y+5+8.5);
+        x.textAlign='right';x.fillText(fmtMoney(l.unit),cols[3].x+cols[3].w-8,y+5+8.5);x.fillText(fmtMoney(l.unit*l.cant),cols[4].x+cols[4].w-8,y+5+8.5);}
+      y+=rh;rule(y,'#ccc');y+=1;
+    });
+    /* total */
+    if(paint){x.fillStyle='#111';x.textBaseline='middle';x.textAlign='right';font(17,true);x.fillText(fmtMoney(d.total),W-P-4,y+19);const tw=x.measureText(fmtMoney(d.total)).width;font(15,true);x.fillText('Importe total:',W-P-4-tw-14,y+19);}
+    y+=38;rule(y);y+=1;
+    if(e.alias.length){y+=7;e.alias.forEach(a=>{y+=text(wrap([['Alias: '+a,false]],W-P*2,12),P,y,12,16);});y+=7;}
+    if(paint&&d.anulado){x.save();x.translate(W/2,y/2);x.rotate(-0.21);x.globalAlpha=.55;x.fillStyle='#c00';x.textAlign='center';x.textBaseline='middle';font(56,true);x.fillText('ANULADO',0,0);x.restore();}
+    return y;
+  };
+  const mc=document.createElement('canvas').getContext('2d'),H=render(mc,false);
+  const cv=document.createElement('canvas');cv.width=(W+M*2)*K;cv.height=(H+M*2)*K;
+  const x=cv.getContext('2d');x.scale(K,K);x.fillStyle='#fff';x.fillRect(0,0,W+M*2,H+M*2);
+  x.translate(M,M);render(x,true);
+  x.setTransform(K,0,0,K,0,0);x.strokeStyle=LN;x.lineWidth=1;x.strokeRect(M+.5,M+.5,W-1,H-1);
+  return cv;
+}
+/* cómo se manda el recibo como imagen según dónde esté la app (null = no se puede: se manda el texto, como antes):
+   nativo (APK) abre el chat del cliente con la imagen adjunta · compartir (celular con navegador) abre el menú de compartir
+   · portapapeles (computadora) copia la imagen y abre el chat para pegarla */
+function reciboVia(){
+  const b=window.YapurApp;
+  if(b)return typeof b.shareImage==='function'?'nativo':null;
+  try{
+    if(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)){
+      if(navigator.canShare&&navigator.canShare({files:[new File(['x'],'r.png',{type:'image/png'})]}))return 'compartir';
+      return null;
+    }
+    if(navigator.clipboard&&navigator.clipboard.write&&window.ClipboardItem)return 'portapapeles';
+  }catch(e){}
+  return null;
+}
+function mandarReciboWA(ev,d,tel,href){
+  const via=reciboVia(),afuera=()=>NET.openExternal(href);
+  if(!via){if(window.YapurApp){ev.preventDefault();afuera();}return;}   /* sin imagen posible: el enlace con el texto del recibo (en el APK lo abre el puente) */
+  ev.preventDefault();
+  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.emisor.razon||'')+' · '+fmtMoney(d.total);
+  try{
+    const cv=receiptCanvas(d);
+    if(via==='nativo'){
+      const r=String(window.YapurApp.shareImage(nombre,cv.toDataURL('image/png').split(',')[1],waNumber(tel),cap)||'');
+      if(r!=='ok'){toast(r||'No se pudo abrir WhatsApp','bad');afuera();}
+      return;
+    }
+    cv.toBlob(async blob=>{
+      try{
+        if(!blob)throw new Error('sin imagen');
+        if(via==='compartir')await navigator.share({files:[new File([blob],nombre,{type:'image/png'})],text:cap});
+        else{await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast('Recibo copiado como imagen: pegalo en el chat (Ctrl+V)');window.open(waUrl(tel,cap),'_blank','noopener');}
+      }catch(err){if(err&&err.name==='AbortError')return;afuera();}
+    },'image/png');
+  }catch(err){afuera();}
+}
+/* al imprimir, el recibo entra en media hoja A4 (210 × 148 mm): se imprime arriba y la hoja se corta al medio */
+const RC_PRINT_CSS='@page{size:A4 portrait;margin:8mm 10mm}html,body{margin:0;background:#fff}.rc{max-width:none;width:100%;font-size:9pt;line-height:1.2;border-color:#000}.rc .h{display:flex;padding:4px 8px}.rc .h b{font-size:12pt}.rc .tt,.rc .nv{margin-top:0}.rc .tt{text-align:center}.rc .nv{text-align:right;font-size:8pt}.rc .b{padding:3px 8px}.rc .b div{margin:0}.rc th,.rc td{padding:1.5px 6px}.rc td{font-size:9pt}.rc th{font-size:7.5pt}.rc .cp{display:table-cell}.rc .w1{width:7%}.rc .w2{width:15%}.rc .w3{width:14%}.rc .tot{padding:4px 8px;font-size:11pt}.rc .al{padding:4px 8px;font-size:8.5pt}.rc .al div{margin:0}';
 /* imprime solo el recibo, en una hoja aparte (desde la computadora de la oficina) */
 function printReceipt(d){
   try{
     const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
-    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title><style>@page{margin:12mm}body{margin:0}</style>'+receiptHTML(d));doc.close();
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title>'+receiptHTML(d)+'<style>'+RC_PRINT_CSS+'</style>');doc.close();
     setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}setTimeout(()=>f.remove(),2000);},150);
   }catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}
 }
@@ -3825,14 +3931,14 @@ function openReceipt(recibo){
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
-    <div class="actions start" style="margin-top:12px">${d.anulado||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
+    <div class="actions start" style="margin-top:12px">${d.anulado||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
     ${pc&&puedeVerComp(pc)?`<div class="actions start"><button class="btn" type="button" id="rc-comp">Ver comprobante de la transferencia</button></div><div class="hint" id="rc-comp-st"></div><img id="rc-comp-img" class="comp-full" alt="Comprobante de la transferencia" hidden>`:''}
     <div id="rc-tel" class="card flat" hidden><p class="small muted" style="margin:0 0 8px">Este cliente no tiene teléfono cargado. Escribí su número de WhatsApp (con el código de área, sin 0 ni 15) y se abre el chat con el recibo listo para mandar.</p>
       ${F('WhatsApp del cliente','rc-num','<input id="rc-num" type="tel" inputmode="tel" autocomplete="off" placeholder="3844 56-2605">')}
       ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
-      <div class="actions"><a class="btn primary" id="rc-wa-go" target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
+      <div class="actions"><a class="btn primary" id="rc-wa-go" data-wa-img target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
     onMount(el){
       const bc=$('#rc-comp',el);if(bc)bc.addEventListener('click',()=>{bc.disabled=true;verComprobante(pc.comp,$('#rc-comp-img',el),$('#rc-comp-st',el)).finally(()=>{bc.disabled=false;});});
       const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
@@ -3850,6 +3956,7 @@ function openReceipt(recibo){
         catch(err){toast(err.message||'No se pudo reenviar','bad');re.disabled=false;}
       });
       const wa=$('#rc-wa',el);
+      if(wa&&wa.tagName==='A')wa.addEventListener('click',ev=>mandarReciboWA(ev,d,c.tel,wa.href));
       if(wa&&wa.tagName==='BUTTON'){   /* sin teléfono cargado: se pide el número en el momento */
         const box=$('#rc-tel',el),inp=$('#rc-num',el),go=$('#rc-wa-go',el);
         const num2=()=>waNumber(inp.value),ok=()=>{const n=num2();return n.length>=12&&n.length<=14;};
@@ -3860,6 +3967,7 @@ function openReceipt(recibo){
           if(!ok()){e.preventDefault();return toast('Escribí el número con el código de área (por ejemplo 3844 56-2605)','bad');}
           const sv=$('#rc-save',el);
           if(c&&sv&&sv.checked)saveClient(c,{tel:inp.value.trim()}).then(()=>toast('Número guardado en la ficha')).catch(dbError);
+          mandarReciboWA(e,d,inp.value,go.href);
         });
       }
     }});
@@ -4396,7 +4504,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='e9770ef01d';
+const BUILD='311a25e5dc';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

@@ -81,6 +81,7 @@ done
 unzip -p "$OUT" classes.dex > "$WORK/check.dex"
 grep -aq "Lar/net/yapur/gestion/MainActivity;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae MainActivity" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/UbicacionService;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el servicio de ubicación" >&2; rm -f "$OUT"; exit 1; }
+grep -aq "shareImage" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el envío del recibo como imagen (shareImage)" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/FotoProvider;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el proveedor de la foto del comprobante" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "Lar/net/yapur/gestion/UbicacionReceptor;" "$WORK/check.dex" || { echo "ERROR: classes.dex no trae el receptor de arranque de la ubicación" >&2; rm -f "$OUT"; exit 1; }
 grep -aq "$SERVER_URL" "$WORK/check.dex" || { echo "ERROR: la dirección del servidor no quedó dentro del APK" >&2; rm -f "$OUT"; exit 1; }

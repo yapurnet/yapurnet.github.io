@@ -253,7 +253,7 @@ const NET=(function(){
   /* en la app de Android los enlaces de WhatsApp, mapas y llamadas se abren afuera, sin sacar a la persona de la app */
   if(native){
     document.addEventListener('click',e=>{
-      const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;
+      const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented||a.hasAttribute('data-wa-img'))return;   /* data-wa-img: el recibo por WhatsApp lo maneja su propio botón (manda la imagen) */
       const h=a.getAttribute('href')||'';
       if(/^(https?:|geo:|tel:|whatsapp:|waze:|intent:|mailto:|sms:)/i.test(h)&&(a.target==='_blank'||!h.startsWith(location.origin))&&typeof bridge.openUrl==='function'){
         e.preventDefault();bridge.openUrl(h);
