@@ -2218,8 +2218,8 @@ VIEWS.ajustes={
       <div class="list" id="aj-users"></div></div>
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-cero">Empezar a cobrar de cero</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
-    <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
-      <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos.</p>
+    <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
+      <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos. Si ya tenés los clientes cargados y te faltan las IP, <b>Completar IP con archivos .rsc</b> las busca en los exports de los routers.</p>
       <div class="list" id="aj-routers"></div></div>
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
@@ -2697,22 +2697,25 @@ function rtBuild(lines){
     else if(t==='D')D.push({ip:l[1],mac:rtClean(l[2]),server:rtClean(l[3]),dis:l[4]==='true',comment:rtClean(l[5])});
   });
   const E=new Map(),res={items:[],otros:0,repetidos:0,vpn:0};
-  const mk=key=>{let e=E.get(key);if(!e){e={key,ip:'',nombre:'',tipo:'fija',usuario:'',mac:'',rate:null,perfil:'',dis:false,fuentes:[]};E.set(key,e);}return e;};
+  const mk=key=>{let e=E.get(key);if(!e){e={key,ip:'',nombre:'',tipo:'fija',usuario:'',mac:'',rate:null,perfil:'',dis:false,fuentes:[],alias:[]};E.set(key,e);}return e;};
+  const al=(e,...xs)=>xs.forEach(x=>{x=rtClean(x);if(x&&!/^PON[_ ]?\d+$/i.test(x)&&!e.alias.includes(x))e.alias.push(x);});   /* los otros nombres con que aparece (para emparejar con la ficha) */
   Q.forEach(q=>{
     const ip=rtIpOne(q.target);
     if(!ip){res.otros++;return;}
     const had=E.has(ip),e=mk(ip);
+    al(e,q.name,q.comment);
     if(had&&e.fuentes.includes('cola')){res.repetidos++;return;}
     e.ip=ip;e.nombre=q.name;e.rate=rtRate(q.max);e.dis=e.dis||q.dis;e.fuentes.push('cola');
   });
   D.forEach(d=>{
     const ip=rtIpOne(d.ip);if(!ip)return;
-    const e=mk(ip);e.ip=ip;e.tipo='dhcp';e.mac=d.mac;if(!e.nombre)e.nombre=d.comment;e.dis=e.dis||d.dis;e.fuentes.push('dhcp');
+    const e=mk(ip);al(e,d.comment);e.ip=ip;e.tipo='dhcp';e.mac=d.mac;if(!e.nombre)e.nombre=d.comment;e.dis=e.dis||d.dis;e.fuentes.push('dhcp');
   });
   P.forEach(p=>{
     if(!p.name)return;
     if(p.service&&!/^(pppoe|any)$/i.test(p.service)){res.vpn++;return;}   // VPN y otros servicios: no son clientes
     const ip=rtIpOne(p.remote),e=mk(ip||'u:'+p.name.toLowerCase());
+    al(e,p.comment,p.name.split('@')[0].replace(/[._]+/g,' '));
     if(ip)e.ip=ip;
     e.tipo='pppoe';e.usuario=p.name;e.perfil=p.profile;e.dis=e.dis||p.dis;e.fuentes.push('pppoe');
     if(!e.nombre)e.nombre=p.comment||p.name;
@@ -2936,9 +2939,178 @@ async function openDetected(id){
     draw();
   }});
 }
+/* ----- completar la IP de los clientes ya cargados con los archivos .rsc (export de cada router) -----
+   Los archivos se leen en este equipo: no se suben ni se guardan, y de ellos solo se toman nombre, IP, MAC y velocidad
+   (las contraseñas y claves que traen no se leen). */
+/* RouterOS escribe lo que no es ASCII como \C3\B1 (UTF-8) o \F1 (Latin-1), y escapa \" \\ \$ \? */
+function rscDecode(s){
+  return String(s).replace(/(?:\\[0-9A-Fa-f]{2})+/g,m=>{
+    const h=m.slice(1).split('\\');
+    try{return decodeURIComponent('%'+h.join('%'));}catch(e){return h.map(x=>String.fromCharCode(parseInt(x,16))).join('');}
+  }).replace(/\\(["\\$?])/g,'$1');
+}
+function rscKV(s){
+  const o={},re=/([A-Za-z][A-Za-z0-9_.-]*)=("(?:[^"\\]|\\.)*"|[^\s"]*)/g;let m;
+  while((m=re.exec(s))){let v=m[2];if(v[0]==='"')v=v.slice(1,-1);o[m[1]]=rscDecode(v);}
+  return o;
+}
+/* un .rsc → las mismas líneas que manda el script del router (Q, P, F, D), para usar rtBuild */
+function rscLines(txt){
+  const L=[];let sec='',cur='';
+  for(const raw of String(txt||'').split(/\r?\n/)){
+    const l=raw.replace(/\s+$/,'');
+    if(l.endsWith('\\')){cur+=cur?l.slice(0,-1).replace(/^\s+/,''):l.slice(0,-1);continue;}
+    const line=(cur?cur+l.replace(/^\s+/,''):l).trim();cur='';
+    if(!line||line[0]==='#')continue;
+    let path,rest;const m=line.match(/^(\/[a-z0-9 -]+?)\s+add\s+(.*)$/i);
+    if(m){path=m[1];rest=m[2];}
+    else if(/^\/[a-z0-9 \/-]+$/i.test(line)){sec=line;continue;}
+    else if(/^add\s/i.test(line)&&sec){path=sec;rest=line.replace(/^add\s+/i,'');}
+    else continue;
+    path=path.toLowerCase().replace(/\s+/g,' ');
+    if(!/^\/(queue simple|ppp secret|ppp profile|ip dhcp-server lease)$/.test(path))continue;
+    const o=rscKV(rest),b=k=>o[k]==='yes'?'true':'false';
+    if(path==='/queue simple')L.push(['Q',o.name||'',o.target||'',o['max-limit']||'',b('disabled'),o.parent||'none',o.comment||'']);
+    else if(path==='/ppp secret')L.push(['P',o.name||'',o.service||'',o.profile||'',o['remote-address']||'',b('disabled'),o.comment||'']);
+    else if(path==='/ppp profile')L.push(['F',o.name||'',o['rate-limit']||'']);
+    else L.push(['D',o.address||'',o['mac-address']||'',o.server||'',b('disabled'),o.comment||'']);
+  }
+  return L;
+}
+const rscRouter=n=>String(n||'').replace(/\.rsc$/i,'').replace(/[-_ ]*\d{1,2}[-_.]\d{1,2}[-_.]\d{2,4}.*$/,'').trim()||String(n||'').replace(/\.rsc$/i,'');
+/* palabras de un nombre para compararlo: sin tildes, sin números (los routers agregan «-104») ni conectores; lo que está entre paréntesis se mira aparte */
+const RT_STOP=new Set(['de','del','la','las','el','los','y','ftth','fibra','wifi','sr','sra']);
+function rtToks(s){return norm(s).replace(/[^a-z0-9]+/g,' ').trim().split(' ').filter(t=>t&&!/^\d+$/.test(t)&&!RT_STOP.has(t));}
+function rtVars(s){
+  s=String(s||'');const dentro=[...s.matchAll(/\(([^)]*)\)/g)].map(m=>m[1]).join(' '),fuera=s.replace(/\([^)]*\)/g,' ');
+  const v=[],add=t=>{if(t.length&&!v.some(x=>x.k===t.slice().sort().join(' ')))v.push({t,k:t.slice().sort().join(' ')});};
+  add(rtToks(fuera));if(rtToks(dentro).length>=2)add(rtToks(dentro));
+  if(!v.length)add(rtToks(s));
+  return v;
+}
+function rtLev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return Math.max(m,n);let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c;}return p[n];}
+/* dos palabras «iguales» aunque haya un error de tipeo (Caseres/Caceres) o falte el final (Municipalid/Municipalidad) */
+const rtSame=(a,b)=>a===b||(Math.min(a.length,b.length)>=4&&rtLev(a,b)<=1)||(Math.min(a.length,b.length)>=4&&Math.abs(a.length-b.length)<=3&&(a.startsWith(b)||b.startsWith(a)));
+/* Empareja los clientes que NO tienen IP con lo que se leyó de los routers.
+   seguro: mismo usuario PPPoE o mismo nombre (en cualquier orden) con una sola IP · parecido: el nombre de uno está dentro del otro, con una sola IP ·
+   revisar: varias IP posibles, nombres con error de tipeo, o una IP que reclaman dos clientes (no se marca solo) · sin: no se encontró */
+function rtCompletarIp(items,clientes){
+  const usadas=new Map();
+  for(const c of clientes){const ip=rtIpOne(c.ip);if(ip&&!usadas.has(ip))usadas.set(ip,c);}
+  const fuentes=[];
+  items.forEach(e=>{if(!e.ip)return;const vs=[];(e.alias&&e.alias.length?e.alias:[e.nombre]).forEach(a=>rtVars(a).forEach(v=>vs.push(Object.assign({a},v))));fuentes.push({e,vs});});
+  const porClave=new Map(),porUsuario=new Map(),porPal=new Map(),porIni=new Map(),push=(m,k,x)=>{let l=m.get(k);if(!l)m.set(k,l=[]);l.push(x);};
+  fuentes.forEach(f=>{
+    f.vs.forEach(v=>{const h={f,v};push(porClave,v.k,h);v.t.forEach(x=>push(porPal,x,h));new Set(v.t.filter(x=>x.length>=3).map(x=>x.slice(0,2))).forEach(x=>push(porIni,x,h));});
+    if(f.e.usuario)porUsuario.set(f.e.usuario.toLowerCase(),f);
+  });
+  /* solo se comparan los que comparten palabras (o las 2 primeras letras de al menos 2 palabras) */
+  const cerca=(v,m,corte)=>{const c=new Map();new Set(v.t.map(x=>corte?(x.length>=3?x.slice(0,2):''):x)).forEach(k=>(m.get(k)||[]).forEach(h=>c.set(h,(c.get(h)||0)+1)));return [...c.entries()].filter(([,n])=>n>=(corte?2:1)).map(([h])=>h);};
+  const res={rows:[],sin:[],yaTienen:0,bajas:0,fuentes:fuentes.length};
+  const opt=(f,a)=>({ip:f.e.ip,nombre:a||f.e.nombre,router:f.e.router||'',tipo:f.e.tipo});
+  const juntar=(hits)=>{const m=new Map();hits.forEach(h=>{if(!usadas.has(h.f.e.ip)&&!m.has(h.f.e.ip))m.set(h.f.e.ip,opt(h.f,h.v.a));});return [...m.values()];};
+  for(const c of clientes){
+    if(String(c.ip==null?'':c.ip).trim()){res.yaTienen++;continue;}
+    if(c.estado==='baja'){res.bajas++;continue;}
+    const cv=rtVars(c.nombre);let opts=[],tier='';
+    const u=String(c.usuario||'').trim().toLowerCase(),fu=u&&porUsuario.get(u);
+    if(fu){opts=juntar([{f:fu,v:{a:fu.e.nombre}}]);tier='seguro';}
+    if(!opts.length){opts=juntar(cv.flatMap(v=>porClave.get(v.k)||[]));tier='seguro';}
+    if(!opts.length){   /* un nombre contenido en el otro (2 palabras o más) */
+      const hits=[];
+      cv.forEach(v=>{if(v.t.length<2)return;cerca(v,porPal).forEach(h=>{const w=h.v;if(w.t.length<2)return;
+        const [a,b]=v.t.length<=w.t.length?[v.t,w.t]:[w.t,v.t];if(a.every(x=>b.includes(x)))hits.push(h);});});
+      opts=juntar(hits);tier='parecido';
+    }
+    if(!opts.length){   /* con errores de tipeo: al menos 2 palabras iguales y casi todo el nombre */
+      const hits=[];
+      cv.forEach(v=>{if(v.t.length<2)return;cerca(v,porIni,true).forEach(h=>{const w=h.v;if(w.t.length<2)return;
+        const usd=new Set();let sh=0;v.t.forEach(x=>{const j=w.t.findIndex((y,i)=>!usd.has(i)&&rtSame(x,y));if(j>=0){usd.add(j);sh++;}});
+        if(sh>=2&&(sh===Math.min(v.t.length,w.t.length)||sh/Math.max(v.t.length,w.t.length)>=0.6))hits.push({f:h.f,v:w,sh});});});
+      hits.sort((x,y)=>y.sh-x.sh);opts=juntar(hits).slice(0,4);tier='revisar';
+    }
+    if(!opts.length){res.sin.push(c);continue;}
+    if(opts.length>1)tier='revisar';
+    res.rows.push({id:c.id,shard:c._doc||clientShard(c.id),nombre:c.nombre,tier,opts,sel:0,marcado:tier!=='revisar'});
+  }
+  const reclaman=new Map();   /* una IP no es de dos clientes: si dos la reclaman, los dos pasan a revisar */
+  res.rows.forEach(r=>{if(r.tier!=='revisar'){const ip=r.opts[0].ip;reclaman.set(ip,(reclaman.get(ip)||0)+1);}});
+  res.rows.forEach(r=>{if(r.tier!=='revisar'&&reclaman.get(r.opts[0].ip)>1){r.tier='revisar';r.marcado=false;}});
+  return res;
+}
+const RSC_TABS=[['seguro','Seguros'],['parecido','Parecidos'],['revisar','A revisar'],['sin','Sin coincidencia']];
+function openRscIp(){
+  if(!S.loaded.clientes)return toast('Esperá a que terminen de cargar los clientes','bad');
+  const st={res:null,tab:'seguro',q:'',info:''};
+  openModal({title:'Completar IP con archivos .rsc',wide:true,html:`<div class="notice info">Elegí los archivos <b>.rsc</b> que exportaste de los routers (por ejemplo admin, fm, bomberos y leo). Se leen en este equipo: <b>no se suben ni se guardan</b>, y las contraseñas que traen no se leen. Solo se completa la IP de los clientes que no la tienen, y no se cambia nada en los routers.</div>
+    <div class="actions start"><button class="btn primary" type="button" id="rs-pick">Elegir archivos .rsc</button><input type="file" id="rs-file" multiple hidden></div>
+    <div id="rs-out"></div>`,onMount(el){
+    const out=$('#rs-out',el);
+    const rowsOf=t=>t==='sin'?st.res.sin:st.res.rows.filter(r=>r.tier===t);
+    const marcados=()=>st.res.rows.filter(r=>r.marcado);
+    function draw(){
+      const r=st.res,kp=RSC_TABS.map(([k,l])=>[k,l,rowsOf(k).length]);
+      const q=rtNameKey(st.q),l=rowsOf(st.tab).filter(x=>!q||rtNameKey(x.nombre||'').includes(q)||(x.opts||[]).some(o=>rtNameKey(o.nombre+' '+o.ip).includes(q)));
+      const n=marcados().length;
+      out.innerHTML=`<div class="hint">${esc(st.info)}</div>
+        <div class="kpis">${kp.map(([k,lb,c])=>`<div class="kpi"><span class="n">${c}</span><span class="l">${lb}</span></div>`).join('')}<div class="kpi"><span class="n">${r.yaTienen}</span><span class="l">Ya tienen IP</span></div></div>
+        <div class="toolbar"><div class="line"><input id="rs-q" class="search" type="search" placeholder="Buscar cliente, nombre en el router o IP" value="${esc(st.q)}"></div>
+          <div class="seg" id="rs-tab">${kp.map(([k,lb,c])=>`<button type="button" data-t="${k}" aria-pressed="${k===st.tab}">${lb} (${c})</button>`).join('')}</div></div>
+        ${st.tab==='sin'?`<div class="hint">Estos clientes no aparecen en los archivos (o la IP que les correspondería ya la tiene otro cliente). Se cargan a mano desde la ficha.</div>`:
+          `<div class="hint">${st.tab==='seguro'?'Mismo nombre (en cualquier orden) o mismo usuario PPPoE, con una sola IP. Vienen marcados.':st.tab==='parecido'?'El nombre de uno está dentro del otro (por ejemplo «Figueredo Emiliano Ricardo» y «Emiliano Figueredo»). Vienen marcados: mirá que sea la misma persona.':'Hay varias IP posibles, el nombre tiene un error de tipeo o dos clientes reclaman la misma IP. No vienen marcados: elegí la IP y marcá los que sean.'}</div>
+          <div class="actions start"><button class="btn small" type="button" data-all="1">Marcar todos</button><button class="btn small ghost" type="button" data-all="0">Desmarcar todos</button></div>`}
+        <div class="tbl-wrap"><table><thead><tr>${st.tab==='sin'?'<th>Cliente</th>':'<th></th><th>Cliente</th><th>En el router</th><th>IP</th>'}</tr></thead><tbody>${l.length?l.slice(0,150).map(x=>st.tab==='sin'?`<tr><td>${esc(x.nombre)}</td></tr>`:
+          `<tr><td><input type="checkbox" data-k="${esc(x.id)}" aria-label="Marcar a ${esc(x.nombre)}"${x.marcado?' checked':''}></td><td>${esc(x.nombre)}</td>${x.opts.length>1?`<td colspan="2">${x.opts.map((o,i)=>`<label style="display:flex;gap:8px;align-items:baseline;margin:2px 0"><input type="radio" name="o-${esc(x.id)}" data-r="${esc(x.id)}" value="${i}"${i===x.sel?' checked':''}><span><span class="mono">${esc(o.ip)}</span> · ${esc(o.nombre)}${o.router?` <span class="muted small">(${esc(o.router)})</span>`:''}</span></label>`).join('')}</td>`:`<td>${esc(x.opts[0].nombre)}${x.opts[0].router?` <span class="muted small">(${esc(x.opts[0].router)})</span>`:''}</td><td class="mono">${esc(x.opts[0].ip)}</td>`}</tr>`).join(''):`<tr><td colspan="4" class="muted">No hay nada con ese filtro</td></tr>`}</tbody></table></div>
+        ${l.length>150?`<div class="hint">Se muestran 150 de ${l.length}. Usá la búsqueda para ver otros.</div>`:''}
+        <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button><button class="btn primary" type="button" id="rs-go"${n?'':' disabled'}>Guardar la IP de ${n} ${n===1?'cliente':'clientes'}</button></div><div class="hint" id="rs-prog"></div>`;
+      const qi=$('#rs-q',out);qi.addEventListener('input',e=>{st.q=e.target.value;const p=e.target.selectionStart;draw();const n2=$('#rs-q',out);n2.focus();try{n2.setSelectionRange(p,p);}catch(_){}});
+      $('#rs-tab',out).addEventListener('click',e=>{const b=e.target.closest('[data-t]');if(!b)return;st.tab=b.dataset.t;draw();});
+      $$('[data-k]',out).forEach(i=>i.addEventListener('change',()=>{const r2=st.res.rows.find(x=>x.id===i.dataset.k);if(r2){r2.marcado=i.checked;$('#rs-go',out).disabled=!marcados().length;$('#rs-go',out).textContent=`Guardar la IP de ${marcados().length} ${marcados().length===1?'cliente':'clientes'}`;}}));
+      $$('[data-r]',out).forEach(i=>i.addEventListener('change',()=>{   /* elegir una IP marca al cliente */
+        const r2=st.res.rows.find(x=>x.id===i.dataset.r);if(!r2)return;r2.sel=Number(i.value)||0;r2.marcado=true;
+        const cb=$$('[data-k]',out).find(x=>x.dataset.k===r2.id);if(cb)cb.checked=true;
+        const g=$('#rs-go',out),m=marcados().length;g.disabled=!m;g.textContent=`Guardar la IP de ${m} ${m===1?'cliente':'clientes'}`;}));
+      $$('[data-all]',out).forEach(b=>b.addEventListener('click',()=>{const on=b.dataset.all==='1';l.forEach(x=>{x.marcado=on;});draw();}));
+      $('#rs-go',out).addEventListener('click',guardar);
+    }
+    async function guardar(){
+      const sel=marcados();if(!sel.length)return;
+      /* una misma IP no puede quedar en dos clientes */
+      const ips=new Map();sel.forEach(r=>{const ip=r.opts[r.sel].ip;(ips.get(ip)||ips.set(ip,[]).get(ip)).push(r.nombre);});
+      const dup=[...ips.entries()].find(([,n])=>n.length>1);
+      if(dup)return toast(`La IP ${dup[0]} está marcada para ${dup[1].length} clientes (${dup[1].slice(0,2).join(', ')}…). Dejá uno solo.`,'bad');
+      if(!await askConfirm(`Se va a escribir la IP de ${sel.length} ${sel.length===1?'cliente que no la tenía':'clientes que no la tenían'}. No se cambia nada en los routers. ¿Guardar?`,'Guardar'))return;
+      const go=$('#rs-go',out);go.disabled=true;
+      try{
+        await updateImported(sel.map(r=>({id:r.id,shard:r.shard,patch:{ip:r.opts[r.sel].ip}})),(d,t)=>{$('#rs-prog',out).textContent=`Guardando… ${d} de ${t}`;});
+        toast('IP guardada en '+sel.length+' clientes');closeModal();
+      }catch(err){dbError(err);go.disabled=false;$('#rs-prog',out).textContent='No se pudo terminar. Los que ya se guardaron no se repiten: volvé a abrir esta pantalla.';}
+    }
+    $('#rs-pick',el).addEventListener('click',()=>$('#rs-file',el).click());
+    $('#rs-file',el).addEventListener('change',async e=>{
+      const fl=[...e.target.files].slice(0,12);e.target.value='';if(!fl.length)return;
+      out.innerHTML='<div class="hint">Leyendo…</div>';
+      try{
+        const items=[],lab=[],cnt={q:0,d:0,p:0};
+        for(const f of fl){
+          if(f.size>30e6)throw new Error(f.name+' pesa demasiado para ser un export de un router.');
+          const lines=rscLines(await f.text());
+          if(!lines.length){lab.push(rscRouter(f.name)+' (sin colas ni clientes)');continue;}
+          const b=rtBuild(lines),nm=rscRouter(f.name);
+          b.items.forEach(x=>{x.router=nm;items.push(x);});
+          lines.forEach(l=>{if(l[0]==='Q')cnt.q++;else if(l[0]==='D')cnt.d++;else if(l[0]==='P')cnt.p++;});lab.push(nm);
+        }
+        st.res=rtCompletarIp(items,[...S.clientes.values()]);
+        st.info=`Leí ${fl.length} ${fl.length===1?'archivo':'archivos'} (${lab.join(', ')}): ${cnt.q} colas, ${cnt.d} leases DHCP y ${cnt.p} usuarios PPPoE; ${st.res.fuentes} con IP.`+(st.res.bajas?` ${st.res.bajas} clientes de baja no se tocan.`:'');
+        st.tab=st.res.rows.some(r=>r.tier==='seguro')?'seguro':'revisar';draw();
+      }catch(err){out.innerHTML=`<div class="notice bad">${esc(err.message||'No se pudo leer el archivo')}</div>`;}
+    });
+  }});
+}
 function bindRouters(el){
   $('#aj-newr',el).addEventListener('click',()=>openRouterForm(null));
   $('#aj-refr',el).addEventListener('click',()=>loadRouters());
+  $('#aj-rsc',el).addEventListener('click',openRscIp);
   $('#aj-routers',el).addEventListener('click',e=>{
     const b=e.target.closest('[data-rt]');if(!b)return;
     const id=b.dataset.id,a=b.dataset.rt;
@@ -4515,7 +4687,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='7d232c6eb7';
+const BUILD='d49d151fb6';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
