@@ -164,6 +164,7 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .bar i{display:block;width:100%;max-width:56px;background:var(--accent);border-radius:6px 6px 2px 2px;min-height:2px}
 .bar.now i{background:var(--accent)} .bar:not(.now) i{background:var(--accent-line)}
 .bar span{font-size:11px;color:var(--muted)} .bar b{font-size:11px;font-variant-numeric:tabular-nums}
+tr.tap{cursor:pointer}tr.tap:hover td{background:rgba(127,127,127,.08)}tr.tap:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
 table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -1137,7 +1138,7 @@ function openClient(id){
   const pl=S.planes.get(c.planId),b=billing(c);
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
   const tel=t=>t&&can('telefono')?`<span class="mono">${esc(t)}</span> <a class="small" href="${waUrl(t,'')}" target="_blank" rel="noopener">WhatsApp</a>`:'';
-  const pays=(S.payByClient.get(c.id)||[]).slice(0,5);
+  const pays=(S.payByClient.get(c.id)||[]).slice(0,12);
   const cl=can('cobrar')||can('caja')?cutLine(c):null;
   const owes=b.aplica&&b.periods.some(p=>p.per<=todayStr().slice(0,7)&&p.rest>0);
   const ords=[...S.ordenes.values()].filter(o=>o.clientId===c.id).sort((a,b2)=>(b2.creado||'').localeCompare(a.creado||'')).slice(0,4);
@@ -1153,10 +1154,12 @@ function openClient(id){
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
-    ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+    ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
   openModal({title:'Ficha del cliente',html,onMount(el){
+    el.addEventListener('keydown',e=>{const rc=e.key==='Enter'&&e.target.closest&&e.target.closest('tr[data-receipt]');if(rc)openReceipt(rc.dataset.receipt);});
     el.addEventListener('click',e=>{
+      const rc=e.target.closest('[data-receipt]');if(rc)return openReceipt(rc.dataset.receipt);   /* un pago de la lista: abre su recibo (reenviar, copiar, imprimir) */
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openClientForm(c.id);
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
@@ -3918,9 +3921,16 @@ function mandarReciboWA(ev,d,tel,href){
 const RC_PRINT_CSS='@page{size:A4 portrait;margin:8mm 10mm}html,body{margin:0;background:#fff}.rc{max-width:none;width:100%;font-size:9pt;line-height:1.2;border-color:#000}.rc .h{display:flex;padding:4px 8px}.rc .h b{font-size:12pt}.rc .tt,.rc .nv{margin-top:0}.rc .tt{text-align:center}.rc .nv{text-align:right;font-size:8pt}.rc .b{padding:3px 8px}.rc .b div{margin:0}.rc th,.rc td{padding:1.5px 6px}.rc td{font-size:9pt}.rc th{font-size:7.5pt}.rc .cp{display:table-cell}.rc .w1{width:7%}.rc .w2{width:15%}.rc .w3{width:14%}.rc .tot{padding:4px 8px;font-size:11pt}.rc .al{padding:4px 8px;font-size:8.5pt}.rc .al div{margin:0}';
 /* imprime solo el recibo, en una hoja aparte (desde la computadora de la oficina) */
 function printReceipt(d){
+  const html='<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title>'+receiptHTML(d)+'<style>'+RC_PRINT_CSS+'</style>',b=window.YapurApp;
+  if(b){   /* APK: la ventana de la app no imprime sola; Android arma la impresión (elegís impresora o «Guardar como PDF») */
+    if(typeof b.printHtml!=='function')return toast('Para imprimir desde el celular instalá la última versión de la app.','bad');
+    let r='';try{r=String(b.printHtml(html,'Recibo '+d.nro)||'');}catch(_){r='No se pudo abrir la impresión.';}
+    if(r!=='ok')toast(r||'No se pudo abrir la impresión.','bad');
+    return;
+  }
   try{
     const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
-    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title>'+receiptHTML(d)+'<style>'+RC_PRINT_CSS+'</style>');doc.close();
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write(html);doc.close();
     setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}setTimeout(()=>f.remove(),2000);},150);
   }catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}
 }
@@ -4505,7 +4515,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='be4d47a105';
+const BUILD='7d232c6eb7';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
