@@ -27,6 +27,7 @@ FIXTURE = """() => {
   pg('r3', '2026-10', 'R261102-DOS', '17:59'); pg('r4', '2026-11', 'R261102-DOS', '17:59');
   ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'].forEach((p, i) => pg('m' + i, p, 'R261102-SEIS', '18:0' + i));
   S.pagos.set('x1', {id: 'x1', c: 'c1', concepto: 'instalacion', nota: 'Cable y ficha', monto: 65000, fecha: '2026-11-02', hora: '18:10', recibo: 'R261102-INS', metodo: 'transferencia', anulado: true});
+  rebuildDerived();
 }"""
 
 async def login(ctx):
@@ -134,6 +135,46 @@ async def main():
         check('y deja copiada la imagen del recibo para pegarla en el chat', tipos and 'image/png' in tipos[0], tipos)
         check('con aviso de pegar', 'pegalo en el chat' in await n3.inner_text('#toastRoot'))
         await c3.close()
+
+        # 5) desde la ficha del cliente: cada pago abre su recibo (para reenviarlo o imprimirlo cuando se quiera)
+        await pg.evaluate("openClient('c1')"); await pg.wait_for_selector('.sheet tr[data-receipt]')
+        filas = await pg.evaluate("[...document.querySelectorAll('.sheet tr[data-receipt]')].map(r => r.dataset.receipt)")
+        check('en «Últimos pagos» de la ficha, cada pago tiene su recibo', len(filas) >= 8 and 'R261102-J2R' in filas, filas)
+        check('y dice cómo usarlo', 'reenvía por WhatsApp' in await pg.inner_text('.sheet') and 'imprime' in await pg.inner_text('.sheet'))
+        await pg.click('.sheet tr[data-receipt="R261102-J2R"]')
+        await pg.wait_for_selector('.rc')
+        check('al tocar un pago se abre el recibo con «Enviar por WhatsApp», «Copiar» e «Imprimir»', await pg.query_selector('#rc-wa') is not None and await pg.query_selector('#rc-print') is not None and 'Copiar' in await pg.inner_text('.sheet'))
+        check('el recibo abierto es el de ese pago', 'R261102-J2R' in await pg.inner_text('.sheet'))
+        await pg.click('.sheet [data-close]')
+        await pg.evaluate("openClient('c1')"); await pg.wait_for_selector('.sheet tr[data-receipt]')
+        await pg.focus('.sheet tr[data-receipt="R261102-DIC"]'); await pg.keyboard.press('Enter')
+        await pg.wait_for_selector('.rc')
+        check('también se abre con el teclado (Enter)', 'R261102-DIC' in await pg.inner_text('.sheet'))
+        await pg.click('.sheet [data-close]')
+
+        # 6) imprimir desde el celular (APK): Android arma la impresión con el recibo en media hoja A4
+        c4 = await br.new_context(viewport={'width': 390, 'height': 844}, bypass_csp=True)
+        await c4.add_init_script("window.__calls = []; window.__r = 'ok'; window.YapurApp = { printHtml: (h, t) => { window.__calls.push(['printHtml', h, t]); return window.__r; }, openUrl: () => true, saveFile: () => 'ok' };")
+        await c4.route('**/fonts.g*/**', lambda r: r.abort())
+        n4 = await login(c4)
+        await n4.evaluate("openReceipt('R261102-J2R')"); await n4.wait_for_selector('#rc-print')
+        await n4.click('#rc-print')
+        calls = await n4.evaluate('window.__calls')
+        html = calls[0][1] if calls else ''
+        check('en el APK, «Imprimir» le pasa a Android el recibo listo para imprimir', len(calls) == 1 and calls[0][2] == 'Recibo R261102-J2R' and 'Importe total' in html and 'size:A4' in html and 'R261102-J2R' in html and 'Hogar' not in html, [c[0] for c in calls])
+        await n4.evaluate("window.__r = 'No se pudo abrir la impresión.'")
+        await n4.click('#rc-print')
+        check('si Android no puede, avisa', 'No se pudo abrir la impresión' in await n4.inner_text('#toastRoot'))
+        await c4.close()
+        # con un APK anterior (sin impresión) avisa que hay que actualizar, en vez de no hacer nada
+        c5 = await br.new_context(viewport={'width': 390, 'height': 844}, bypass_csp=True)
+        await c5.add_init_script("window.YapurApp = { openUrl: () => true, saveFile: () => 'ok' };")
+        await c5.route('**/fonts.g*/**', lambda r: r.abort())
+        n5 = await login(c5)
+        await n5.evaluate("openReceipt('R261102-J2R')"); await n5.wait_for_selector('#rc-print')
+        await n5.click('#rc-print')
+        check('con un APK anterior, «Imprimir» avisa que hay que instalar la última versión', 'instalá la última versión' in await n5.inner_text('#toastRoot'))
+        await c5.close()
         await br.close()
     check('sin errores de la página', not errors, errors)
     print(f'\n{sum(res)} ok, {len(res) - sum(res)} con fallas'); sys.exit(0 if all(res) else 1)

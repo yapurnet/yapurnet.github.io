@@ -15,6 +15,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.provider.MediaStore;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -301,6 +304,37 @@ public class MainActivity extends Activity {
         return checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION") == PackageManager.PERMISSION_GRANTED;
     }
 
+    /* la vista que arma el documento a imprimir: se guarda para que el sistema no la recoja antes de terminar */
+    private WebView printWeb;
+
+    private void imprimirHtml(String html, final String title) {
+        try {
+            final boolean[] hecho = {false};
+            WebView w = new WebView(this);
+            w.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView v, String url) {
+                    if (hecho[0]) return;
+                    hecho[0] = true;
+                    try {
+                        PrintManager pm = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                        PrintDocumentAdapter ad = v.createPrintDocumentAdapter(title);
+                        pm.print(title, ad, new PrintAttributes.Builder()
+                                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                                .build());
+                    } catch (Throwable e) {
+                        toast("No se pudo abrir la impresión.");
+                    }
+                }
+            });
+            printWeb = w;
+            w.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        } catch (Throwable e) {
+            toast("No se pudo abrir la impresión.");
+        }
+    }
+
     /* manda una imagen por WhatsApp (o WhatsApp Business); con el número del cliente se abre directo su chat. Si no hay WhatsApp, el menú de compartir */
     private void compartirImagen(File f, String num, String cap) {
         Uri u = FotoProvider.uriDe(f);
@@ -505,6 +539,19 @@ public class MainActivity extends Activity {
             } catch (Throwable t) {
                 return "No se pudo preparar la imagen del recibo.";
             }
+        }
+
+        /* Imprime el recibo (HTML ya armado en media hoja A4): se abre la impresión de Android, donde se elige la impresora
+           o «Guardar como PDF». Devuelve «ok» o el motivo. */
+        @JavascriptInterface
+        public String printHtml(final String html, String title) {
+            if (html == null || html.length() < 20 || html.length() > 2000000) return "No se pudo preparar el recibo para imprimir.";
+            final String t = title == null || title.trim().length() == 0 ? "Recibo" : title.trim();
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() { imprimirHtml(html, t); }
+            });
+            return "ok";
         }
 
         @JavascriptInterface

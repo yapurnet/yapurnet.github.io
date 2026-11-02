@@ -181,9 +181,16 @@ function mandarReciboWA(ev,d,tel,href){
 const RC_PRINT_CSS='@page{size:A4 portrait;margin:8mm 10mm}html,body{margin:0;background:#fff}.rc{max-width:none;width:100%;font-size:9pt;line-height:1.2;border-color:#000}.rc .h{display:flex;padding:4px 8px}.rc .h b{font-size:12pt}.rc .tt,.rc .nv{margin-top:0}.rc .tt{text-align:center}.rc .nv{text-align:right;font-size:8pt}.rc .b{padding:3px 8px}.rc .b div{margin:0}.rc th,.rc td{padding:1.5px 6px}.rc td{font-size:9pt}.rc th{font-size:7.5pt}.rc .cp{display:table-cell}.rc .w1{width:7%}.rc .w2{width:15%}.rc .w3{width:14%}.rc .tot{padding:4px 8px;font-size:11pt}.rc .al{padding:4px 8px;font-size:8.5pt}.rc .al div{margin:0}';
 /* imprime solo el recibo, en una hoja aparte (desde la computadora de la oficina) */
 function printReceipt(d){
+  const html='<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title>'+receiptHTML(d)+'<style>'+RC_PRINT_CSS+'</style>',b=window.YapurApp;
+  if(b){   /* APK: la ventana de la app no imprime sola; Android arma la impresión (elegís impresora o «Guardar como PDF») */
+    if(typeof b.printHtml!=='function')return toast('Para imprimir desde el celular instalá la última versión de la app.','bad');
+    let r='';try{r=String(b.printHtml(html,'Recibo '+d.nro)||'');}catch(_){r='No se pudo abrir la impresión.';}
+    if(r!=='ok')toast(r||'No se pudo abrir la impresión.','bad');
+    return;
+  }
   try{
     const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
-    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>Recibo '+esc(d.nro)+'</title>'+receiptHTML(d)+'<style>'+RC_PRINT_CSS+'</style>');doc.close();
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write(html);doc.close();
     setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}setTimeout(()=>f.remove(),2000);},150);
   }catch(_){toast('Este navegador no puede imprimir. Copiá el recibo.','bad');}
 }
