@@ -110,6 +110,21 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (web != null) { web.onResume(); web.resumeTimers(); }
+        if (pendArch != null) {   /* se volvió del chat que se abrió primero: ahora sí va el recibo */
+            final File f = pendArch;
+            final String n = pendNum, c = pendCap;
+            final boolean fresco = System.currentTimeMillis() - pendT < 180000;
+            pendArch = null;
+            pendNum = "";
+            pendCap = "";
+            if (fresco && f.exists() && web != null) {
+                marcarChatListo(n);
+                web.postDelayed(new Runnable() {
+                    @Override
+                    public void run() { enviarImagen(f, n, c); }
+                }, 300);
+            }
+        }
     }
 
     @Override
@@ -335,8 +350,63 @@ public class MainActivity extends Activity {
         }
     }
 
-    /* manda una imagen por WhatsApp (o WhatsApp Business); con el número del cliente se abre directo su chat. Si no hay WhatsApp, el menú de compartir */
+    /* WhatsApp solo adjunta la imagen en el chat directo si ya conoce ese chat. Con un número que nunca abrió, abre el chat vacío y descarta
+       la imagen (la segunda vez sí la trae). Por eso, la primera vez con cada número se abre primero su chat, y apenas se vuelve a la app
+       (flecha «atrás») se manda la imagen; de ahí en más va directo. */
+    private File pendArch;
+    private String pendNum = "", pendCap = "";
+    private long pendT;
+
+    private boolean chatListo(String num) {
+        try {
+            return getSharedPreferences("yapur", Context.MODE_PRIVATE).getStringSet("wa_listos", new java.util.HashSet<String>()).contains(num);
+        } catch (Throwable t) {
+            return true;   /* si no se puede leer, se manda directo como antes */
+        }
+    }
+
+    private void marcarChatListo(String num) {
+        try {
+            android.content.SharedPreferences sp = getSharedPreferences("yapur", Context.MODE_PRIVATE);
+            java.util.Set<String> s = new java.util.HashSet<String>(sp.getStringSet("wa_listos", new java.util.HashSet<String>()));
+            if (s.size() > 2000) s.clear();
+            s.add(num);
+            sp.edit().putStringSet("wa_listos", s).apply();
+        } catch (Throwable t) {
+            /* no es grave: la próxima vez se vuelve a abrir el chat primero */
+        }
+    }
+
+    /* abre el chat de ese número en WhatsApp (o WhatsApp Business), sin texto */
+    private boolean abrirChat(String num) {
+        String[] paquetes = {"com.whatsapp", "com.whatsapp.w4b"};
+        for (String p : paquetes) {
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/" + num));
+                i.setPackage(p);
+                startActivity(i);
+                return true;
+            } catch (Exception e) {
+                /* ese WhatsApp no está: se prueba con el siguiente */
+            }
+        }
+        return false;
+    }
+
     private void compartirImagen(File f, String num, String cap) {
+        if (num.length() >= 10 && !chatListo(num) && abrirChat(num)) {
+            pendArch = f;
+            pendNum = num;
+            pendCap = cap;
+            pendT = System.currentTimeMillis();
+            toast("Primera vez con este número: se abre su chat. Volvé atrás (←) y se abre el recibo listo para mandar.");
+            return;
+        }
+        enviarImagen(f, num, cap);
+    }
+
+    /* manda una imagen por WhatsApp (o WhatsApp Business); con el número del cliente se abre directo su chat. Si no hay WhatsApp, el menú de compartir */
+    private void enviarImagen(File f, String num, String cap) {
         Uri u = FotoProvider.uriDe(f);
         String[] paquetes = {"com.whatsapp", "com.whatsapp.w4b", null};
         for (String p : paquetes) {
