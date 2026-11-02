@@ -55,7 +55,7 @@ S.clientes.set('c1',{id:'c1',nombre:'Cliente Prueba',codigo:'7',dni:'30111222',d
 const rt2=receiptText('R261019-ABC'),L2=rt2.split('\\n');
 t('recibo con datos: encabezado como el de papel',L2[0]==='SOLUCIONES INFORMATICAS'&&L2[1]==='EMISOR DE PRUEBA'&&rt2.includes('CUIT: 20111111112 / Ingresos Brutos: 20111111112')&&rt2.includes('Calle 1 500, Pueblo')&&rt2.includes('Ana: 3844-000000 / Web: www.ejemplo.net'),rt2);
 t('recibo con datos: punto de venta, cliente, condiciones y alias',rt2.includes('Punto de venta: 00004')&&rt2.includes('DNI / CUIT: 30111222')&&rt2.includes('Dirección: Lavalle 100, Pueblo')&&rt2.includes('Condición de venta: Contado')&&rt2.includes('Condición frente al IVA: Consumidor Final')&&rt2.includes('Alias: mi.alias')&&rt2.includes('Alias: otro.alias'),rt2);
-t('recibo: período facturado y vencimiento del mes pagado',rt2.includes('Período facturado: 01/09/2026 al 30/09/2026 · Vto. para el pago: 10/09/2026')&&rt2.includes('Abono Mensual Servicio de Internet (septiembre de 2026)'),rt2);
+t('recibo: período facturado del 1 al 1 del mes siguiente y vencimiento el 10 del mes siguiente',rt2.includes('Período facturado: 01/09/2026 al 01/10/2026 · Vto. para el pago: 10/10/2026')&&rt2.includes('Abono Mensual Servicio de Internet (septiembre de 2026)'),rt2);
 const rh=receiptHTML(receiptData('R261019-ABC'));
 t('recibo HTML: tabla con el servicio, total y alias',rh.includes('Producto / Servicio')&&rh.includes('Importe total')&&rh.includes('Alias: mi.alias')&&!rh.includes('ANULADO'),rh.slice(0,200));
 S.clientes.set('c1',{id:'c1',nombre:'<b>Hack</b> & Cía',codigo:'7'});

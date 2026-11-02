@@ -301,6 +301,33 @@ public class MainActivity extends Activity {
         return checkSelfPermission("android.permission.ACCESS_BACKGROUND_LOCATION") == PackageManager.PERMISSION_GRANTED;
     }
 
+    /* manda una imagen por WhatsApp (o WhatsApp Business); con el número del cliente se abre directo su chat. Si no hay WhatsApp, el menú de compartir */
+    private void compartirImagen(File f, String num, String cap) {
+        Uri u = FotoProvider.uriDe(f);
+        String[] paquetes = {"com.whatsapp", "com.whatsapp.w4b", null};
+        for (String p : paquetes) {
+            try {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("image/png");
+                i.putExtra(Intent.EXTRA_STREAM, u);
+                if (cap.length() > 0) i.putExtra(Intent.EXTRA_TEXT, cap);
+                i.setClipData(ClipData.newRawUri("recibo", u));
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (p != null) {
+                    i.setPackage(p);
+                    if (num.length() >= 10) i.putExtra("jid", num + "@s.whatsapp.net");
+                    startActivity(i);
+                } else {
+                    startActivity(Intent.createChooser(i, "Enviar recibo"));
+                }
+                return;
+            } catch (Exception e) {
+                /* ese WhatsApp no está: se prueba con el siguiente */
+            }
+        }
+        toast("No se pudo abrir WhatsApp.");
+    }
+
     /* abre la cámara del celular para sacar la foto del comprobante; la foto se guarda en un archivo temporal de la app (FotoProvider) */
     private File fotoArch;
 
@@ -449,6 +476,35 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String saveFile(String name, String mime, String text) {
             try { return saveDownload(name, mime, text); } catch (Throwable t) { return "No se pudo guardar el archivo."; }
+        }
+
+        /* El recibo como imagen (PNG en base64): se abre WhatsApp con la imagen adjunta, directo en el chat del cliente si hay número.
+           Devuelve «ok» o el motivo. */
+        @JavascriptInterface
+        public String shareImage(String name, String b64, String tel, String caption) {
+            try {
+                byte[] data = android.util.Base64.decode(b64 == null ? "" : b64, android.util.Base64.DEFAULT);
+                if (data.length < 100 || data.length > 8 * 1024 * 1024) return "No se pudo preparar la imagen del recibo.";
+                String n = name == null ? "" : name.replaceAll("[^A-Za-z0-9_.-]", "_");
+                if (n.length() > 60) n = n.substring(0, 60);
+                if (n.length() == 0 || n.startsWith(".")) n = "recibo";
+                if (!n.endsWith(".png")) n += ".png";
+                File d = FotoProvider.dir(MainActivity.this);
+                File[] viejos = d.listFiles();
+                if (viejos != null) for (File x : viejos) x.delete();
+                final File f = new File(d, n);
+                FileOutputStream o = new FileOutputStream(f);
+                try { o.write(data); } finally { o.close(); }
+                final String num = tel == null ? "" : tel.replaceAll("[^0-9]", "");
+                final String cap = caption == null ? "" : caption;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() { compartirImagen(f, num, cap); }
+                });
+                return "ok";
+            } catch (Throwable t) {
+                return "No se pudo preparar la imagen del recibo.";
+            }
         }
 
         @JavascriptInterface

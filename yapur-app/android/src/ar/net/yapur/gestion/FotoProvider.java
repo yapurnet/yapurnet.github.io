@@ -12,8 +12,8 @@ import android.provider.OpenableColumns;
 import java.io.File;
 import java.io.FileNotFoundException;
 
-/* Le presta a la cámara del celular el archivo donde guardar la foto del comprobante (botón «Sacar foto con la cámara»).
-   Las fotos quedan en la memoria temporal privada de la app (no en la galería) y se borran al sacar la siguiente.
+/* Le presta archivos a otras apps: (1) a la cámara, el archivo donde guardar la foto del comprobante («Sacar foto con la cámara»);
+   (2) a WhatsApp, la imagen del recibo que se le manda al cliente (shareImage). Las fotos quedan en la memoria temporal privada de la app (no en la galería) y se borran al sacar la siguiente.
    Sin esto, Android no deja que otra app (la cámara) escriba dentro de la nuestra. No está exportado: solo recibe
    permiso la cámara a la que le entregamos el enlace, y solo para ese archivo. */
 public class FotoProvider extends ContentProvider {
@@ -66,7 +66,8 @@ public class FotoProvider extends ContentProvider {
 
     @Override
     public String getType(Uri uri) {
-        return "image/jpeg";
+        String n = uri.getLastPathSegment();
+        return n != null && n.endsWith(".png") ? "image/png" : "image/jpeg";
     }
 
     @Override
