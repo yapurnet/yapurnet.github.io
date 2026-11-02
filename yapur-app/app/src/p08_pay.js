@@ -18,9 +18,10 @@ function receiptData(recibo){
   const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
   let periodo=null;
   if(mens.length){
-    /* el mes pagado va del 1 al 1 del mes siguiente, y el pago vence el día de vencimiento del ciclo del mes siguiente (ej.: noviembre → 01/11 al 01/12, vto. 10/12) */
-    const a=mens[0].per,z=addMonths(mens[mens.length-1].per,1);
-    periodo={desde:a+'-01',hasta:z+'-01',vto:z+'-'+pad(Math.min(cicloCfg(cicloOf(c)).hasta,daysIn(z)))};
+    /* el período va del día en que empieza el ciclo del cliente al mismo día del mes siguiente, y el pago vence el día de vencimiento del ciclo en el mes siguiente
+       (ciclo 1, noviembre: 01/11 al 01/12, vto. 10/12 · ciclo 2, noviembre: 13/11 al 13/12, vto. 20/12) */
+    const a=mens[0].per,z=addMonths(mens[mens.length-1].per,1),cfg=cicloCfg(cicloOf(c));
+    periodo={desde:a+'-'+pad(Math.min(cfg.desde,daysIn(a))),hasta:z+'-'+pad(Math.min(cfg.desde,daysIn(z))),vto:z+'-'+pad(Math.min(cfg.hasta,daysIn(z)))};
   }
   return {
     nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
