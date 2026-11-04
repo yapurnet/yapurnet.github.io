@@ -1684,7 +1684,7 @@ function cargarContratos(){
   if(ctCarga)return ctCarga;
   ctCarga=NET.api('GET','/api/contratos',undefined,{noKick:true}).then(j=>{
     S.contratos.clear();ctIdx=null;(j.contratos||[]).forEach(ctGuardar);S.contratosOk=true;dataChanged('contratos');
-  }).catch(e=>console.error(e)).finally(()=>{ctCarga=null;});
+  }).catch(e=>{if(!(e&&e.network))console.error(e);}).finally(()=>{ctCarga=null;});  /* sin red no es un error: se vuelve a pedir en la próxima sincronización */
   return ctCarga;
 }
 function ctOnEvent(r){ctGuardar(r);dataChanged('contratos');}
@@ -1905,7 +1905,7 @@ async function openContrato(id,back){
   }
   const prev=d.prevResumen;
   const logHtml=gest&&d.log&&d.log.length?`<div><h3>Registro</h3><div class="list">${d.log.map(l=>`<div class="item" style="cursor:default"><div><div class="t">${esc(({firmado:'Firmado',aprobado:'Aprobado',rechazado:'Rechazado',archivado:'Archivado',borrado:'Mandado a la papelera',restaurado:'Restaurado',verificado:'Verificado'})[l.acc]||l.acc)}${l.uname?' · '+esc(l.uname):''}</div><div class="s">${esc(ctFecha(l.ts))}${l.det?' · '+esc(l.det):''}</div></div></div>`).join('')}</div></div>`:'';
-  openModal({title:'Contrato N° '+ctNum(d.num),wide:true,onClose:undefined,html:`<div class="tags"><span class="chip ${CT_CLS[d.estado]||''}">${esc(CT_ESTADO[d.estado]||d.estado)}</span><span class="chip info">${esc(CT_MOTIVO[d.motivo]||d.motivo)}</span>${d.prueba?'<span class="chip bad">De prueba</span>':''}</div>
+  openModal({title:'Contrato N° '+ctNum(d.num),wide:true,html:`<div class="tags"><span class="chip ${CT_CLS[d.estado]||''}">${esc(CT_ESTADO[d.estado]||d.estado)}</span><span class="chip info">${esc(CT_MOTIVO[d.motivo]||d.motivo)}</span>${d.prueba?'<span class="chip bad">De prueba</span>':''}</div>
     <dl class="kv"><dt>Cliente</dt><dd>${cli?esc(cli.nombre):'-'}${cli&&cli.codigo?' <span class="muted mono small">#'+esc(cli.codigo)+'</span>':''}</dd><dt>Titular</dt><dd>${esc(d.titular.nombre)}</dd><dt>Firmado</dt><dd>${esc(ctFecha(d.ts))} · la firma la tomó ${esc(d.por||'-')}</dd>${gest&&d.ip?`<dt>Desde</dt><dd class="small">IP ${esc(d.ip)}<br>${esc((d.ua||'').slice(0,120))}</dd>`:''}${prev?`<dt>Reemplaza al</dt><dd>contrato N° ${ctNum(prev.num)}${prev.tit?' ('+esc(prev.tit)+')':''} · ${esc(CT_ESTADO[prev.estado]||prev.estado)} <button class="btn small ghost" type="button" data-ct="prev" data-id="${esc(prev.id)}">Ver</button></dd>`:''}</dl>
     ${d.estado==='revision'&&gest?'<div class="notice info">Este contrato espera tu revisión. Al aprobarlo pasa a ser el vigente y el anterior se archiva (queda guardado, no se borra).</div>':''}
     ${contratoDocHtml(d)}
@@ -5480,7 +5480,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='fcd0af42d3';
+const BUILD='79b68794ed';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
