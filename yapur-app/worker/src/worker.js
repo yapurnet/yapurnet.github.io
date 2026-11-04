@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'comodato', 'contratosGestion'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, comodato: true, contratosGestion: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, comodato: true, contratosGestion: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -187,6 +187,8 @@ function guard(u, p, coll, existing, patch, ctx) {
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
       if (!isPlain(nw)) return 'Formato inválido.';
+      const malComodato = guardComodato(p, nw, prev);
+      if (malComodato) return malComodato;
       if (!prev) { if (!p.editarClientes) return 'Tu usuario no puede dar de alta clientes.'; continue; }
       if (p.editarClientes) continue;
       for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
@@ -270,6 +272,81 @@ function guardRed(u, p, old, items) {
     for (const k of ['ref', 'notas']) if (k in nw && nw[k] !== null && (typeof nw[k] !== 'string' || nw[k].length > 500)) return 'El texto es demasiado largo.';
   }
   return null;
+}
+
+/* ================= comodato: equipos prestados al cliente y contrato firmado ================= */
+const COMODATO_TIPOS = ['ONU', 'Router Wi-Fi', 'Antena', 'Cable de fibra', 'Fuente o adaptador', 'Otro'];
+const COMODATO_KEYS = ['t', 'd', 's', 'n', 'e', 'o'];   // tipo, descripción (marca y modelo), serie o MAC, cantidad, estado (nuevo|usado), observaciones
+const COMODATO_MAX = 30;
+const lim = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+function comodatoLimpio(v) {
+  const out = [];
+  for (const it of (Array.isArray(v) ? v : []).slice(0, COMODATO_MAX)) {
+    if (!isPlain(it)) continue;
+    out.push({ t: COMODATO_TIPOS.includes(it.t) ? it.t : 'Otro', d: lim(it.d, 80), s: lim(it.s, 60), n: Math.max(1, Math.min(99, Math.round(Number(it.n)) || 1)), e: it.e === 'nuevo' ? 'nuevo' : 'usado', o: lim(it.o, 120) });
+  }
+  return out;
+}
+/* la «firma» de una lista de equipos: dos listas con los mismos equipos (en cualquier orden) dan el mismo texto */
+const eqSig = arr => comodatoLimpio(arr).map(e => [e.t, e.d, e.s, e.n, e.e, e.o].map(x => String(x).toLowerCase()).join('|')).sort().join(';');
+function guardComodato(p, nw, prev) {
+  if (!('comodato' in nw) || (prev && same(nw.comodato, prev.comodato))) return null;
+  if (!p.comodato) return 'Tu usuario no puede cargar los equipos en comodato.';
+  const c = nw.comodato, mal = 'La lista de equipos en comodato no es válida.';
+  if (!Array.isArray(c) || c.length > COMODATO_MAX) return mal;
+  for (const it of c) {
+    if (!isPlain(it) || Object.keys(it).some(k => !COMODATO_KEYS.includes(k))) return mal;
+    for (const [k, n] of [['t', 30], ['d', 80], ['s', 60], ['e', 10], ['o', 120]]) if (k in it && (typeof it[k] !== 'string' || it[k].length > n)) return mal;
+    if (typeof it.n !== 'number' || !isFinite(it.n) || it.n < 1 || it.n > 99 || Math.round(it.n) !== it.n) return mal;
+  }
+  return null;
+}
+const CONTRATO_ESTADOS = ['vigente', 'revision', 'archivado', 'rechazado', 'borrado'];
+const CONTRATO_MOTIVOS = { alta: 'Alta', titularidad: 'Cambio de titularidad', equipos: 'Cambio de equipos' };
+const CONTRATO_VARS = ['empresa', 'empresa_cuit', 'empresa_domicilio', 'representante', 'lugar', 'fecha', 'numero', 'titular', 'dni', 'domicilio', 'telefono', 'cliente_n', 'equipos'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const fechaLarga = t => { const [y, m, d] = ymd(t).split('-').map(Number); return d + ' de ' + MESES[m - 1] + ' de ' + y; };
+const fmtDocAR = s => { const d = String(s || '').replace(/\D/g, ''); if (d.length === 11) return d.slice(0, 2) + '-' + d.slice(2, 10) + '-' + d.slice(10); return d.length === 7 || d.length === 8 ? d.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : d; };
+const horaAR = t => { const d = new Date(t - 3 * 3600e3).toISOString(); return d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) + ' ' + d.slice(11, 16); };
+/* Texto provisorio: sirve para probar el circuito. Mientras diga «BORRADOR» o tenga «[COMPLETAR…]» no se puede marcar como definitivo ni lo pueden firmar los clientes. */
+const CONTRATO_TXT_DEF = `BORRADOR PARA REVISAR: este es un texto provisorio. Reemplazalo por el contrato definitivo y borrá esta línea.
+
+CONTRATO DE COMODATO DE EQUIPOS N° {{numero}}
+
+En {{lugar}}, a {{fecha}}, entre {{empresa}} (CUIT {{empresa_cuit}}), con domicilio en {{empresa_domicilio}}, representada por {{representante}}, en adelante "EL COMODANTE", y {{titular}}, DNI/CUIT {{dni}}, con domicilio en {{domicilio}}, teléfono {{telefono}}, cliente N° {{cliente_n}}, en adelante "EL COMODATARIO", se celebra el presente contrato de comodato, sujeto a las siguientes cláusulas:
+
+PRIMERA - OBJETO. EL COMODANTE entrega en comodato (préstamo de uso gratuito) a EL COMODATARIO, que los recibe de conformidad, los siguientes equipos, de propiedad exclusiva de EL COMODANTE:
+
+{{equipos}}
+
+SEGUNDA - DESTINO. Los equipos se usan únicamente para recibir el servicio de internet contratado, en el domicilio indicado. EL COMODATARIO no puede prestarlos, alquilarlos, cederlos, abrirlos, modificarlos ni trasladarlos sin autorización de EL COMODANTE.
+
+TERCERA - PLAZO. El comodato dura mientras se mantenga el servicio. Termina cuando el servicio se da de baja por cualquier causa.
+
+CUARTA - CUIDADO. EL COMODATARIO conserva los equipos con la diligencia de un buen cuidador y responde por su pérdida, robo o daño, salvo el desgaste normal por el uso. En ese caso abonará el valor de reposición: [COMPLETAR valor o criterio].
+
+QUINTA - DEVOLUCIÓN. Al terminar el servicio, EL COMODATARIO devuelve los equipos en el plazo de [COMPLETAR días] y en buen estado. EL COMODANTE puede retirarlos del domicilio y EL COMODATARIO permitirá el ingreso del personal técnico.
+
+SEXTA - CAMBIO DE TITULARIDAD. Si cambia el titular del servicio, el nuevo titular firma un nuevo contrato. El anterior queda archivado cuando EL COMODANTE aprueba el cambio.
+
+SÉPTIMA - JURISDICCIÓN. Para cualquier cuestión, las partes se someten a los tribunales ordinarios de [COMPLETAR jurisdicción].
+
+EL COMODATARIO declara haber leído este contrato, estar de acuerdo con su contenido y que los datos indicados son verdaderos. La firma se realiza en forma electrónica en un dispositivo de EL COMODANTE y queda guardada junto con la fecha, la hora y un código de verificación.`;
+function renderContrato(tpl, x) {
+  const em = tpl.empresa || {};
+  const eq = x.equipos.map((e, i) => (i + 1) + '. ' + e.t + (e.d ? ' ' + e.d : '') + (e.s ? ' · N° de serie / MAC: ' + e.s : '') + ' · Cantidad: ' + e.n + ' · Estado: ' + e.e + (e.o ? ' · ' + e.o : '')).join('\n');
+  const v = {
+    empresa: em.razon, empresa_cuit: em.cuit, empresa_domicilio: em.domicilio, representante: em.rep, lugar: em.lugar,
+    fecha: fechaLarga(x.ts), numero: x.num ? String(x.num).padStart(4, '0') : '(se asigna al firmar)',
+    titular: x.titular.nombre, dni: x.titular.dniTxt, domicilio: x.titular.dir + (x.titular.loc ? ', ' + x.titular.loc : ''), telefono: x.titular.tel, cliente_n: x.codigo, equipos: eq
+  };
+  return String(tpl.texto).replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (m, k) => (k in v ? (String(v[k] || '').trim() || '-') : m));
+}
+/* la firma dibujada llega como imagen PNG chica en base64 */
+function pngOk(s) {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(s || ''));
+  if (!m || m[1].length > 90000 || m[1].length < 300) return false;
+  try { const b = atob(m[1].slice(0, 16)); return b.charCodeAt(0) === 0x89 && b.slice(1, 4) === 'PNG'; } catch (e) { return false; }
 }
 
 /* ================= respuestas ================= */
@@ -441,6 +518,10 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS jornada(uid TEXT NOT NULL, dia TEXT NOT NULL, ingreso INTEGER NOT NULL, origen TEXT NOT NULL, dist INTEGER, regreso INTEGER, en_base INTEGER NOT NULL DEFAULT 1, ult INTEGER NOT NULL DEFAULT 0, ingreso2 INTEGER, ev TEXT, tr TEXT, adj TEXT, PRIMARY KEY(uid,dia)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS snapshots(name TEXT NOT NULL, part INTEGER NOT NULL, ts INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(name,part)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS contratos(id TEXT PRIMARY KEY, num INTEGER NOT NULL, cid TEXT NOT NULL, estado TEXT NOT NULL, motivo TEXT NOT NULL, prev TEXT, prueba INTEGER NOT NULL DEFAULT 0, tver INTEGER, titular TEXT NOT NULL, equipos TEXT NOT NULL, eq TEXT NOT NULL, texto TEXT NOT NULL, firma TEXT NOT NULL, aclar TEXT, ts INTEGER NOT NULL, por TEXT, pornombre TEXT, ip TEXT, ua TEXT, hash TEXT NOT NULL, estado_prev TEXT);
+      CREATE INDEX IF NOT EXISTS contratos_cid ON contratos(cid);
+      CREATE TABLE IF NOT EXISTS contratos_log(id TEXT PRIMARY KEY, cto TEXT NOT NULL, ts INTEGER NOT NULL, uid TEXT, uname TEXT, acc TEXT NOT NULL, det TEXT);
+      CREATE INDEX IF NOT EXISTS contratos_log_cto ON contratos_log(cto);
     `);
     for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
@@ -609,6 +690,7 @@ export class YapurDB extends DurableObject {
       if (!p.precios) drop.push('precio', 'hp');
       /* el plan contratado (velocidad y nombre) tampoco lo ve quien no tiene el permiso: ni el plan actual ni los anteriores */
       if (!p.verPlan) drop.push('planId', 'hp');
+      if (!p.comodato) drop.push('comodato');
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
       /* los servicios adicionales (Multimedia, Multimedia Net…) son de facturación: el técnico no tiene que enterarse de cuáles tiene cada cliente */
@@ -1033,7 +1115,11 @@ export class YapurDB extends DurableObject {
   exportJSON() {
     const docs = this.q('SELECT coll,id,data FROM docs ORDER BY coll,id').map(r => '{"coll":' + JSON.stringify(r.coll) + ',"id":' + JSON.stringify(r.id) + ',"data":' + r.data + '}');
     const users = this.q('SELECT * FROM users').map(r => JSON.stringify({ id: r.id, usuario: r.usuario, nombre: r.nombre, role: r.role, tel: r.tel, permisos: r.permisos ? JSON.parse(r.permisos) : null, activo: r.activo, salt: r.salt, hash: r.hash, created: r.created }));
-    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + ']}';
+    /* los contratos firmados (con su firma) y su registro viajan en toda copia; la plantilla también */
+    const contratos = this.q('SELECT * FROM contratos ORDER BY num').map(r => JSON.stringify(r));
+    const clog = this.q('SELECT * FROM contratos_log ORDER BY ts').map(r => JSON.stringify(r));
+    const tpl = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
+    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + '],"contratos":[' + contratos.join(',') + '],"contratos_log":[' + clog.join(',') + '],"contrato_tpl":' + (tpl ? tpl.v : 'null') + '}';
   }
   async snapshot(name) {
     const gz = await gzip(this.exportJSON());
@@ -1083,6 +1169,22 @@ export class YapurDB extends DurableObject {
     return await gunzip(all);
   }
 
+  /* Los contratos firmados no se pisan ni se borran al restaurar: solo se suman los que faltan (un contrato nunca se modifica una vez firmado,
+     y los que se firmaron después de la copia tienen que quedar). Lo mismo con su registro y con la plantilla, que solo se repone si no hay ninguna. */
+  restoreContratos(body) {
+    const t = v => (typeof v === 'string' ? v : '');
+    for (const r of Array.isArray(body.contratos) ? body.contratos : []) {
+      if (!isPlain(r) || !/^k[0-9a-f]{16}$/.test(t(r.id)) || !Number.isInteger(r.num) || !ID_RE.test(t(r.cid)) || !CONTRATO_ESTADOS.includes(r.estado) || !Object.prototype.hasOwnProperty.call(CONTRATO_MOTIVOS, r.motivo)) continue;
+      if (!t(r.titular) || !t(r.equipos) || !t(r.texto) || !pngOk(r.firma) || !t(r.hash) || !Number.isFinite(r.ts)) continue;
+      this.sql.exec('INSERT OR IGNORE INTO contratos(id,num,cid,estado,motivo,prev,prueba,tver,titular,equipos,eq,texto,firma,aclar,ts,por,pornombre,ip,ua,hash,estado_prev) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        r.id, r.num, r.cid, r.estado, r.motivo, r.prev ? t(r.prev) : null, r.prueba ? 1 : 0, Number.isInteger(r.tver) ? r.tver : null, r.titular, r.equipos, t(r.eq), r.texto, r.firma, t(r.aclar), r.ts, r.por ? t(r.por) : null, t(r.pornombre), t(r.ip), t(r.ua), r.hash, r.estado_prev ? t(r.estado_prev) : null);
+    }
+    for (const l of Array.isArray(body.contratos_log) ? body.contratos_log : []) {
+      if (!isPlain(l) || !/^l[0-9a-f]{16}$/.test(t(l.id)) || !/^k[0-9a-f]{16}$/.test(t(l.cto)) || !Number.isFinite(l.ts) || !t(l.acc)) continue;
+      this.sql.exec('INSERT OR IGNORE INTO contratos_log(id,cto,ts,uid,uname,acc,det) VALUES(?,?,?,?,?,?,?)', l.id, l.cto, l.ts, l.uid ? t(l.uid) : null, t(l.uname).slice(0, 60), t(l.acc).slice(0, 30), l.det ? t(l.det).slice(0, 300) : null);
+    }
+    if (isPlain(body.contrato_tpl) && typeof body.contrato_tpl.texto === 'string' && !this.q1("SELECT 1 x FROM meta WHERE k='contrato_tpl'")) this.sql.exec("INSERT INTO meta(k,v) VALUES('contrato_tpl',?)", JSON.stringify(body.contrato_tpl));
+  }
   /* restaura una copia de este servidor o la exportada desde la versión anterior (artefacto de Claude) */
   async restore(body) {
     if (!body || !Array.isArray(body.docs)) throw httpErr(400, 'El archivo no es una copia válida.');
@@ -1125,11 +1227,218 @@ export class YapurDB extends DurableObject {
       this.sql.exec('DELETE FROM sessions');
       for (const u of [...keep, ...newUsers.filter(u => !keep.some(k => k.usuario === u.usuario))]) this.insUser(Object.assign({}, u, { last_login: null }));
       this.sql.exec('DELETE FROM devices WHERE uid NOT IN (SELECT id FROM users)');   // los equipos aprobados de quienes siguen existiendo se conservan
+      this.restoreContratos(body);
       this.SEQ++;
     });
     this.loadUsers();
     for (const s of [...this.streams]) { this.sse(s, 'kick', {}); this.endStream(s); }
     return { docs: rows.length, usuarios: report };
+  }
+
+  /* ================= comodato: contratos firmados =================
+     Cada contrato queda guardado de forma permanente en su propia tabla (no en los datos comunes): el texto tal como se firmó, los datos del titular,
+     los equipos, la firma dibujada, quién la tomó, desde qué equipo y cuándo, y un código de verificación (SHA-256) que permite saber si algo se tocó.
+     Nada se borra de verdad: «borrar» manda a la papelera (se puede restaurar) y todo cambio queda en un registro. */
+  contratoTpl() {
+    const r = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
+    let t = null; try { t = r ? JSON.parse(r.v) : null; } catch (e) { t = null; }
+    if (!isPlain(t)) t = { texto: CONTRATO_TXT_DEF, ver: 1, final: false };
+    const aj = this.readDoc('ajustes', 'general') || {};
+    t.empresa = Object.assign({ razon: lim(aj.empresa || 'YAPUR.NET', 100), cuit: '', domicilio: '', rep: '', lugar: 'Añatuya, Santiago del Estero' }, isPlain(t.empresa) ? t.empresa : {});
+    return t;
+  }
+  contratoPlantillaVer(u) {
+    if (!effPerms(u).comodato) throw httpErr(403, 'Tu usuario no puede ver los contratos de comodato.', 'permission_denied');
+    const t = this.contratoTpl();
+    return { texto: t.texto, ver: t.ver, final: !!t.final, empresa: t.empresa, vars: CONTRATO_VARS, mod: t.mod || null, modPor: t.modPor || '' };
+  }
+  contratoPlantillaGuardar(u, b) {
+    if (!isPlain(b)) throw httpErr(400, 'Datos inválidos.');
+    const texto = String(b.texto == null ? '' : b.texto).replace(/\r\n?/g, '\n').trim();
+    if (texto.length < 200 || texto.length > 20000) throw httpErr(400, 'El contrato tiene que tener entre 200 y 20.000 letras.');
+    const mal = new Set();
+    for (const m of texto.matchAll(/\{\{\s*([^}]*?)\s*\}\}/g)) if (!CONTRATO_VARS.includes(m[1])) mal.add(m[1]);
+    if (mal.size) throw httpErr(400, 'El contrato usa datos que no existen: ' + [...mal].map(x => '{{' + x + '}}').join(', ') + '.');
+    for (const k of ['equipos', 'titular', 'dni']) if (!new RegExp('\\{\\{\\s*' + k + '\\s*\\}\\}').test(texto)) throw httpErr(400, 'El contrato tiene que incluir {{' + k + '}}.');
+    const e = isPlain(b.empresa) ? b.empresa : {};
+    const empresa = { razon: lim(e.razon, 100), cuit: lim(e.cuit, 30), domicilio: lim(e.domicilio, 150), rep: lim(e.rep, 120), lugar: lim(e.lugar, 80) || 'Añatuya, Santiago del Estero' };
+    const final = b.final === true;
+    if (final) {
+      if (/BORRADOR|\[COMPLETAR/i.test(texto)) throw httpErr(400, 'Todavía dice «BORRADOR» o tiene partes «[COMPLETAR…]». Corregilo antes de marcarlo como definitivo.');
+      for (const [k, n] of [['razon', 'el nombre o razón social'], ['cuit', 'el CUIT'], ['domicilio', 'el domicilio'], ['rep', 'quién representa a la empresa']]) if (!empresa[k]) throw httpErr(400, 'Para marcarlo como definitivo completá ' + n + ' de la empresa.');
+    }
+    const old = this.contratoTpl();
+    if (old.texto === texto && !!old.final === final && same(old.empresa, empresa)) return this.contratoPlantillaVer(u);
+    const t = { texto, ver: (Number(old.ver) || 0) + 1, final, empresa, mod: Date.now(), modPor: String(u.nombre || u.usuario || '').slice(0, 60) };
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('contrato_tpl',?)", JSON.stringify(t));
+    return this.contratoPlantillaVer(u);
+  }
+  contratoLog(cto, u, acc, det) {
+    this.sql.exec('INSERT INTO contratos_log(id,cto,ts,uid,uname,acc,det) VALUES(?,?,?,?,?,?,?)', 'l' + hex(rnd(8)), cto, Date.now(), u ? u.id : null, u ? String(u.nombre || u.usuario || '').slice(0, 60) : '', acc, det ? String(det).slice(0, 300) : null);
+  }
+  contratoResumen(r, gest) {
+    const o = { id: r.id, num: r.num, cid: r.cid, estado: r.estado, motivo: r.motivo, prev: r.prev || null, prueba: !!r.prueba, ts: r.ts, por: r.pornombre || '' };
+    if (r.estado === 'vigente' || r.estado === 'revision') o.eq = r.eq;
+    if (gest) { try { o.tit = JSON.parse(r.titular).nombre; } catch (e) { o.tit = ''; } }
+    return o;
+  }
+  contratoPermiso(u, gest) {
+    const p = effPerms(u);
+    if (!p.comodato) throw httpErr(403, 'Tu usuario no puede ver los contratos de comodato.', 'permission_denied');
+    if (gest && !p.contratosGestion) throw httpErr(403, 'Esto lo hace la oficina o el administrador.', 'permission_denied');
+    return p;
+  }
+  contratoLista(u, url) {
+    const p = this.contratoPermiso(u, false), gest = !!p.contratosGestion;
+    const cid = url.searchParams.get('cid');
+    if (url.searchParams.get('papelera')) {
+      this.contratoPermiso(u, true);
+      return { contratos: this.q("SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE estado='borrado' ORDER BY num DESC").map(r => this.contratoResumen(r, true)) };
+    }
+    const rows = cid && ID_RE.test(cid)
+      ? this.q("SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE cid=? AND estado<>'borrado' ORDER BY num", cid)
+      : this.q("SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE estado<>'borrado' ORDER BY num");
+    return { contratos: rows.map(r => this.contratoResumen(r, gest)) };
+  }
+  /* avisa en vivo a las pantallas abiertas de quien puede ver contratos */
+  broadcastContrato(id) {
+    const r = this.q1('SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE id=?', id);
+    if (!r) return;
+    for (const s of [...this.streams]) {
+      const u = this.USERS.get(s.uid);
+      if (!u || !u.activo) continue;
+      const p = effPerms(u);
+      if (!p.comodato) continue;
+      const gest = !!p.contratosGestion;
+      this.sse(s, 'contrato', r.estado === 'borrado' && !gest ? { id: r.id, cid: r.cid, estado: 'borrado' } : this.contratoResumen(r, gest));
+    }
+  }
+  contratoTitular(t) {
+    if (!isPlain(t)) throw httpErr(400, 'Faltan los datos del titular.');
+    const nombre = lim(t.nombre, 80), d = String(t.dni || '').replace(/\D/g, ''), dir = lim(t.dir, 120), loc = lim(t.loc, 60), tel = lim(t.tel, 30);
+    if (nombre.length < 3) throw httpErr(400, 'Falta el nombre completo del titular.');
+    if (d.length < 7 || d.length > 11) throw httpErr(400, 'El DNI o CUIT del titular no es válido.');
+    if (dir.length < 3) throw httpErr(400, 'Falta el domicilio del titular.');
+    return { nombre, dni: d, dniTxt: fmtDocAR(d), dir, loc, tel };
+  }
+  /* controles comunes de la vista previa y de la firma */
+  contratoPreparar(u, b) {
+    const p = this.contratoPermiso(u, false);
+    if (!isPlain(b)) throw httpErr(400, 'Datos inválidos.');
+    const cid = String(b.cid || '');
+    if (!ID_RE.test(cid)) throw httpErr(400, 'Falta el cliente.');
+    const c = this.clienteDe(cid);
+    if (!c) throw httpErr(404, 'No existe ese cliente.');
+    const motivo = Object.prototype.hasOwnProperty.call(CONTRATO_MOTIVOS, b.motivo) ? b.motivo : '';
+    if (!motivo) throw httpErr(400, 'Falta el motivo del contrato.');
+    const equipos = comodatoLimpio(c.comodato);
+    if (!equipos.length) throw httpErr(400, 'Cargá primero los equipos en comodato de este cliente.');
+    const tpl = this.contratoTpl();
+    if (!tpl.final && u.role !== 'admin') throw httpErr(409, 'Todavía no está cargado el texto definitivo del contrato. Avisale al administrador.', 'failed_precondition');
+    const titular = this.contratoTitular(b.titular);
+    const vivos = this.q("SELECT id,estado FROM contratos WHERE cid=? AND estado IN ('vigente','revision')", cid);
+    const vig = vivos.find(r => r.estado === 'vigente'), rev = vivos.find(r => r.estado === 'revision');
+    if (motivo === 'alta') {
+      if (vig || rev) throw httpErr(409, 'Este cliente ya tiene un contrato' + (vig ? '' : ' esperando revisión') + '. Para cambiar al titular o los equipos usá «Cambio de titularidad» o «Cambio de equipos».', 'failed_precondition');
+    } else {
+      if (!vig) throw httpErr(409, 'Este cliente todavía no tiene un contrato vigente: primero hay que firmar el de alta.', 'failed_precondition');
+      if (rev) throw httpErr(409, 'Ya hay un contrato nuevo de este cliente esperando la revisión de la oficina.', 'failed_precondition');
+    }
+    return { p, cid, c, motivo, equipos, eq: eqSig(equipos), tpl, titular, prev: vig ? vig.id : null };
+  }
+  contratoVista(u, b) {
+    const x = this.contratoPreparar(u, b);
+    const texto = renderContrato(x.tpl, { ts: Date.now(), num: 0, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo });
+    return { texto, tver: x.tpl.ver, eq: x.eq, final: !!x.tpl.final, prueba: !x.tpl.final, equipos: x.equipos, titular: x.titular, motivo: x.motivo };
+  }
+  contratoHash(c) { return sha(JSON.stringify(['yapur-comodato-v1', c.id, c.num, c.cid, c.motivo, c.prev || '', c.ts, c.texto, c.titular, c.equipos, c.eq, c.firmaSha, c.aclar])); }
+  async contratoFirmar(u, b, request) {
+    this.contratoPreparar(u, b);
+    if (b.acepto !== true) throw httpErr(400, 'Falta confirmar que el titular leyó y acepta el contrato.');
+    const aclar = lim(b.aclar, 80);
+    if (aclar.length < 3) throw httpErr(400, 'Falta la aclaración: el nombre de quien firma.');
+    if (!pngOk(b.firma)) throw httpErr(400, 'La firma no es válida. Pedile que firme de nuevo.');
+    const firmaSha = await sha(b.firma), id = 'k' + hex(rnd(8)), ip = (request.headers.get('cf-connecting-ip') || '').slice(0, 60), ua = (request.headers.get('user-agent') || '').slice(0, 300);
+    for (let intento = 0; intento < 5; intento++) {
+      const x = this.contratoPreparar(u, b);
+      if (Number(b.tver) !== x.tpl.ver || String(b.eq) !== x.eq) throw httpErr(409, 'El texto del contrato o los equipos cambiaron mientras se firmaba. Volvé a abrir el contrato para leer la versión actual.', 'failed_precondition');
+      const num = this.q1('SELECT COALESCE(MAX(num),0)+1 n FROM contratos').n, ts = Date.now();
+      const texto = renderContrato(x.tpl, { ts, num, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo });
+      const titularS = JSON.stringify(x.titular), equiposS = JSON.stringify(x.equipos);
+      const hash = await this.contratoHash({ id, num, cid: x.cid, motivo: x.motivo, prev: x.prev, ts, texto, titular: titularS, equipos: equiposS, eq: x.eq, firmaSha, aclar });
+      let hecho = false;
+      this.tx(() => {
+        const y = this.contratoPreparar(u, b);   // pudo cambiar algo mientras se calculaba el código
+        if (y.eq !== x.eq || y.tpl.ver !== x.tpl.ver || y.prev !== x.prev || this.q1('SELECT COALESCE(MAX(num),0)+1 n FROM contratos').n !== num) return;
+        this.sql.exec('INSERT INTO contratos(id,num,cid,estado,motivo,prev,prueba,tver,titular,equipos,eq,texto,firma,aclar,ts,por,pornombre,ip,ua,hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          id, num, x.cid, x.motivo === 'alta' ? 'vigente' : 'revision', x.motivo, x.prev, x.tpl.final ? 0 : 1, x.tpl.ver, titularS, equiposS, x.eq, texto, b.firma, aclar, ts, u.id, String(u.nombre || u.usuario || '').slice(0, 60), ip, ua, hash);
+        this.contratoLog(id, u, 'firmado', CONTRATO_MOTIVOS[x.motivo] + (x.tpl.final ? '' : ' (de prueba)'));
+        hecho = true;
+      });
+      if (hecho) { this.broadcastContrato(id); return { contrato: this.contratoDetalle(u, id) }; }
+    }
+    throw httpErr(409, 'Se firmaron varios contratos a la vez. Probá de nuevo.', 'failed_precondition');
+  }
+  contratoDetalle(u, id) {
+    const p = this.contratoPermiso(u, false), gest = !!p.contratosGestion;
+    const r = this.q1('SELECT * FROM contratos WHERE id=?', id);
+    if (!r || (r.estado === 'borrado' && !gest)) throw httpErr(404, 'No existe ese contrato.', 'not_found');
+    const tit = JSON.parse(r.titular);
+    let texto = r.texto;
+    if (!p.dni && !gest) { texto = tit.dniTxt ? texto.split(tit.dniTxt).join('••••••••') : texto; tit.dni = tit.dniTxt = '••••••••'; }
+    const o = Object.assign(this.contratoResumen(r, gest), { texto, titular: tit, equipos: JSON.parse(r.equipos), aclar: r.aclar || '', firma: r.firma, hash: r.hash, tver: r.tver });
+    if (gest) {
+      o.ip = r.ip || ''; o.ua = r.ua || ''; o.estadoPrev = r.estado_prev || null;
+      o.log = this.q('SELECT ts,uname,acc,det FROM contratos_log WHERE cto=? ORDER BY ts,rowid', id);
+    }
+    if (r.prev) { const pv = this.q1('SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE id=?', r.prev); if (pv) o.prevResumen = this.contratoResumen(pv, gest); }
+    return o;
+  }
+  async contratoVerificar(u, id) {
+    this.contratoPermiso(u, true);
+    const r = this.q1('SELECT * FROM contratos WHERE id=?', id);
+    if (!r) throw httpErr(404, 'No existe ese contrato.', 'not_found');
+    const h = await this.contratoHash({ id: r.id, num: r.num, cid: r.cid, motivo: r.motivo, prev: r.prev, ts: r.ts, texto: r.texto, titular: r.titular, equipos: r.equipos, eq: r.eq, firmaSha: await sha(r.firma), aclar: r.aclar || '' });
+    const ok = safeEq(h, r.hash);
+    this.contratoLog(id, u, 'verificado', ok ? 'Íntegro' : 'ALTERADO');
+    return { ok };
+  }
+  contratoAccion(u, id, accion, b) {
+    this.contratoPermiso(u, true);
+    const motivo = lim(isPlain(b) ? b.motivo : '', 200);
+    let res;
+    this.tx(() => {
+      const r = this.q1('SELECT * FROM contratos WHERE id=?', id);
+      if (!r) throw httpErr(404, 'No existe ese contrato.', 'not_found');
+      const cambiar = (rid, estado, extra) => this.sql.exec('UPDATE contratos SET estado=?, estado_prev=? WHERE id=?', estado, extra === undefined ? null : extra, rid);
+      if (accion === 'aprobar') {
+        if (r.estado !== 'revision') throw httpErr(409, 'Este contrato no está esperando revisión.', 'failed_precondition');
+        for (const o of this.q("SELECT id FROM contratos WHERE cid=? AND estado='vigente' AND id<>?", r.cid, id)) { cambiar(o.id, 'archivado'); this.contratoLog(o.id, u, 'archivado', 'Lo reemplaza el contrato N° ' + String(r.num).padStart(4, '0')); }
+        cambiar(id, 'vigente');
+        this.contratoLog(id, u, 'aprobado', motivo || null);
+      } else if (accion === 'rechazar') {
+        if (r.estado !== 'revision') throw httpErr(409, 'Este contrato no está esperando revisión.', 'failed_precondition');
+        if (motivo.length < 3) throw httpErr(400, 'Escribí el motivo del rechazo.');
+        cambiar(id, 'rechazado');
+        this.contratoLog(id, u, 'rechazado', motivo);
+      } else if (accion === 'borrar') {
+        if (r.estado === 'borrado') throw httpErr(409, 'Este contrato ya está en la papelera.', 'failed_precondition');
+        if (motivo.length < 3) throw httpErr(400, 'Escribí el motivo por el que se borra.');
+        cambiar(id, 'borrado', r.estado);
+        this.contratoLog(id, u, 'borrado', motivo + ' (estaba ' + r.estado + ')');
+      } else if (accion === 'restaurar') {
+        if (r.estado !== 'borrado') throw httpErr(409, 'Este contrato no está en la papelera.', 'failed_precondition');
+        let vuelve = CONTRATO_ESTADOS.includes(r.estado_prev) && r.estado_prev !== 'borrado' ? r.estado_prev : 'archivado';
+        if (vuelve === 'vigente' && this.q1("SELECT 1 x FROM contratos WHERE cid=? AND estado='vigente' AND id<>?", r.cid, id)) vuelve = 'archivado';
+        if (vuelve === 'revision' && this.q1("SELECT 1 x FROM contratos WHERE cid=? AND estado='revision' AND id<>?", r.cid, id)) vuelve = 'archivado';
+        cambiar(id, vuelve);
+        this.contratoLog(id, u, 'restaurado', 'Vuelve como «' + vuelve + '»');
+      } else throw httpErr(400, 'Acción inválida.');
+      res = r.cid;
+    });
+    this.broadcastContrato(id);
+    for (const o of this.q('SELECT id FROM contratos WHERE cid=? AND id<>?', res, id)) this.broadcastContrato(o.id);
+    return { contrato: this.contratoDetalle(u, id) };
   }
 
   /* ================= routers MikroTik (solo lectura) =================
@@ -1721,6 +2030,17 @@ export class YapurDB extends DurableObject {
     if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
     if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
+    if (p === '/api/contratos' && m === 'GET') return send(200, this.contratoLista((await this.needAuth(request)).user, url));
+    if (p === '/api/contrato/plantilla' && m === 'GET') return send(200, this.contratoPlantillaVer((await this.needAuth(request)).user));
+    if (p === '/api/contrato/plantilla' && m === 'PUT') return send(200, this.contratoPlantillaGuardar((await this.needAdmin(request)).user, readBody(raw, 6e4)));
+    if (p === '/api/contrato/vista' && m === 'POST') return send(200, this.contratoVista((await this.needAuth(request)).user, readBody(raw, 2e4)));
+    if (p === '/api/contrato' && m === 'POST') return send(200, await this.contratoFirmar((await this.needAuth(request)).user, readBody(raw, 2e5), request));
+    if ((mm = /^\/api\/contrato\/(k[0-9a-f]{16})(?:\/(aprobar|rechazar|borrar|restaurar|verificar))?$/.exec(p))) {
+      const u = (await this.needAuth(request)).user;
+      if (!mm[2] && m === 'GET') return send(200, { contrato: this.contratoDetalle(u, mm[1]) });
+      if (mm[2] === 'verificar' && m === 'POST') return send(200, await this.contratoVerificar(u, mm[1]));
+      if (mm[2] && mm[2] !== 'verificar' && m === 'POST') return send(200, this.contratoAccion(u, mm[1], mm[2], readBody(raw, 2e3)));
+    }
     if (p === '/api/routers' && m === 'GET') { await this.needAdmin(request); return send(200, { routers: this.routerList() }); }
     if (p === '/api/routers' && m === 'POST') { await this.needAdmin(request); return send(200, await this.routerCreate(readBody(raw, 1e4))); }
     if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/ping-token|\/items)?$/.exec(p))) {
