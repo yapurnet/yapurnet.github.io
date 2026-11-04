@@ -99,6 +99,15 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Sin probar en un router real:** el script se armó con la sintaxis de RouterOS 6.4x/7.x pero **no se pudo correr en un MikroTik desde acá**. Probalo primero en uno chico (por ejemplo un nodo con IP fija). Si el router responde «not enough permissions», agregá el permiso `write` al script y a la programación (el script igual no escribe). El paso «Si algo falla» del mismo cuadro explica los demás casos.
 - Más adelante, cortar y reconectar desde el sistema se podría agregar como un script aparte que el router *consulta* (siempre del lado del router, sin dar acceso al sistema); hoy no existe.
 
+## Dar de baja a un cliente (y que no desaparezca hasta retirar los equipos)
+
+- **Cómo:** abrí la ficha del cliente → **Dar de baja** (lo ve quien puede editar clientes). Elegís la fecha, un motivo si querés, y si **tiene equipos en comodato para retirar** (viene tildado). Si lo dejás tildado también se crea la orden de **Retiro de equipo**, sin asignar, para que la tome un técnico.
+- **Qué pasa mientras falta retirar:** el cliente queda de baja (no se factura ni aparece para cobrar) pero **sigue en la lista de «Todos»** con el aviso **«Baja · retirar equipo»**, y también en el filtro **«Equipos por retirar»** (que ven también los técnicos). La ficha dice desde cuándo está de baja y el motivo.
+- **Confirmar el retiro:** en la ficha, **Confirmar equipos retirados**; o cuando el técnico cierra la orden de «Retiro de equipo», la pantalla de cierre ofrece «Confirmar que se retiraron los equipos» (tildado). Recién ahí sale de «Todos».
+- **Después:** el cliente no se borra nunca. Se encuentra en el filtro **«Bajas»** (con buscador) con su historial, pagos y fechas de baja y de retiro. Para reactivarlo: Editar → Estado.
+- **Baja sin equipos:** destildá «Tiene equipos en comodato» y sale de la lista en el acto.
+- **Ojo con la deuda:** al pasar a baja deja de figurar como deuda del mes; el formulario avisa si debe algo. La «Deuda anterior» sí se mantiene.
+
 ## Probar la conexión de un cliente (ping)
 
 La oficina y los técnicos en la calle pueden ver si un cliente **contesta** sin tocar nada del router: en la ficha del cliente, **Conexión → Probar conexión**.

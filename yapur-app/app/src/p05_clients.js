@@ -29,7 +29,8 @@ function searchClients(q,filter,limit){
 }
 /* el estado del cliente tal como lo puede ver esta persona: el técnico no ve «Activo» ni «Suspendido» (por falta de pago) */
 const estLabel=c=>{if(!c||!c.estado)return '';if(!veEstado()&&(c.estado==='activo'||c.estado==='suspendido'))return '';return ESTADOS[c.estado]||c.estado;};
-const estChip=c=>{const l=estLabel(c);return l?`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(l)}</span>`:'';};
+const bajaPend=c=>!!c&&c.estado==='baja'&&c.retiro==='pend';   /* de baja, pero todavía no se confirmó que retiraron los equipos en comodato */
+const estChip=c=>{if(bajaPend(c))return '<span class="chip warn">Baja · retirar equipo</span>';const l=estLabel(c);return l?`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(l)}</span>`:'';};
 function clientRow(c){
   const pl=S.planes.get(c.planId);
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
@@ -188,6 +189,7 @@ function openClient(id){
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${bajaBlock(c)}
     ${deudaAntBlock(c)}
     ${cuentaBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI / CUIT / CUIL',esc(c.dni)):''}
@@ -195,7 +197,7 @@ function openClient(id){
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${pingBlock(c)}
-    <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -221,10 +223,51 @@ function openClient(id){
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
       else if(a.dataset.act==='ping')pingProbar(c,el);
+      else if(a.dataset.act==='baja')openBaja(c.id);
+      else if(a.dataset.act==='retiro-ok')confirmarRetiro(c.id);
       else if(a.dataset.act==='promesa')openPromesa(c.id);
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- dar de baja sin que desaparezca hasta que se retiren los equipos en comodato ----- */
+function bajaBlock(c){
+  if(c.estado!=='baja')return '';
+  const f=c.bajaFecha?' desde el '+esc(dmy(c.bajaFecha)):'',mot=c.bajaMotivo?' Motivo: '+esc(c.bajaMotivo)+'.':'';
+  if(c.retiro==='pend')return `<div class="notice"><b>De baja${f}.</b>${mot} <b>Falta retirar los equipos en comodato.</b> El cliente sigue en la lista de «Todos» hasta que se confirme el retiro.</div>`;
+  return `<div class="notice info"><b>De baja${f}.</b>${mot}${c.retiro==='ok'?' Equipos retirados'+(c.retiroFecha?' el '+esc(dmy(c.retiroFecha)):'')+'.':''} Lo encontrás en «Bajas».</div>`;
+}
+function openBaja(id){
+  const c=S.clientes.get(id);if(!c)return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede editar clientes','bad');
+  if(c.estado==='baja')return toast('Este cliente ya está de baja','bad');
+  const b=billing(c),debe=b.aplica&&b.deuda>0;
+  const html=`<form class="form" id="bjform" novalidate>
+    <p>Vas a dar de baja a <b>${esc(c.nombre)}</b>. Deja de facturarse y de aparecer en los cobros.</p>
+    ${debe?`<div class="notice bad">Debe ${esc(fmtMoney(b.deuda))}. Cobralo antes: al pasar a baja deja de figurar como deuda.</div>`:''}
+    <div class="grid2">${F('Fecha de la baja','bj-fecha',`<input id="bj-fecha" type="date" value="${esc(todayStr())}">`)}${F('Motivo (opcional)','bj-mot','<input id="bj-mot" maxlength="120" placeholder="Se mudó, se pasó a otra empresa…">')}</div>
+    <label class="per"><input id="bj-eq" type="checkbox" checked><span class="grow">Tiene equipos en comodato que hay que retirar<br><span class="small muted">El cliente <b>sigue apareciendo en la lista</b> (con el aviso «Baja · retirar equipo») hasta que confirmes que se retiraron.</span></span></label>
+    ${can('crearOrdenes')?`<label class="per" id="bj-ord-box"><input id="bj-ord" type="checkbox" checked><span class="grow">Crear la orden de «Retiro de equipo»<br><span class="small muted">Queda sin asignar para que la tome un técnico.</span></span></label>`:''}
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn danger" type="submit">Dar de baja</button></div></form>`;
+  openModal({title:'Dar de baja',html,onMount(el){
+    const eq=$('#bj-eq',el),ord=$('#bj-ord',el);
+    if(ord)eq.addEventListener('change',()=>{ord.disabled=!eq.checked;if(!eq.checked)ord.checked=false;});
+    $('#bjform',el).addEventListener('submit',async e=>{
+      e.preventDefault();
+      const fecha=$('#bj-fecha',el).value||todayStr(),conEq=eq.checked,btn=$('button[type=submit]',el);btn.disabled=true;
+      try{
+        await saveClient(c,{estado:'baja',bajaFecha:fecha,bajaMotivo:$('#bj-mot',el).value.trim(),retiro:conEq?'pend':'',retiroFecha:conEq?null:fecha,corteMora:null});
+        if(conEq&&ord&&ord.checked){const cre=todayStr();await putItem('ordenes',orderShard(cre.slice(0,7)),newId(),{estado:'pendiente',creado:cre,mod:Date.now(),clientId:c.id,tipo:'retiro',tecnico:null,tecNombre:null,fecha:cre,prioridad:'normal',notas:'Retirar los equipos en comodato (baja del servicio).'});}
+        toast(conEq?'Cliente de baja: falta retirar los equipos':'Cliente dado de baja');closeModal();
+      }catch(err){btn.disabled=false;dbError(err);}
+    });
+  }});
+}
+async function confirmarRetiro(id){
+  const c=S.clientes.get(id);if(!c||!bajaPend(c))return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede editar clientes','bad');
+  if(!await askConfirm('¿Confirmás que ya se retiraron todos los equipos en comodato de '+c.nombre+'? Después deja de aparecer en «Todos» (se encuentra en «Bajas»).','Confirmar retiro'))return;
+  try{await saveClient(c,{retiro:'ok',retiroFecha:todayStr()});toast('Equipos retirados: baja completa');closeModal();}catch(err){dbError(err);}
 }
 /* ----- probar la conexión (ping desde un router de la empresa) ----- */
 /* una sola IPv4 válida (con /32 opcional); cualquier otra cosa, o varias IP juntas, no se puede probar */
@@ -235,7 +278,7 @@ function ipUnica(t){
   return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
 }
 function pingBlock(c){
-  if(!can('ping'))return '';
+  if(!can('ping')||c.estado==='baja')return '';
   const ip=ipUnica(c.ip);
   if(!ip)return `<div class="hint" id="png-box">Para probar la conexión, el cliente tiene que tener <b>una sola IP</b> cargada en su ficha.</div>`;
   return `<div class="card flat" id="png-box"><div class="head-row"><h3>Conexión</h3><button class="btn small" type="button" data-act="ping" id="png-btn">Probar conexión</button></div>
@@ -551,13 +594,15 @@ VIEWS.clientes={
   },
   update(){
     const seg=$('#cl-seg');if(!seg)return;
-    const fs=[['todos','Todos'],...(veEstado()?[['activo','Activos'],['suspendido','Suspendidos']]:[]),['pendiente','Por instalar'],['nogeo','Sin ubicación']];
+    const fs=[['todos','Todos'],...(veEstado()?[['activo','Activos'],['suspendido','Suspendidos']]:[]),['pendiente','Por instalar'],['retirar','Equipos por retirar'],['nogeo','Sin ubicación']];
+    if(veEstado())fs.push(['baja','Bajas']);
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     if(veServicios())serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
-      if(CL.estado==='todos')return c.estado!=='baja';
+      if(CL.estado==='todos')return c.estado!=='baja'||bajaPend(c);   /* una baja con equipos sin retirar sigue en la lista hasta que se confirme */
+      if(CL.estado==='retirar')return bajaPend(c);
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
