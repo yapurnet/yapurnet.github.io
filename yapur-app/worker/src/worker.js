@@ -69,6 +69,38 @@ const canReadPagos = (u, p) => u.role === 'admin' || p.cobrar || p.caja || p.pro
 const pubUser = u => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, role: u.role, tel: u.tel, activo: u.activo, permisos: u.permisos, perms: effPerms(u), last_login: u.last_login || null });
 const meOf = u => ({ id: u.id, usuario: u.usuario, nombre: u.nombre, role: u.role, tel: u.tel, perms: effPerms(u) });
 
+/* ================= equipos (dispositivos) =================
+   Cada teléfono o navegador que entra queda registrado con un identificador propio (lo genera la app y lo guarda en el equipo).
+   Los empleados solo pueden entrar desde equipos que el administrador aprobó. */
+const DID_RE = /^[A-Za-z0-9_-]{16,64}$/;
+/* un nombre legible del equipo a partir de lo que manda el navegador (modelo y sistema en Android, navegador o app) */
+function uaInfo(ua) {
+  ua = String(ua || '');
+  const apk = /YapurApp\/([\d.]+)/.exec(ua);
+  let os = '', modelo = '';
+  const an = /Android ([\d.]+);\s*([^;)]*)/.exec(ua);
+  if (an) { os = 'Android ' + an[1].split('.')[0]; modelo = an[2].replace(/\s*Build\/.*$/, '').trim(); if (/^(K|wv)$/i.test(modelo)) modelo = ''; }
+  else if (/iPhone/.test(ua)) { os = 'iPhone'; }
+  else if (/iPad/.test(ua)) { os = 'iPad'; }
+  else if (/Windows NT/.test(ua)) { os = 'Windows'; }
+  else if (/Mac OS X|Macintosh/.test(ua)) { os = 'Mac'; }
+  else if (/CrOS/.test(ua)) { os = 'Chromebook'; }
+  else if (/Linux/.test(ua)) { os = 'Linux'; }
+  let nav = '';
+  if (/Edg\//.test(ua)) nav = 'Edge'; else if (/OPR\/|Opera/.test(ua)) nav = 'Opera'; else if (/SamsungBrowser/.test(ua)) nav = 'Samsung Internet';
+  else if (/Firefox\//.test(ua)) nav = 'Firefox'; else if (/Chrome\/|CriOS/.test(ua)) nav = 'Chrome'; else if (/Safari\//.test(ua)) nav = 'Safari';
+  const app = apk ? 'apk' : 'web';
+  const partes = [modelo, os].filter(Boolean);
+  const cuando = apk ? 'App Yapur ' + apk[1] : (nav ? 'Navegador ' + nav : 'Navegador');
+  return { app, label: (partes.length ? partes.join(' · ') + ' · ' : '') + cuando };
+}
+/* de dónde parece venir el pedido (Cloudflare lo estima por la IP; en celulares puede ser la ciudad del operador) */
+function geoOf(request) {
+  const cf = request.cf || {};
+  const lugar = [cf.city, cf.region].filter(Boolean).join(', ') + (cf.country ? (cf.city || cf.region ? ' ' : '') + '(' + cf.country + ')' : '');
+  return [lugar, cf.asOrganization].filter(Boolean).join(' · ').slice(0, 140);
+}
+
 /* ================= contraseñas ================= */
 /* PBKDF2-SHA256 con el máximo de vueltas que permite Cloudflare (100.000). El prefijo «p1:» permite cambiar el método más adelante. */
 async function derive(pw, salt) {
@@ -241,7 +273,7 @@ function guardRed(u, p, old, items) {
 }
 
 /* ================= respuestas ================= */
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS', 'Access-Control-Max-Age': '600' };
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-did', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS', 'Access-Control-Max-Age': '600' };
 function send(status, body, headers) {
   const h = Object.assign({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }, CORS, headers || {});
   if (typeof body !== 'string') { h['Content-Type'] = h['Content-Type'] || 'application/json; charset=utf-8'; body = JSON.stringify(body); }
@@ -399,6 +431,7 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS docs(coll TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, upd INTEGER NOT NULL, PRIMARY KEY(coll,id)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL, role TEXT NOT NULL, tel TEXT DEFAULT '', permisos TEXT, activo INTEGER NOT NULL DEFAULT 1, salt TEXT, hash TEXT, created INTEGER, last_login INTEGER);
       CREATE TABLE IF NOT EXISTS sessions(th TEXT PRIMARY KEY, uid TEXT NOT NULL, created INTEGER, last INTEGER);
+      CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, uid TEXT NOT NULL, did TEXT NOT NULL, label TEXT, ua TEXT, app TEXT, ip TEXT, geo TEXT, estado TEXT NOT NULL DEFAULT 'pend', creado INTEGER, visto INTEGER, UNIQUE(uid,did));
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
@@ -410,6 +443,14 @@ export class YapurDB extends DurableObject {
     `);
     for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
+    try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
+    /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
+       cuando ese teléfono vuelva a pedir algo con la versión nueva, se completa con los datos reales del equipo */
+    for (const r of this.q('SELECT th,uid,created,last FROM sessions WHERE dev IS NULL')) {
+      const id = 'd' + hex(rnd(6));
+      this.sql.exec('INSERT INTO devices(id,uid,did,label,ua,app,ip,geo,estado,creado,visto) VALUES(?,?,?,?,?,?,?,?,?,?,?)', id, r.uid, 'old-' + r.th.slice(0, 20), 'Sesión anterior (sin datos del equipo)', '', '', '', '', 'ok', r.created || Date.now(), r.last || Date.now());
+      this.sql.exec('UPDATE sessions SET dev=? WHERE th=?', id, r.th);
+    }
     this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
     this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
     this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
@@ -441,25 +482,77 @@ export class YapurDB extends DurableObject {
   }
 
   /* ----- sesiones ----- */
-  async newSession(uid) {
+  async newSession(uid, dev) {
     const token = b64u(rnd(32));
-    this.sql.exec('INSERT INTO sessions(th,uid,created,last) VALUES(?,?,?,?)', await sha(token), uid, Date.now(), Date.now());
+    this.sql.exec('INSERT INTO sessions(th,uid,created,last,dev) VALUES(?,?,?,?,?)', await sha(token), uid, Date.now(), Date.now(), dev || null);
     return token;
+  }
+  /* equipos: ¿hay que pedir aprobación a los empleados? (se cambia en Ajustes; si nadie lo tocó, vale lo configurado en el servidor, que normalmente es «sí») */
+  reqAprob() {
+    const r = this.q1('SELECT v FROM meta WHERE k=?', 'disp_aprob');
+    return r ? r.v !== '0' : String(this.env.DISP_APROBAR || '1') !== '0';
+  }
+  /* reconoce (o da de alta) el equipo desde el que entra un usuario y devuelve su fila; un empleado en un equipo nuevo queda «pendiente» y se le avisa al administrador */
+  async devEntrar(u, request, didIn) {
+    const ua = (request.headers.get('user-agent') || '').slice(0, 300), info = uaInfo(ua), ip = (request.headers.get('cf-connecting-ip') || '').slice(0, 60), geo = geoOf(request), now = Date.now();
+    const did = DID_RE.test(String(didIn || '')) ? String(didIn) : 'ua-' + (await sha(ua)).slice(0, 24);
+    let d = this.q1('SELECT * FROM devices WHERE uid=? AND did=?', u.id, did);
+    if (!d) {
+      const estado = u.role === 'admin' || !this.reqAprob() ? 'ok' : 'pend';
+      if (estado === 'pend' && this.q1("SELECT COUNT(*) n FROM devices WHERE uid=? AND estado='pend'", u.id).n >= 8) throw httpErr(429, 'Hay demasiados equipos esperando aprobación para este usuario. Avisale al administrador.', 'resource_exhausted');
+      d = { id: 'd' + hex(rnd(6)), uid: u.id, did, label: info.label, ua, app: info.app, ip, geo, estado, creado: now, visto: now };
+      this.sql.exec('INSERT INTO devices(id,uid,did,label,ua,app,ip,geo,estado,creado,visto) VALUES(?,?,?,?,?,?,?,?,?,?,?)', d.id, d.uid, d.did, d.label, d.ua, d.app, d.ip, d.geo, d.estado, d.creado, d.visto);
+      if (estado === 'pend') this.avisarAdmins();
+      return d;
+    }
+    if (d.estado === 'pend' && !this.reqAprob()) d.estado = 'ok';   // se apagó el pedido de aprobación: los que esperaban entran
+    this.sql.exec('UPDATE devices SET label=?,ua=?,app=?,ip=?,geo=?,estado=?,visto=? WHERE id=?', info.label, ua, info.app, ip, geo, d.estado, now, d.id);
+    return Object.assign(d, { label: info.label, ua, app: info.app, ip, geo, visto: now });
+  }
+  /* una sesión abierta antes de existir el registro de equipos: con el primer pedido de la app nueva se completa con el equipo real */
+  devCompletar(d, request, didIn) {
+    if (!DID_RE.test(String(didIn || ''))) return;
+    const ua = (request.headers.get('user-agent') || '').slice(0, 300), info = uaInfo(ua), ip = (request.headers.get('cf-connecting-ip') || '').slice(0, 60), geo = geoOf(request);
+    const otro = this.q1('SELECT id FROM devices WHERE uid=? AND did=?', d.uid, didIn);
+    if (otro) { this.sql.exec('UPDATE sessions SET dev=? WHERE dev=?', otro.id, d.id); this.sql.exec('DELETE FROM devices WHERE id=?', d.id); return; }
+    this.sql.exec('UPDATE devices SET did=?,label=?,ua=?,app=?,ip=?,geo=? WHERE id=?', didIn, info.label, ua, info.app, ip, geo, d.id);
+  }
+  avisarAdmins() {
+    const n = this.q1("SELECT COUNT(*) n FROM devices WHERE estado='pend'").n;
+    for (const s of [...this.streams]) { const u = this.USERS.get(s.uid); if (u && u.role === 'admin') this.sse(s, 'disp', { pend: n }); }
   }
   async authOf(request) {
     const m = /^Bearer\s+(\S+)$/.exec(request.headers.get('authorization') || '');
     if (!m) return null;
     const th = await sha(m[1]);
-    const s = this.q1('SELECT uid,last FROM sessions WHERE th=?', th);
+    const s = this.q1('SELECT uid,last,dev FROM sessions WHERE th=?', th);
     if (!s) return null;
     const u = this.USERS.get(s.uid);
     if (!u || !u.activo) return null;
     if (Date.now() - s.last > 180 * 864e5) { this.sql.exec('DELETE FROM sessions WHERE th=?', th); return null; }
-    if (Date.now() - s.last > 60e3) this.sql.exec('UPDATE sessions SET last=? WHERE th=?', Date.now(), th);
-    return { user: u, th };
+    /* el equipo de esta sesión tiene que seguir autorizado: si el administrador lo bloqueó o lo quitó, la sesión termina en el acto */
+    let dev = s.dev ? this.q1('SELECT id,uid,did,estado FROM devices WHERE id=?', s.dev) : null;
+    if (s.dev && (!dev || dev.estado !== 'ok')) { this.sql.exec('DELETE FROM sessions WHERE th=?', th); return null; }
+    const did = request.headers.get('x-did');
+    if (dev && dev.did.startsWith('old-') && did) { this.devCompletar(dev, request, did); dev = this.q1('SELECT id,uid,did,estado FROM devices WHERE uid=? AND did=?', s.uid, did) || dev; }
+    if (Date.now() - s.last > 60e3) {
+      this.sql.exec('UPDATE sessions SET last=?,dev=? WHERE th=?', Date.now(), dev ? dev.id : s.dev, th);
+      if (dev) this.sql.exec('UPDATE devices SET visto=?,ip=?,geo=? WHERE id=?', Date.now(), (request.headers.get('cf-connecting-ip') || '').slice(0, 60), geoOf(request), dev.id);
+      if (dev && dev.did.startsWith('old-')) { const ua = (request.headers.get('user-agent') || '').slice(0, 300), info = uaInfo(ua); this.sql.exec('UPDATE devices SET label=?,ua=?,app=? WHERE id=?', info.label, ua, info.app, dev.id); }
+    }
+    return { user: u, th, dev: dev ? dev.id : null };
   }
   async needAuth(request) { const a = await this.authOf(request); if (!a) throw httpErr(401, 'Tu sesión terminó. Entrá de nuevo.', 'unauthenticated'); return a; }
   async needAdmin(request) { const a = await this.needAuth(request); if (a.user.role !== 'admin') throw httpErr(403, 'Solo el administrador puede hacer esto.', 'permission_denied'); return a; }
+  /* lista de equipos para el administrador: primero los que esperan aprobación, después los autorizados (el último uso arriba) y al final los bloqueados */
+  dispView(a) {
+    const orden = { pend: 0, ok: 1, bloq: 2 };
+    const lista = this.q('SELECT d.*, (SELECT COUNT(*) FROM sessions s WHERE s.dev=d.id) ses FROM devices d').map(r => {
+      const u = this.USERS.get(r.uid);
+      return { id: r.id, uid: r.uid, usuario: u ? u.usuario : '?', nombre: u ? u.nombre : '(usuario eliminado)', role: u ? u.role : '', label: r.label || '', app: r.app || '', ip: r.ip || '', geo: r.geo || '', estado: r.estado, creado: r.creado, visto: r.visto, sesion: r.ses > 0, actual: r.id === a.dev, anterior: r.did.startsWith('old-'), cod: /^(old|ua)-/.test(r.did) ? '' : r.did.slice(0, 6).toUpperCase() };
+    }).sort((x, y) => (orden[x.estado] - orden[y.estado]) || ((y.estado === 'pend' ? y.creado : y.visto) - (x.estado === 'pend' ? x.creado : x.visto)));
+    return { requiere: this.reqAprob(), pend: lista.filter(x => x.estado === 'pend').length, lista };
+  }
   adminsActivos() { return [...this.USERS.values()].filter(u => u.role === 'admin' && u.activo); }
 
   /* ----- freno a los intentos de entrada -----
@@ -901,6 +994,7 @@ export class YapurDB extends DurableObject {
       if (!u || !u.activo) { this.sse(s, 'kick', {}); this.endStream(s); } else this.sse(s, 'me', meOf(u));
     }
   }
+  kickDevice(dev) { for (const s of [...this.streams]) if (s.dev === dev) { this.sse(s, 'kick', {}); this.endStream(s); } }
   kickUser(uid) { for (const s of [...this.streams]) if (s.uid === uid) { this.sse(s, 'kick', {}); this.endStream(s); } }
   ensureTimer() {
     if (this.timer) return;
@@ -913,12 +1007,12 @@ export class YapurDB extends DurableObject {
       if (!this.streams.size) { clearInterval(this.timer); this.timer = null; }
     }, 20e3);
   }
-  openStream(u) {
+  openStream(u, dev) {
     const self = this;
     let s;
     const body = new ReadableStream({
       start(c) {
-        s = { c, uid: u.id };
+        s = { c, uid: u.id, dev: dev || null };
         self.streams.add(s);
         c.enqueue(enc.encode('retry: 3000\n\n'));
         self.sse(s, 'hello', { seq: self.SEQ });
@@ -1025,6 +1119,7 @@ export class YapurDB extends DurableObject {
       this.sql.exec('DELETE FROM users');
       this.sql.exec('DELETE FROM sessions');
       for (const u of [...keep, ...newUsers.filter(u => !keep.some(k => k.usuario === u.usuario))]) this.insUser(Object.assign({}, u, { last_login: null }));
+      this.sql.exec('DELETE FROM devices WHERE uid NOT IN (SELECT id FROM users)');   // los equipos aprobados de quienes siguen existiendo se conservan
       this.SEQ++;
     });
     this.loadUsers();
@@ -1361,7 +1456,8 @@ export class YapurDB extends DurableObject {
         if (!this.readDoc('ajustes', 'general')) this.putDoc('ajustes', 'general', JSON.stringify({ empresa: String(b.empresa || 'YAPUR.NET').trim().slice(0, 60) || 'YAPUR.NET', diaVenc: 10 }));
       });
       this.loadUsers();
-      return send(200, { token: await this.newSession(id), me: meOf(this.USERS.get(id)) });
+      const dev0 = await this.devEntrar(this.USERS.get(id), request, b.did);
+      return send(200, { token: await this.newSession(id, dev0.id), me: meOf(this.USERS.get(id)) });
     }
 
     if (p === '/api/login' && m === 'POST') {
@@ -1376,8 +1472,12 @@ export class YapurDB extends DurableObject {
         throw httpErr(401, u && !u.activo && ok ? 'Este usuario está desactivado. Consultá con el administrador.' : 'Usuario o clave incorrectos.', 'unauthenticated');
       }
       this.clearFail(k1);
+      /* ¿desde qué equipo entra? Un empleado en un equipo que el administrador no aprobó no recibe sesión */
+      const dev = await this.devEntrar(u, request, b.did);
+      if (dev.estado === 'bloq') throw httpErr(403, 'Este dispositivo fue bloqueado por el administrador.', 'device_blocked');
+      if (dev.estado === 'pend') throw httpErr(403, 'Este dispositivo todavía no está autorizado. Avisale al administrador para que lo apruebe y después volvé a entrar.', 'device_pending');
       this.sql.exec('UPDATE users SET last_login=? WHERE id=?', Date.now(), u.id); u.last_login = Date.now();
-      return send(200, { token: await this.newSession(u.id), me: meOf(u) });
+      return send(200, { token: await this.newSession(u.id, dev.id), me: meOf(u) });
     }
 
     if (p === '/api/logout' && m === 'POST') {
@@ -1400,7 +1500,7 @@ export class YapurDB extends DurableObject {
 
     if (p === '/api/ticket' && m === 'POST') {
       const a = await this.needAuth(request), t = b64u(rnd(24));
-      this.tickets.set(t, { uid: a.user.id, exp: Date.now() + 30e3 });
+      this.tickets.set(t, { uid: a.user.id, dev: a.dev, exp: Date.now() + 30e3 });
       this.ensureTimer();
       return send(200, { t });
     }
@@ -1410,7 +1510,8 @@ export class YapurDB extends DurableObject {
       if (!tk || tk.exp < Date.now()) return send(401, { error: 'ticket', code: 'unauthenticated' });
       const u = this.USERS.get(tk.uid);
       if (!u || !u.activo) return send(401, { error: 'usuario', code: 'unauthenticated' });
-      return this.openStream(u);
+      if (tk.dev) { const dv = this.q1('SELECT estado FROM devices WHERE id=?', tk.dev); if (!dv || dv.estado !== 'ok') return send(401, { error: 'dispositivo', code: 'unauthenticated' }); }
+      return this.openStream(u, tk.dev);
     }
     if (p === '/api/comprobante' && m === 'POST') {
       const a = await this.needAuth(request);
@@ -1582,6 +1683,28 @@ export class YapurDB extends DurableObject {
         this.loadUsers(); this.pushMe(id); this.broadcastPerfiles();
         return send(200, { user: pubUser(this.USERS.get(id)) });
       }
+    }
+
+    if (p === '/api/dispositivos' && m === 'GET') return send(200, this.dispView(await this.needAdmin(request)));
+    if (p === '/api/dispositivos' && m === 'PATCH') {
+      const a = await this.needAdmin(request), b = readBody(raw, 1e3);
+      if (!isPlain(b) || typeof b.requiere !== 'boolean') throw httpErr(400, 'Falta indicar si se pide aprobación.');
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'disp_aprob', b.requiere ? '1' : '0');
+      return send(200, this.dispView(a));
+    }
+    if ((mm = /^\/api\/dispositivos\/(d[0-9a-f]{12})$/.exec(p)) && m === 'POST') {
+      const a = await this.needAdmin(request), b = readBody(raw, 1e3), id = mm[1], d = this.q1('SELECT * FROM devices WHERE id=?', id);
+      if (!d) throw httpErr(404, 'Ese dispositivo ya no está en la lista.');
+      const acc = isPlain(b) ? b.accion : '';
+      if (acc === 'aprobar') this.sql.exec("UPDATE devices SET estado='ok' WHERE id=?", id);
+      else if (acc === 'bloquear' || acc === 'quitar') {
+        if (id === a.dev) throw httpErr(400, 'Es el equipo que estás usando ahora.');
+        this.sql.exec('DELETE FROM sessions WHERE dev=?', id);
+        if (acc === 'bloquear') this.sql.exec("UPDATE devices SET estado='bloq' WHERE id=?", id); else this.sql.exec('DELETE FROM devices WHERE id=?', id);
+        this.kickDevice(id);
+      } else throw httpErr(400, 'Acción inválida.');
+      this.avisarAdmins();
+      return send(200, this.dispView(a));
     }
 
     if (p === '/api/backup' && m === 'GET') {

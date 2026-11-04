@@ -8,6 +8,14 @@ const NET=(function(){
   const bridge=window.YapurApp||null;
   const native=!!bridge;
   const base='';
+  /* identificador de ESTE equipo: se genera una vez y se conserva aunque se cierre la sesión; el servidor lo usa para saber desde qué equipos entra cada persona */
+  const DID_OK=/^[A-Za-z0-9_-]{16,64}$/;
+  let did=lsGet('did')||'';
+  if(!DID_OK.test(did)){
+    try{const a=new Uint8Array(18);crypto.getRandomValues(a);did=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
+    catch(e){did=(Date.now().toString(36)+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2)).replace(/[^a-z0-9]/g,'').padEnd(24,'x').slice(0,40);}
+    lsSet('did',did);
+  }
   let token=lsGet('tok')||'';
   let me=null;try{me=JSON.parse(lsGet('me')||'null');}catch(e){}
   if(!token)me=null;
@@ -16,7 +24,7 @@ const NET=(function(){
   let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
-  const handlers={status:[],me:[],kick:[]};
+  const handlers={status:[],me:[],kick:[],disp:[]};
   const emit=(k,v)=>handlers[k].forEach(f=>{try{f(v);}catch(e){console.error(e);}});
 
   const isPlain=o=>o&&typeof o==='object'&&!Array.isArray(o);
@@ -36,7 +44,7 @@ const NET=(function(){
     const tm=ctl?setTimeout(()=>ctl.abort(),opt.timeout||25000):null;
     let r;
     try{
-      r=await fetch(base+path,{method,signal:ctl?ctl.signal:undefined,headers:Object.assign({'Content-Type':'application/json'},token&&!opt.anon?{Authorization:'Bearer '+token}:{}),body:body===undefined?undefined:JSON.stringify(body)});
+      r=await fetch(base+path,{method,signal:ctl?ctl.signal:undefined,headers:Object.assign({'Content-Type':'application/json','X-Did':did},token&&!opt.anon?{Authorization:'Bearer '+token}:{}),body:body===undefined?undefined:JSON.stringify(body)});
     }catch(e){throw netErr();}
     finally{if(tm)clearTimeout(tm);}
     let j=null;try{j=await r.json();}catch(e){}
@@ -63,8 +71,8 @@ const NET=(function(){
     closeStream();synced=false;fresh=false;started=false;for(const k of Object.keys(data))delete data[k];
     kvClear();
   }
-  async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
-  async function setup(b){const j=await api('POST','/api/setup',b,{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
+  async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave,did},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
+  async function setup(b){const j=await api('POST','/api/setup',Object.assign({did},b),{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
   async function logout(){try{if(token)await api('POST','/api/logout',{},{noKick:true,timeout:5000});}catch(e){}clearSession();}
   async function status(){return api('GET','/api/status',undefined,{anon:true,noKick:true,timeout:9000});}
   /* ----- copia local para abrir sin señal (los pagos no se guardan en el equipo) ----- */
@@ -146,6 +154,7 @@ const NET=(function(){
     s.addEventListener('ping',seen);
     s.addEventListener('doc',ev=>{seen();let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);});
     s.addEventListener('me',ev=>{seen();try{const m=JSON.parse(ev.data);me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}});
+    s.addEventListener('disp',ev=>{seen();try{emit('disp',JSON.parse(ev.data));}catch(e){}});
     s.addEventListener('kick',()=>{lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');});
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);
@@ -261,7 +270,7 @@ const NET=(function(){
     },true);
   }
   return {
-    native,get base(){return base;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
+    native,get base(){return base;},get did(){return did;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
     api,init,bring,login,setup,logout,status,saveFile,
     get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
     openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},

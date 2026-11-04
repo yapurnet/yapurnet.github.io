@@ -167,7 +167,18 @@ function showLogin(flash){
     if(!u||!p)return toast('Escribí tu usuario y tu clave','bad');
     const b=$('button[type=submit]',el);b.disabled=true;b.textContent='Entrando…';
     try{await NET.login(u,p);lsSet('lastUser',u.toLowerCase());location.reload();}
-    catch(err){b.disabled=false;b.textContent='Entrar';toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');$('#lg-pass',el).value='';}
+    catch(err){
+      b.disabled=false;b.textContent='Entrar';$('#lg-pass',el).value='';
+      if(err.code==='device_pending'||err.code==='device_blocked'){
+        /* el equipo no está autorizado: se explica en pantalla (no en un aviso que se va) y se da el código para que el administrador lo reconozca */
+        const cod=String(NET.did||'').slice(0,6).toUpperCase(),pend=err.code==='device_pending';
+        let n=$('#lg-dev',el);if(!n){n=document.createElement('div');n.id='lg-dev';n.className='notice '+(pend?'warn':'bad');$('#lg-form',el).before(n);}
+        n.innerHTML=pend?`<b>Este equipo todavía no está autorizado.</b><br>Avisale al administrador que estás intentando entrar desde este equipo (código <span class="mono">${esc(cod)}</span>). Cuando lo apruebe, volvé a tocar «Entrar».`
+          :`<b>Este equipo fue bloqueado.</b><br>Consultá con el administrador (código <span class="mono">${esc(cod)}</span>).`;
+        return;
+      }
+      toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');
+    }
   });
 }
 function showSetup(){
@@ -214,6 +225,8 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   NET.on('kick',()=>location.reload());
   NET.on('me',onMeChanged);
   NET.on('status',updateNetBar);
+  NET.on('disp',dispAviso);
+  const devBar=$('#devBar');if(devBar)devBar.addEventListener('click',dispAbrir);
   let st;
   try{st=await NET.init();}catch(e){console.error(e);st={state:'noserver',error:e};}
   if(st.state!=='ready'){showAuth(st.state,st);return;}
@@ -229,6 +242,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
   S.ready=true;refreshAll();updateNetBar();
+  dispRefresh();
   ubicInit().then(jornadaInit,jornadaInit);
 })();
 
