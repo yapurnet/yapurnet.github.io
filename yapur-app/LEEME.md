@@ -129,6 +129,16 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **El texto del contrato** se edita en **Ajustes → Contrato de comodato** (solo administrador): se escribe o pega el texto y se tocan los datos que se completan solos (`{{titular}}`, `{{dni}}`, `{{equipos}}`, `{{fecha}}`…), más los datos de la empresa (razón social, CUIT, domicilio, representante). **Hoy es un borrador:** mientras diga «BORRADOR» o tenga partes «[COMPLETAR…]» no se puede marcarlo como definitivo, y sin eso **los técnicos no pueden hacer firmar**. Cada contrato firmado guarda su propia copia del texto, así que cambiar el texto después no altera los ya firmados.
 - **Importante:** es una **firma electrónica simple** (firma dibujada + registro + código de verificación), no la «firma digital» con certificado de la Ley 25.506. Sirve como constancia firmada y ordenada, pero conviene que **un abogado revise el texto final** del contrato antes de usarlo con clientes.
 
+## Pagar deuda: escribir cuánto paga y repartirlo entre varios medios
+
+- **Dónde:** en la ficha del cliente, el botón **Pagar deuda** (aparece cuando debe algo; lo ven oficina y administrador). También hay un acceso directo adentro de **Cobrar**.
+- **Cómo:** arriba muestra lo que debe (deuda anterior, cada mes y el total). Escribís **cuánto paga** y el medio (efectivo, transferencia, Mercado Pago u otro). Si lo reparte, tocás **Agregar otro medio de pago**: por ejemplo 15.000 en efectivo y la transferencia se completa sola con los 4.000 que faltan. **Registrar pago** y listo.
+- **A qué se aplica:** a lo más viejo primero (la deuda anterior, y después los meses hasta el actual). Antes de registrar, la pantalla muestra «Así queda registrado» con cuánto va a cada mes y con qué medio.
+- **Un solo recibo:** sale un recibo con **«Contado + Transferencia»** y cada renglón dice con qué medio se pagó. En «Cobrado hoy» aparece una sola fila con el total y los medios; la **Caja del día** suma cada medio por separado.
+- **Pagos parciales:** si escribe menos de lo que debe, el resto queda como deuda (la pantalla avisa cuánto). No deja escribir más de lo que debe: para pagar meses adelantados se usa **Cobrar**.
+- **Cuenta unificada:** junta los meses de todos los servicios y los cobra en un solo recibo.
+- **Quién no lo ve:** el técnico (no ve la deuda ni cobra mensualidades).
+
 ## Probar la conexión de un cliente (ping)
 
 La oficina y los técnicos en la calle pueden ver si un cliente **contesta** sin tocar nada del router: en la ficha del cliente, **Conexión → Probar conexión**.
