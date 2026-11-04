@@ -130,6 +130,7 @@ async def main():
         await pg.wait_for_selector('[data-act=baja]'); await pg.click('[data-act=baja]'); await pg.wait_for_selector('#bjform')
         await pg.click('#bjform button[type=submit]')
         await pg.wait_for_function("S.clientes.get('cOtro').retiro === 'pend'", timeout=8000)
+        await pg.wait_for_function("[...S.ordenes.values()].some(o=>o.clientId==='cOtro'&&o.tipo==='retiro')", timeout=8000)  # la orden llega un instante después que el cliente
         oid = await pg.evaluate("[...S.ordenes.values()].find(o=>o.clientId==='cOtro'&&o.tipo==='retiro').id")
         await pg.evaluate(f"closeModal(); openFinishOrder(S.ordenes.get('{oid}'))")
         await pg.wait_for_selector('#fform')
