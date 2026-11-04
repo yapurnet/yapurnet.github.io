@@ -76,7 +76,7 @@ async def main():
         check('completa nombre, DNI, IP', await pg.input_value('#cf-nombre') == 'Ana Ester Paz' and await pg.input_value('#cf-dni') == '28354900' and await pg.input_value('#cf-ip') == '10.20.43.9', out)
         check('queda activo y cobra desde el mes siguiente', await pg.input_value('#cf-estado') == 'activo' and await pg.input_value('#cf-desde') == NEXT, [await pg.input_value('#cf-estado'), await pg.input_value('#cf-desde')])
         check('avisa del pago y de lo que falta completar', 'Pago detectado: efectivo' in out and '65.000' in out.replace('\xa0', ' ') and 'Falta completar: teléfono y calle y número' in out, out)
-        check('detecta el DNI repetido aunque el otro cliente lo tenga con puntos', 'Ojo: ya hay un cliente con ese DNI (Vieja Vera)' in out, out)
+        check('detecta el DNI repetido aunque el otro cliente lo tenga con puntos', 'Ojo: ya hay un cliente con ese DNI o CUIT (Vieja Vera)' in out, out)
         await pg.fill('#cf-dni', '28354999')   # para poder seguir: el reporte ya avisó
         await pg.fill('#cf-tel', '3844 56-0000'); await pg.fill('#cf-dir', 'Belgrano 100')
         await pg.click('#cform button[type=submit]')
