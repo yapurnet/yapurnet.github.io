@@ -135,7 +135,10 @@ async def main():
         rec = await pg.evaluate("(() => { const r = [...S.pagos.values()].filter(p => p.c && ['man','pc','pe','pf'].includes(p.c)); return {n: r.length, recibos: [...new Set(r.map(p => p.recibo))], docs: [...new Set(r.map(p => p._doc))], clientes: r.map(p => p.c).sort().join(','), total: r.reduce((s, p) => s + p.monto, 0)}; })()")
         check('se registraron 4 cobros con un solo número de recibo y en un solo bloque', rec['n'] == 4 and len(rec['recibos']) == 1 and len(rec['docs']) == 1 and rec['clientes'] == 'man,pc,pe,pf' and rec['total'] == 92000, rec)
         rc = await pg.inner_text('.rc')
-        check('el recibo es de la empresa con su CUIT y nombra cada servicio', 'Manaos distribuidora' in rc and 'DNI / CUIT / CUIL: 27-23373806-4' in rc and 'FM' in rc and 'suc. España' in rc and '(C. Central)' in rc and '92.000' in rc, rc)
+        check('el recibo es de la empresa con su CUIT y junta los 4 servicios iguales en un renglón', 'Manaos distribuidora' in rc and 'DNI / CUIT / CUIL: 27-23373806-4' in rc and '4 conexiones' in rc and rc.count('Abono Mensual') == 1 and '92.000' in rc, rc)
+        # impreso como sale al papel (A4 con márgenes de 10 mm): el recibo de la cuenta tiene que entrar en media hoja (148,5 mm de alto)
+        mm = await pg.evaluate("(r) => new Promise(ok => { const d = receiptData(r), f = document.createElement('iframe'); f.style.cssText = 'position:fixed;left:-9999px;top:0;width:190mm;height:400mm;border:0'; document.body.appendChild(f); f.onload = () => { const h = f.contentDocument.querySelector('.rc').getBoundingClientRect().height * 25.4 / 96; f.remove(); ok(h); }; f.srcdoc = '<!doctype html><meta charset=utf-8>' + receiptHTML(d) + '<style>' + RC_PRINT_CSS + '</style>'; })", rec['recibos'][0])
+        check('impreso, el recibo de la cuenta ocupa menos de media hoja A4 (alto %.0f mm)' % mm, 20 < mm < 125, mm)
         href = await pg.get_attribute('#rc-wa', 'href')
         check('«Enviar por WhatsApp» va al número de la empresa', href and '5493844562605' in href, href)
         if SHOTS: await pg.screenshot(path=os.path.join(SHOTS, 'cuenta-recibo.png'), full_page=True)
@@ -158,7 +161,7 @@ async def main():
         await pg.close(); pg = await login()
         sheet = lambda: pg.inner_text('.sheet-body')
         d = await pg.evaluate("(r) => { const d = receiptData(r); return {total: d.total, n: d.lineas.length, nombre: d.cliente.nombre, dni: d.cliente.dni}; }", recibo)
-        check('tras recargar, el recibo único sigue con los 4 servicios y su total', d == {'total': 92000, 'n': 4, 'nombre': 'Manaos distribuidora', 'dni': '27-23373806-4'}, d)
+        check('tras recargar, el recibo único sigue con los 4 servicios en un renglón y su total', d == {'total': 92000, 'n': 1, 'nombre': 'Manaos distribuidora', 'dni': '27-23373806-4'}, d)
         check('la cuenta sigue armada y cada servicio con su domicilio', await pg.evaluate("cuentaMiembros(S.clientes.get('pf')).length === 4 && S.clientes.get('pe').lat === -28.46 && S.clientes.get('pf').dir === 'España 450'"))
 
         # 9) sacar un servicio de la cuenta: sigue cobrándose con el ciclo que tenía

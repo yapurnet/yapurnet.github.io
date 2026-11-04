@@ -10,6 +10,19 @@ function allocate(sel,received){
   return out;
 }
 /* Datos del recibo (formato del recibo en papel): quién emite, a quién, qué se cobra y el período */
+/* los renglones del recibo. En una cuenta con varios servicios, los que son iguales (mismo concepto, mismo mes y mismo precio) van en un solo renglón
+   «… - 4 conexiones» con cantidad 4, así el recibo no se alarga con cada conexión y entra en media hoja; los distintos quedan cada uno con el nombre de su servicio */
+function lineasDe(ps,multi,svc,cond){
+  const base=p=>p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:'');
+  const out=[],idx=new Map();
+  for(const p of ps){
+    const unit=Number(p.monto)||0,b=base(p),k=multi?b+'|'+unit+'|'+cond(p):null;
+    if(k&&idx.has(k)){idx.get(k).cant++;continue;}
+    const l={b,desc:b+(multi&&svc(p)?' - '+svc(p):''),cant:1,cond:cond(p),unit};
+    out.push(l);if(k)idx.set(k,l);
+  }
+  return out.map(l=>({desc:l.cant>1?l.b+' - '+l.cant+' conexiones':l.desc,cant:l.cant,cond:l.cond,unit:l.unit}));
+}
 function receiptData(recibo){
   const ps0=paymentsOfReceipt(recibo);if(!ps0.length)return null;
   /* un recibo de una cuenta con varios servicios lleva los datos de la cuenta principal y el nombre de cada servicio en su renglón */
@@ -33,9 +46,7 @@ function receiptData(recibo){
     emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
       tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
     cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||(multi?(ps.map(p=>S.clientes.get(p.c)).find(m=>m&&m.dni)||{}).dni||'':''),dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
-    lineas:ps.map(p=>({
-      desc:(p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''))+(multi&&svc(p)?' - '+svc(p):''),
-      cant:1,cond:cond(p),unit:Number(p.monto)||0})),
+    lineas:lineasDe(ps,multi,svc,cond),
     medio:METODOS[p0.metodo]||p0.metodo||''
   };
 }
