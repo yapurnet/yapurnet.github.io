@@ -99,6 +99,19 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Sin probar en un router real:** el script se armó con la sintaxis de RouterOS 6.4x/7.x pero **no se pudo correr en un MikroTik desde acá**. Probalo primero en uno chico (por ejemplo un nodo con IP fija). Si el router responde «not enough permissions», agregá el permiso `write` al script y a la programación (el script igual no escribe). El paso «Si algo falla» del mismo cuadro explica los demás casos.
 - Más adelante, cortar y reconectar desde el sistema se podría agregar como un script aparte que el router *consulta* (siempre del lado del router, sin dar acceso al sistema); hoy no existe.
 
+## Probar la conexión de un cliente (ping)
+
+La oficina y los técnicos en la calle pueden ver si un cliente **contesta** sin tocar nada del router: en la ficha del cliente, **Conexión → Probar conexión**.
+
+- **Cómo funciona:** el sistema (Cloudflare) no puede hacer pings. Por eso un router tuyo **consulta cada 10 segundos** si alguien pidió una prueba; si hay una, le hace **4 pings a la IP del cliente** y le avisa al sistema cuántos volvieron. La ficha lo muestra en unos segundos: **Responde** (4 de 4), **Responde con pérdidas** (1 a 3 de 4; mala señal, interferencia o un equipo que se reinicia) o **No responde** (0 de 4: apagado o sin luz, cable desconectado o servicio cortado). Si ningún router contesta en unos 45 segundos, avisa que no contestó a tiempo y se puede intentar de nuevo.
+- **Qué se prueba:** solo clientes con **una sola IP** cargada en su ficha (si no tiene IP o tiene varias juntas, no aparece el botón). Nadie puede pedir el ping a una IP que no sea de un cliente cargado.
+- **Quién puede:** el permiso **«Probar la conexión de un cliente (ping)»** viene encendido para oficina y técnicos; lo apagás por perfil o por usuario en Ajustes. El administrador siempre puede. Cada persona puede pedir hasta 12 pruebas por minuto.
+- **Armarlo (una sola vez por router):** Ajustes → *Routers MikroTik* → en el router que va a hacer los pings → **Script de ping**. Pegá en WinBox → Nuevo terminal: (1) la prueba de conexión (si ya hiciste la de clientes, no hace falta), (2) el script (crea `yapur-ping`) y (3) la programación (cada 10 s). En unos segundos el router figura **«Pruebas de conexión: atendiendo»**. Si el router todavía no está en la lista, primero agregalo con *Agregar router* (no hace falta pegar el script de clientes si solo lo querés para pings).
+- **Qué router hace cada prueba:** si el campo **Nodo** del cliente tiene el nombre de un router que atiende pruebas, lo hace ese; si no, cualquiera que esté atendiendo. Con un solo router, ese.
+- **Seguridad:** el router tiene un acceso **aparte** del de la lista de clientes, que solo sirve para *consultar qué IP probar* y *devolver cuántos contestaron*: no lee nada del sistema. El script no tiene contraseñas ni toca la configuración del router (permisos `read,test`). Si lo perdés, *Script de ping* genera otro y el anterior deja de valer.
+- **Consultas:** a 10 segundos son unas 8.600 consultas por día por router (cuentan para el límite del plan gratis; ver abajo). Para bajarlas, cambiá `interval=10s` por `20s` en la programación.
+- **Sin probar en un router real:** el script usa `/tool fetch` y `/ping` de RouterOS 6.4x/7.x, pero **no se pudo correr en un MikroTik desde acá**. La parte del servidor y de la app sí está probada con un router simulado. Si el router dice «not enough permissions», cambiá `read,test` por `read,write,test`; si dice algo de `check-certificate`, borrá ese parámetro. Para ver qué hizo: `/log print where message~"YAPUR"`. Para apagarlo: `/system scheduler remove [find name=yapur-ping]`. No muestra los milisegundos de respuesta: solo cuántos paquetes volvieron.
+
 ## Recibo por WhatsApp automático (cobros del técnico)
 
 Todo lo que cobra un técnico en la calle **genera un recibo** (con su número, a su nombre y en la caja del día) que la oficina ve en **Cobranzas → Caja del día** (cada fila dice «cobró Pedro» y abre el recibo), y **le llega solo al cliente por WhatsApp** apenas el técnico registra el cobro.
@@ -313,6 +326,7 @@ Correrlo dos veces no mueve a nadie dos veces. Los clientes que ya empiezan ese 
 ## Qué hay que saber del plan gratis de Cloudflare
 
 - Alcanza de sobra para ~2.000 clientes y un equipo chico: el límite es de 100.000 pedidos por día y un uso normal ronda unos pocos miles.
+- Las **pruebas de conexión** suman unas 8.600 consultas por día por cada router que las atiende (cada 10 segundos). Con uno o dos routers sigue sobrando; con muchos, subí el intervalo a 20 s o pasá al plan pago.
 - Si alguien inundara la dirección con pedidos basura, se podría agotar ese cupo y el sistema se detiene hasta las 21:00 hs de Argentina (00:00 UTC). No es un riesgo de datos (no se pierde nada), pero sí de servicio. Mientras tanto, la app abre con lo último que bajó y se puede consultar sin conexión.
 - Si el negocio crece o querés más tranquilidad, el plan pago de Workers cuesta unos USD 5 por mes y elimina ese tope.
 - Los ingresos tienen bloqueo por intentos fallidos (5 por usuario y dirección, 25 por dirección), guardado en el servidor.

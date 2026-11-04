@@ -171,8 +171,8 @@ function renderRouters(){
   l.innerHTML=RT.list.map(r=>{
     const old=r.visto&&Date.now()-r.visto>36*3600e3;
     const st=r.hayDatos?`<span class="${old?'bad':''}">Última lista ${esc(rtAgo(r.visto))}${old?' (hace mucho: revisá que el router siga enviando)':''}</span> · ${r.total} registros${r.ident?' · '+esc(r.ident):''}${r.ros?' · RouterOS '+esc(r.ros):''}`:'Todavía no mandó ninguna lista';
-    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div></div>
-      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
+    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div><div class="s">${rtPingEstado(r)}</div></div>
+      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
   }).join('')||'<div class="empty"><b>No hay routers cargados</b><span>Agregá el primero para que mande la lista de sus clientes.</span></div>';
 }
 function kindsBoxHTML(cur){
@@ -222,6 +222,69 @@ async function regenScript(id){
   const r=RT.list.find(x=>x.id===id);if(!r)return;
   if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo para ${r.nombre}: el anterior deja de valer. Si el router ya tiene el script puesto, hay que pegarlo de nuevo. ¿Seguir?`,'Generar de nuevo'))return;
   try{const j=await NET.api('POST','/api/routers/'+id+'/token',{});openRouterScript(r,j.token);}catch(err){toast(err.message||'No se pudo generar','bad');}
+}
+
+/* ----- pruebas de conexión (ping a un cliente): el router consulta cada pocos segundos si alguien pidió una ----- */
+const rtAscii=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\x09\x0a\x20-\x7e]/g,'?');
+function rtPingEstado(r){
+  if(!r.ping)return '<span class="muted">Pruebas de conexión: sin configurar</span>';
+  const seg=r.pingVisto?Math.round((Date.now()-r.pingVisto)/1000):null;
+  if(seg!=null&&seg<=90)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
+  return '<span style="color:var(--bad)">Pruebas de conexión: el router no está consultando'+(r.pingVisto?' (última vez '+esc(rtAgo(r.pingVisto))+')':' todavía')+'</span>';
+}
+function rtPingScript(token){
+  const body=`# YAPUR.NET - pruebas de conexion (ping a la IP de un cliente)
+# Cada pocos segundos pregunta a ${location.origin} si alguien pidio probar un cliente.
+# Si si, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
+:local base "${location.origin}/api/router/ping"
+:local h "Authorization: Bearer ${token}"
+:local data ""
+:do {
+  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+  :set data ($r->"data")
+} on-error={ :set data "" }
+:if ([:len $data] > 0) do={
+  :foreach item in=[:toarray $data] do={
+    :local p [:find $item ":"]
+    :if ([:typeof $p] = "num") do={
+      :local id [:pick $item 0 $p]
+      :local ip [:pick $item ($p + 1) [:len $item]]
+      :local rec 0
+      :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
+      :do {
+        /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+      } on-error={}
+      :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
+      :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+    }
+  }
+}`;
+  return rtAscii(`:do { /system script remove [find name="yapur-ping"] } on-error={}\n/system script add name=yapur-ping policy=read,test comment="YAPUR.NET prueba de conexion de clientes" source={\n${body}\n}`);
+}
+const rtPingSched=()=>`/system scheduler add name=yapur-ping interval=10s policy=read,test comment="YAPUR.NET prueba de conexion" on-event="/system script run yapur-ping"`;
+function openPingScript(r,token){
+  const script=rtPingScript(token);
+  const step=(n,t,body)=>`<div class="card flat"><h3>${n}. ${t}</h3>${body}</div>`;
+  const html=`<div class="notice info">Con esto, <b>La oficina y los técnicos</b> pueden tocar «Probar conexión» en la ficha de un cliente y ver si contesta. El router solo hace el <b>ping a la IP del cliente</b> y avisa cuántos paquetes volvieron: no lee ni cambia nada más y no lleva contraseñas.</div>
+    ${step(1,'Probar que el router llega al sistema',`<p class="small muted">En WinBox: <b>Nuevo terminal</b>. Pegá esto; tiene que mostrar un texto con <span class="mono">"ok":true</span>. Si ya lo probaste con el script de clientes, salteá este paso.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtTest())}" data-copy-label="Prueba">Copiar prueba</button></div>`)}
+    ${step(2,'Pegar el script',`<p class="small muted">Pegalo entero en el terminal del router. Crea un script llamado <span class="mono">yapur-ping</span> (si ya existía, lo reemplaza). Lleva el acceso de este router: no lo compartas.</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div>`)}
+    ${step(3,'Dejarlo programado',`<p class="small muted">Hace que el router pregunte cada 10 segundos si hay una prueba pedida. Pegalo en el mismo terminal.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
+    ${step(4,'Revisar que quedó andando',`<p class="small muted">En unos 10 segundos, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
+    <p class="small muted">¿Qué router hace la prueba? Si el <b>Nodo</b> del cliente tiene el nombre de un router con pruebas activas, lo hace ese router; si no, cualquiera que esté atendiendo. Con un solo router, es ese.</p>
+    <details class="small"><summary>Si algo falla</summary><ul class="small muted">
+      <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también el permiso <span class="mono">write</span>. Cambiá <span class="mono">policy=read,test</span> por <span class="mono">policy=read,write,test</span> en el script y en la programación.</li>
+      <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
+      <li>Para ver los pings que hizo: <span class="mono">/log print where message~"YAPUR"</span></li>
+      <li>Para correrlo a mano y ver qué pasa: <span class="mono">/system script run yapur-ping</span></li>
+      <li><b>Consultas:</b> cada 10 segundos son unas 8.600 consultas por día por router. Si querés menos, cambiá <span class="mono">interval=10s</span> por <span class="mono">interval=20s</span> en la programación (las pruebas tardan un poco más).</li>
+      <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-ping]</span></li></ul></details>
+    <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
+  openModal({title:'Pruebas de conexión · '+r.nombre,html,wide:true});
+}
+async function regenPing(id){
+  const r=RT.list.find(x=>x.id===id);if(!r)return;
+  if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de pruebas para ${r.nombre}: el anterior deja de valer. Si el router ya tiene el script de ping, hay que pegarlo de nuevo. El acceso de la lista de clientes no cambia. ¿Seguir?`,'Generar de nuevo'))return;
+  try{const j=await NET.api('POST','/api/routers/'+id+'/ping-token',{});openPingScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
 /* ----- clientes detectados e importación ----- */
@@ -448,7 +511,7 @@ function bindRouters(el){
   $('#aj-routers',el).addEventListener('click',e=>{
     const b=e.target.closest('[data-rt]');if(!b)return;
     const id=b.dataset.id,a=b.dataset.rt;
-    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='det')openDetected(id);
+    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='pscript')regenPing(id);else if(a==='det')openDetected(id);
   });
   loadRouters();
 }

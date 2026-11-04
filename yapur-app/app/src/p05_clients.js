@@ -194,6 +194,7 @@ function openClient(id){
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
+    ${pingBlock(c)}
     <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
@@ -219,10 +220,54 @@ function openClient(id){
       else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
+      else if(a.dataset.act==='ping')pingProbar(c,el);
       else if(a.dataset.act==='promesa')openPromesa(c.id);
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- probar la conexión (ping desde un router de la empresa) ----- */
+/* una sola IPv4 válida (con /32 opcional); cualquier otra cosa, o varias IP juntas, no se puede probar */
+function ipUnica(t){
+  const m=String(t==null?'':t).trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/32)?$/);
+  if(!m||m.slice(1).some(x=>Number(x)>255))return '';
+  const ip=m.slice(1).map(Number).join('.');
+  return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
+}
+function pingBlock(c){
+  if(!can('ping'))return '';
+  const ip=ipUnica(c.ip);
+  if(!ip)return `<div class="hint" id="png-box">Para probar la conexión, el cliente tiene que tener <b>una sola IP</b> cargada en su ficha.</div>`;
+  return `<div class="card flat" id="png-box"><div class="head-row"><h3>Conexión</h3><button class="btn small" type="button" data-act="ping" id="png-btn">Probar conexión</button></div>
+    <div id="png-out" class="hint" aria-live="polite">Un router de la empresa hace el ping a <span class="mono">${esc(ip)}</span> y te dice si responde.</div></div>`;
+}
+const pingMs=v=>v==null?'':(v>=10?Math.round(v):Math.round(v*10)/10)+' ms';
+/* cómo se cuenta el resultado: responde / responde con pérdidas / no responde */
+function pingResultado(p){
+  const sent=p.sent||0,rec=p.rec||0,quien=p.router?' · desde '+esc(p.router):'',hora=p.hecho?' · '+pad(new Date(p.hecho).getHours())+':'+pad(new Date(p.hecho).getMinutes()):'';
+  if(rec>=sent&&sent>0)return ['ok',`<b>Responde</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}`];
+  if(rec>0)return ['warn',`<b>Responde con pérdidas</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}<br><span class="small">Contesta a veces: puede ser mala señal, interferencia o un equipo que se reinicia.</span>`];
+  return ['bad',`<b>No responde</b> · 0 de ${sent}${quien}${hora}<br><span class="small">Puede estar apagado o sin luz, con el cable desconectado, o con el servicio cortado.</span>`];
+}
+async function pingProbar(c,el){
+  const btn=$('#png-btn',el),out=$('#png-out',el);if(!btn||!out)return;
+  const show=(cls,html)=>{out.className=cls?'notice '+cls:'hint';out.innerHTML=html;};
+  btn.disabled=true;show('info','Pidiendo la prueba…');
+  const alive=()=>el.isConnected&&document.body.contains(out);
+  try{
+    let p=(await NET.api('POST','/api/ping',{cid:c.id})).ping;
+    const fin=Date.now()+60e3;
+    while(alive()){
+      if(p.estado==='hecho'){const [cls,html]=pingResultado(p);show(cls,html);break;}
+      if(p.estado==='vencido'){show('warn','El router no contestó a tiempo. Probá de nuevo en un momento.');break;}
+      if(Date.now()>fin){show('warn','Tarda más de lo normal. Probá de nuevo en un momento.');break;}
+      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router…');
+      await new Promise(r=>setTimeout(r,1500));
+      if(!alive())break;
+      p=(await NET.api('GET','/api/ping/'+encodeURIComponent(p.id))).ping;
+    }
+  }catch(err){if(alive())show('bad',esc(err.network?'No se pudo conectar. Revisá tu conexión e intentá de nuevo.':err.message));}
+  if(alive())btn.disabled=false;
 }
 /* ----- cuenta unificada en la ficha ----- */
 const veCuenta=()=>can('cobrar')||can('caja')||can('editarClientes');
