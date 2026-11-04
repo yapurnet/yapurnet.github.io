@@ -145,7 +145,7 @@ async function openStream(token) {
     r = await call('PUT', '/api/doc/planes/pv1', { data: { nombre: 'Con historial', bajada: 50, subida: 20, precio: 25000, hist: [{ d: '0000-00', p: 20000 }, { d: '2099-01', p: 25000 }] } }, A);
     t('vigencia: el administrador guarda un plan con historial de precios', r.s === 200, r);
     r = await call('GET', '/api/doc/planes/pv1', undefined, T);
-    t('vigencia: el técnico no ve el precio ni el historial del plan', r.s === 200 && r.j.data.precio === undefined && r.j.data.hist === undefined && r.j.data.nombre === 'Con historial', r);
+    t('vigencia: el técnico no recibe el plan (ni su precio ni su historial)', r.s === 200 && r.j.exists === false && r.j.data === null, r);
     r = await call('GET', '/api/doc/planes/pv1', undefined, O);
     t('vigencia: la oficina (con precios) sí ve el historial', r.s === 200 && Array.isArray(r.j.data.hist) && r.j.data.hist.length === 2, r);
     r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { nombre: 'Vera Vigencia', estado: 'activo', planId: 'pv1', hp: [{ h: '2026-09', planId: 'pv1', precio: null, extras: [] }] } } } }, O);
@@ -291,6 +291,35 @@ async function openStream(token) {
     t('servicios: lo que guarda el técnico no los borra', r.j.data.items.cmm.extras.join() === 'multimedia,multimedia_net' && r.j.data.items.cmm.dir === 'Calle 7 bis', r.j.data.items.cmm);
     r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cmm: { extras: [] } } } }, T2);
     t('servicios: y no puede quitárselos', r.s === 403, r);
+    /* plan contratado: el técnico no se entera de qué plan tiene cada cliente (ni por la lista de planes) */
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpl: { nombre: 'Paula Plan', estado: 'activo', planId: 'pv1', precio: 31000, dir: 'Calle 3' } } } }, O);
+    t('plan oculto: la oficina carga un cliente con plan', r.s === 200 && r.j.data.items.cpl.planId === 'pv1', r);
+    for (const [nom, tk] of [['técnico', T], ['técnico con cobro en la calle', T2]]) {
+      r = await call('GET', '/api/doc/clientes/c01', undefined, tk);
+      t('plan oculto: al ' + nom + ' no le llega el plan del cliente (sí el resto)', r.s === 200 && r.j.data.items.cpl && !('planId' in r.j.data.items.cpl) && r.j.data.items.cpl.dir === 'Calle 3', r.j.data.items.cpl);
+      r = await call('GET', '/api/doc/planes/pv1', undefined, tk);
+      t('plan oculto: ni el plan en sí (' + nom + ')', r.s === 200 && r.j.exists === false, r);
+      r = await call('GET', '/api/sync', undefined, tk);
+      t('plan oculto: ni en la sincronización (' + nom + ')', !r.j.cols.clientes.some(d => Object.values(d.data.items || {}).some(c => 'planId' in c || 'hp' in c)) && r.j.cols.planes.length === 0, r.j.cols.planes.length);
+    }
+    r = await call('GET', '/api/sync', undefined, O);
+    t('plan oculto: la oficina sí recibe los planes y el plan del cliente', r.j.cols.planes.some(d => d.id === 'pv1') && r.j.cols.clientes.some(d => d.data.items && d.data.items.cpl && d.data.items.cpl.planId === 'pv1'));
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpl: { planId: null } } } }, T2);
+    t('plan oculto: el técnico no puede cambiarle el plan al cliente', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpl: { nombre: 'Paula Plan', dir: 'Calle 3 bis' } } } }, T2);
+    t('plan oculto: el técnico guarda su parte', r.s === 200, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('plan oculto: lo que guarda el técnico no borra el plan ni el precio especial', r.j.data.items.cpl.planId === 'pv1' && r.j.data.items.cpl.precio === 31000 && r.j.data.items.cpl.dir === 'Calle 3 bis', r.j.data.items.cpl);
+    r = await call('POST', '/api/users', { usuario: 'tecplan', nombre: 'Tec Plan', role: 'tecnico', clave: 'tecplan1', permisos: { verPlan: true } }, A);
+    t('plan oculto: el administrador puede dárselo a un técnico', r.s === 200 && r.j.user.perms.verPlan === true, r.j);
+    const TPL = (await call('POST', '/api/login', { usuario: 'tecplan', clave: 'tecplan1' })).j.token;
+    r = await call('GET', '/api/doc/clientes/c01', undefined, TPL);
+    t('plan oculto: con el permiso ve el plan, pero no el precio especial', r.s === 200 && r.j.data.items.cpl.planId === 'pv1' && !('precio' in r.j.data.items.cpl), r.j.data.items.cpl);
+    r = await call('GET', '/api/doc/planes/pv1', undefined, TPL);
+    t('plan oculto: ve el plan, sin precio', r.s === 200 && r.j.exists === true && r.j.data.nombre === 'Con historial' && !('precio' in r.j.data), r);
+    r = await call('POST', '/api/login', { usuario: 'tec1', clave: 'pedro1' });
+    const rOf = await call('POST', '/api/login', { usuario: 'OFI', clave: 'laura1' });
+    t('plan oculto: el permiso viene apagado en el técnico y prendido en la oficina', r.s === 200 && r.j.me.perms.verPlan === false && rOf.j.me.perms.verPlan === true, r.j);
     const sT2 = await openStream(T2);
     await sleep(200);
     await call('PATCH', '/api/doc/clientes/c01', { data: { items: { csus: { estado: 'activo', corteMora: null } } } }, O);
@@ -466,9 +495,9 @@ async function openStream(token) {
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);
     t('técnico no recibe el precio especial; el DNI solo si se lo dieron', r.j.data.items.cli1.dni === '30111222' && !('precio' in r.j.data.items.cli2) && r.j.data.items.cli1.tel === '3844000000', r.j);
     r = await call('GET', '/api/doc/planes/p1', undefined, T);
-    t('técnico no recibe el precio del plan', r.j.data.nombre === 'Hogar 100' && !('precio' in r.j.data), r.j);
+    t('técnico no recibe los planes', r.j.exists === false && r.j.data === null, r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, T);
-    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 3 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
+    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 4 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, A);
     t('administrador sí ve precios de servicios', r.j.data.servicios[0].precio === 15000);
 
@@ -499,7 +528,7 @@ async function openStream(token) {
 
     /* ---- sincronización ---- */
     r = await call('GET', '/api/sync', undefined, T);
-    t('sync técnico: sin pagos', r.s === 200 && !('pagos' in r.j.cols) && r.j.cols.clientes.length === 1 && r.j.cols.planes.length === 2, Object.keys(r.j.cols || {}));
+    t('sync técnico: sin pagos', r.s === 200 && !('pagos' in r.j.cols) && r.j.cols.clientes.length === 1 && r.j.cols.planes.length === 0, Object.keys(r.j.cols || {}));
     r = await call('GET', '/api/sync', undefined, O);
     t('sync oficina: con pagos', r.j.cols.pagos && r.j.cols.pagos[0].data.items.pg1, r.j && Object.keys(r.j.cols || {}));
 
@@ -551,12 +580,12 @@ async function openStream(token) {
     t('borrar plan: ya no existe', r.j.exists === false, r);
     r = await call('DELETE', '/api/doc/planes/pdel', undefined, A);
     t('borrar plan: borrarlo dos veces da 404, no rompe', r.s === 404, r);
-    r = await call('GET', '/api/sync', undefined, T);
+    r = await call('GET', '/api/sync', undefined, O);
     t('borrar plan: ya no viaja en la sincronización', r.j.cols.planes.length === 2 && !r.j.cols.planes.some(x => ['pdel', 'pbaja', 'phist'].includes(x.id)), r.j.cols.planes.map(x => x.id));
     await sleep(200);
     const evO = dsO.events.filter(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.op === 'delete').map(e => e.data.id);
     const evT = dsT.events.filter(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.op === 'delete').map(e => e.data.id);
-    t('borrar plan: el borrado llega en vivo a la oficina y al técnico (una vez por plan)', ['pbaja', 'phist', 'pdel'].every(id => evO.filter(x => x === id).length === 1 && evT.filter(x => x === id).length === 1), [evO, evT]);
+    t('borrar plan: el borrado llega en vivo a la oficina (una vez por plan) y no al técnico, que no ve los planes', ['pbaja', 'phist', 'pdel'].every(id => evO.filter(x => x === id).length === 1) && evT.length === 0, [evO, evT]);
     t('borrar plan: ningún intento rechazado se anunció', !dsO.events.some(e => e.ev === 'doc' && e.data.coll === 'planes' && e.data.id === 'p1'), dsO.events.length);
     dsO.close(); dsT.close();
 
@@ -619,7 +648,7 @@ async function openStream(token) {
 
     /* ---- copia y restauración (formato propio y formato anterior) ---- */
     r = await call('GET', '/api/backup', undefined, A);
-    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 4, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
+    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 5, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
     const backup = r.j;
     const legacy = { app: 'yapur-legacy', v: 1, docs: [
       { coll: 'clientes', id: 'c05', data: { items: { x1: { nombre: 'Legacy 1' }, x2: { nombre: 'Legacy 2' } } } },

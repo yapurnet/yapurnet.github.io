@@ -4,6 +4,8 @@ const CL={q:'',estado:'todos',plan:'',tec:'',limit:50};
 const ESTADO_CLS={activo:'ok',suspendido:'bad',pendiente:'info',baja:''};
 const planName=id=>{const p=S.planes.get(id);return p?p.nombre:'Sin plan';};
 const planSpeed=p=>p?`${p.bajada}/${p.subida} Mbps`:'';
+/* el plan del cliente tal como lo puede ver esta persona: el técnico no lo ve (el servidor tampoco se lo manda) */
+const planVis=c=>can('verPlan')?S.planes.get(c.planId):null;
 function clientHay(c){
   const hv=S.pv+'.'+S.rv,h=cuentaHead(c),hn=h&&h!==c?h.nombre:'';
   if(!c._hay||c._hayV!==hv||c._hayH!==hn){c._hay=norm([c.codigo,c.nombre,hn,can('dni')?c.dni:'',can('dni')?docDigits(c.dni):'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;c._hayH=hn;}
@@ -32,12 +34,12 @@ const estLabel=c=>{if(!c||!c.estado)return '';if(!veEstado()&&(c.estado==='activ
 const bajaPend=c=>!!c&&c.estado==='baja'&&c.retiro==='pend';   /* de baja, pero todavía no se confirmó que retiraron los equipos en comodato */
 const estChip=c=>{if(bajaPend(c))return '<span class="chip warn">Baja · retirar equipo</span>';const l=estLabel(c);return l?`<span class="chip ${ESTADO_CLS[c.estado]||''}">${esc(l)}</span>`:'';};
 function clientRow(c){
-  const pl=S.planes.get(c.planId);
+  const pl=planVis(c);
   return `<button class="item" type="button" data-open-client="${esc(c.id)}">
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
-    <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
+    <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length||!can('verPlan')?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
     ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${billChip(c)}</div></button>`;
 }
@@ -177,7 +179,7 @@ async function saveClient(c,patch){
 }
 function openClient(id){
   const c=S.clientes.get(id);if(!c||!clientVisible(c)){toast('No se encontró el cliente','bad');return;}
-  const pl=S.planes.get(c.planId),b=billing(c);
+  const pl=planVis(c),b=billing(c);
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
   const tel=t=>t&&can('telefono')?`<span class="mono">${esc(t)}</span> <a class="small" href="${waUrl(t,'')}" target="_blank" rel="noopener">WhatsApp</a>`:'';
   const pays=(S.payByClient.get(c.id)||[]).slice(0,12);
@@ -475,7 +477,7 @@ function openClientForm(id){
       ${F('Referencia para llegar','cf-ref',`<input id="cf-ref" value="${esc(c.ref||'')}" placeholder="Portón verde, frente a la plaza…">`)}
       ${geoFieldHTML(c)}</fieldset>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Servicio</legend>
-      ${full?`<div class="grid2">${F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(planNow(p))}`,p.id===c.planId)).join('')}</select>`)}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
+      ${full?`<div class="grid2">${can('verPlan')?F('Plan','cf-plan',`<select id="cf-plan"><option value="">Sin plan</option>${plans.map(p=>opt(p.id,`${p.nombre} · ${p.bajada}/${p.subida} Mbps · ${fmtMoney(planNow(p))}`,p.id===c.planId)).join('')}</select>`):'<input type="hidden" id="cf-plan" value="">'}${F('Estado','cf-estado',`<select id="cf-estado">${Object.entries(ESTADOS).map(([k,v])=>opt(k,v,k===c.estado)).join('')}</select>`)}</div>`:''}
       ${full&&svcs.length?`<div class="field"><label>Servicios adicionales</label><div class="list" id="cf-extras">${svcs.map(s=>`<label class="per"><input type="checkbox" data-extra="${esc(s.id)}"${(c.extras||[]).includes(s.id)?' checked':''}><span class="grow"><b>${esc(s.nombre)}</b>${s.activo===false?' <span class="small muted">(ya no se ofrece)</span>':''}</span>${can('precios')?`<b class="tnum">${fmtMoney(planNow(s))}</b>`:''}</label>`).join('')}</div><div class="hint">Son servicios como Multimedia. Si el cliente tiene otras conexiones a su nombre, se juntan desde su ficha con «Cuenta unificada».</div></div>`:''}
       ${full&&can('precios')?'<div class="hint" id="cf-total"></div>':''}
       ${full&&old?`<div class="notice info" id="cf-vig" hidden><div class="field"><label for="cf-vig-mes">Los cambios de plan, precio o servicios rigen desde</label><input id="cf-vig-mes" type="month" max="${curMonth()}" value="${curMonth()}"${cfVigMin(old)?` min="${cfVigMin(old)}"`:''}></div>
@@ -542,6 +544,7 @@ function openClientForm(id){
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+        if(!can('verPlan'))delete patch.planId;   /* sin el permiso no ve el plan: guardar la ficha no puede borrarlo */
       }
       if(full&&$('#cf-da',el)){
         const raw=v('cf-da'),n=raw===''?0:num(raw),det=v('cf-dad')||'';

@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -603,10 +603,12 @@ export class YapurDB extends DurableObject {
       return d;
     }
     if (u.role === 'admin') return data;
-    if (coll === 'planes') { if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
+    if (coll === 'planes') { if (!p.verPlan) return null; if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
     if (coll === 'clientes') {
       const drop = [];
       if (!p.precios) drop.push('precio', 'hp');
+      /* el plan contratado (velocidad y nombre) tampoco lo ve quien no tiene el permiso: ni el plan actual ni los anteriores */
+      if (!p.verPlan) drop.push('planId', 'hp');
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
       /* los servicios adicionales (Multimedia, Multimedia Net…) son de facturación: el técnico no tiene que enterarse de cuáles tiene cada cliente */

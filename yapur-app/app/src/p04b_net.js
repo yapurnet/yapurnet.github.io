@@ -272,6 +272,7 @@ const NET=(function(){
   return {
     native,get base(){return base;},get did(){return did;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
     api,init,bring,login,setup,logout,status,saveFile,
+    resync:()=>fullSync().catch(()=>{}),   /* vuelve a pedir todo al servidor (por ejemplo, cuando le dan un permiso nuevo y ahora le corresponden más datos) */
     get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
     openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},
     db:dbApi,

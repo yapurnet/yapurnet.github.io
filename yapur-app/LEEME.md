@@ -108,6 +108,13 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Baja sin equipos:** destildá «Tiene equipos en comodato» y sale de la lista en el acto.
 - **Ojo con la deuda:** al pasar a baja deja de figurar como deuda del mes; el formulario avisa si debe algo. La «Deuda anterior» sí se mantiene.
 
+## Que los técnicos no vean el plan contratado
+
+- **Qué cambia:** el técnico ya no ve el plan de ningún cliente: ni el chip del plan en la lista (ni «Sin plan»), ni la fila «Plan» de la ficha, ni el botón «Copiar cola de MikroTik», ni la lista de planes. Sigue viendo lo que usa para trabajar: domicilio, teléfono, IP, usuario, nodo, caja NAP y equipo.
+- **No es solo esconderlo en pantalla:** el servidor no le manda el plan del cliente (ni los planes anteriores del historial) ni los planes en sí; aunque alguien abra las herramientas del navegador no los encuentra. Al guardar sus datos técnicos no borra el plan del cliente.
+- **Quién lo ve:** administrador y oficina. Para dárselo a un técnico en particular (o a un perfil), Ajustes → permiso **«Ver el plan contratado de cada cliente»**; la persona lo recibe en el acto, sin salir de la app. El permiso **«Ver planes y precios»** sigue siendo aparte: es el de los importes.
+- «Ver como…» un técnico muestra lo mismo que ve él.
+
 ## Probar la conexión de un cliente (ping)
 
 La oficina y los técnicos en la calle pueden ver si un cliente **contesta** sin tocar nada del router: en la ficha del cliente, **Conexión → Probar conexión**.
