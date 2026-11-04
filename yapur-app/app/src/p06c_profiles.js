@@ -212,6 +212,7 @@ VIEWS.ajustes={
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos. Si ya tenés los clientes cargados y te faltan las IP, <b>Completar IP con archivos .rsc</b> las busca en los exports de los routers.</p>
       <div class="list" id="aj-routers"></div></div>
+    ${isAdmin()?ctAjustesCard():''}
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
@@ -227,6 +228,7 @@ VIEWS.ajustes={
       if(!nombre)return toast('Falta el nombre','bad');
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
     ajWhatsApp($('#aj-wa-body',el));
+    if(isAdmin())ctAjustesMount(el);
     $('#aj-pre',el).addEventListener('submit',async e=>{e.preventDefault();
       const pi=Math.round(num($('#aj-pi',el).value)||0),pr=Math.round(num($('#aj-pr',el).value)||0);
       if(pi<=0||pr<=0||pi>1e7||pr>1e7)return toast('Cargá los dos precios (números mayores que cero)','bad');
