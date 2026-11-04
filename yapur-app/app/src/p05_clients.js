@@ -622,12 +622,12 @@ VIEWS.clientes={
     };
     const rows=searchClients(CL.q,filt);
     const cta=$('#cl-ct');if(cta){const n=can('contratosGestion')?ctPend():0;cta.innerHTML=n?`<div class="notice info" style="margin-bottom:8px"><b>${n===1?'Hay 1 contrato esperando tu revisión':'Hay '+n+' contratos esperando tu revisión'}.</b> <button class="btn small" type="button" id="cl-ct-go">Revisar</button></div>`:(can('contratosGestion')?'<div class="actions start" style="margin-bottom:8px"><button class="btn small ghost" type="button" id="cl-ct-go">Contratos de comodato</button></div>':'');const g=$('#cl-ct-go');if(g)g.onclick=()=>openContratos();}
-    $('#cl-count').textContent=S.loaded.clientes?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'Cargando…';
+    $('#cl-count').textContent=!S.loaded.clientes?'Cargando…':(veTotales()||rows.length<=TOPE_CONTEO)?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'';   /* sin permiso, solo se cuenta una búsqueda corta */
     const list=$('#cl-list');
     if(!rows.length){
       list.innerHTML=!can('clientesTodos')&&!CL.q?'<div class="empty"><b>No tenés clientes asignados</b><span>Acá aparecen los clientes de tus órdenes abiertas.</span></div>':S.clientes.size?'<div class="empty"><b>Ningún cliente coincide</b><span>Probá con otra búsqueda o cambiá el filtro.</span></div>':`<div class="empty"><b>Todavía no hay clientes</b><span>${can('editarClientes')?'Cargá el primero o importá tu lista desde un archivo CSV en Ajustes.':'La oficina todavía no cargó clientes.'}</span></div>`;
       return;
     }
-    list.innerHTML=rows.slice(0,CL.limit).map(clientRow).join('')+(rows.length>CL.limit?`<button class="btn more" type="button" data-more>Ver más (${rows.length-CL.limit})</button>`:'');
+    list.innerHTML=rows.slice(0,CL.limit).map(clientRow).join('')+(rows.length>CL.limit?`<button class="btn more" type="button" data-more>Ver más${veTotales()?` (${rows.length-CL.limit})`:''}</button>`:'');
   }
 };

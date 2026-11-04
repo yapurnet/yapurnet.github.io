@@ -95,6 +95,9 @@ const can=k=>!!S.perms[k];
 const soloCampo=()=>!can('cobrar')&&can('cobrarCampo');
 /* Quien no maneja la facturación (el técnico) no ve si un cliente está activo o suspendido por falta de pago. Sí ve «Por instalar» y «Baja», que usa para trabajar. */
 const veEstado=()=>can('editarClientes')||can('cobrar')||can('caja');
+/* cuántos clientes tiene la empresa es un dato del negocio: el técnico no ve el total (ni «Ver más (N)») */
+const veTotales=()=>can('editarClientes')||can('cobrar')||can('caja');
+const TOPE_CONTEO=20;
 /* los servicios adicionales (Multimedia…) los ve quien factura; el técnico no (el servidor tampoco se los manda) */
 const veServicios=()=>can('editarClientes')||can('cobrar')||can('caja')||can('precios');
 const isAdmin=()=>S.role==='admin'&&!S.preview;

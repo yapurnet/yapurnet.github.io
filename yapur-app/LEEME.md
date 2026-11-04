@@ -114,6 +114,7 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **No es solo esconderlo en pantalla:** el servidor no le manda el plan del cliente (ni los planes anteriores del historial) ni los planes en sí; aunque alguien abra las herramientas del navegador no los encuentra. Al guardar sus datos técnicos no borra el plan del cliente.
 - **Quién lo ve:** administrador y oficina. Para dárselo a un técnico en particular (o a un perfil), Ajustes → permiso **«Ver el plan contratado de cada cliente»**; la persona lo recibe en el acto, sin salir de la app. El permiso **«Ver planes y precios»** sigue siendo aparte: es el de los importes.
 - «Ver como…» un técnico muestra lo mismo que ve él.
+- **Tampoco ve cuántos clientes tiene la empresa:** en la lista de clientes el técnico no ve el total (ni «Ver más (593)»); solo cuenta resultados cuando una búsqueda trae 20 o menos. Oficina y administrador ven el total como siempre. (La app le baja la lista completa para poder buscar sin conexión; si no querés que un técnico tenga la lista entera, sacale «Ver todos los clientes» en Ajustes y verá solo los de sus órdenes.)
 
 ## Equipos en comodato y contrato firmado en el celular
 
