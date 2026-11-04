@@ -389,12 +389,13 @@ const PERMS=[
   ['cobrarCampo','Cobrar instalaciones y reclamos en la calle','Instalación, reinstalación (mudanza), reclamo u otro cobro. La instalación y la reinstalación se cobran al precio fijo que carga el administrador. No cobra mensualidades ni reconexiones (la reconexión la cobra la oficina, solo si el cliente tiene deuda). Queda a su nombre y suma a la caja del día.','Dinero'],
   ['resumen','Ver el resumen del negocio','','Dinero'],
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
-  ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo']
+  ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo'],
+  ['ping','Probar la conexión de un cliente (ping)','Un router de la empresa hace el ping a la IP del cliente y dice si responde. Solo prueba clientes con la IP cargada en su ficha.','Clientes']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */
@@ -1196,6 +1197,7 @@ function openClient(id){
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
+    ${pingBlock(c)}
     <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
@@ -1221,10 +1223,54 @@ function openClient(id){
       else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
+      else if(a.dataset.act==='ping')pingProbar(c,el);
       else if(a.dataset.act==='promesa')openPromesa(c.id);
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- probar la conexión (ping desde un router de la empresa) ----- */
+/* una sola IPv4 válida (con /32 opcional); cualquier otra cosa, o varias IP juntas, no se puede probar */
+function ipUnica(t){
+  const m=String(t==null?'':t).trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/32)?$/);
+  if(!m||m.slice(1).some(x=>Number(x)>255))return '';
+  const ip=m.slice(1).map(Number).join('.');
+  return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
+}
+function pingBlock(c){
+  if(!can('ping'))return '';
+  const ip=ipUnica(c.ip);
+  if(!ip)return `<div class="hint" id="png-box">Para probar la conexión, el cliente tiene que tener <b>una sola IP</b> cargada en su ficha.</div>`;
+  return `<div class="card flat" id="png-box"><div class="head-row"><h3>Conexión</h3><button class="btn small" type="button" data-act="ping" id="png-btn">Probar conexión</button></div>
+    <div id="png-out" class="hint" aria-live="polite">Un router de la empresa hace el ping a <span class="mono">${esc(ip)}</span> y te dice si responde.</div></div>`;
+}
+const pingMs=v=>v==null?'':(v>=10?Math.round(v):Math.round(v*10)/10)+' ms';
+/* cómo se cuenta el resultado: responde / responde con pérdidas / no responde */
+function pingResultado(p){
+  const sent=p.sent||0,rec=p.rec||0,quien=p.router?' · desde '+esc(p.router):'',hora=p.hecho?' · '+pad(new Date(p.hecho).getHours())+':'+pad(new Date(p.hecho).getMinutes()):'';
+  if(rec>=sent&&sent>0)return ['ok',`<b>Responde</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}`];
+  if(rec>0)return ['warn',`<b>Responde con pérdidas</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}<br><span class="small">Contesta a veces: puede ser mala señal, interferencia o un equipo que se reinicia.</span>`];
+  return ['bad',`<b>No responde</b> · 0 de ${sent}${quien}${hora}<br><span class="small">Puede estar apagado o sin luz, con el cable desconectado, o con el servicio cortado.</span>`];
+}
+async function pingProbar(c,el){
+  const btn=$('#png-btn',el),out=$('#png-out',el);if(!btn||!out)return;
+  const show=(cls,html)=>{out.className=cls?'notice '+cls:'hint';out.innerHTML=html;};
+  btn.disabled=true;show('info','Pidiendo la prueba…');
+  const alive=()=>el.isConnected&&document.body.contains(out);
+  try{
+    let p=(await NET.api('POST','/api/ping',{cid:c.id})).ping;
+    const fin=Date.now()+60e3;
+    while(alive()){
+      if(p.estado==='hecho'){const [cls,html]=pingResultado(p);show(cls,html);break;}
+      if(p.estado==='vencido'){show('warn','El router no contestó a tiempo. Probá de nuevo en un momento.');break;}
+      if(Date.now()>fin){show('warn','Tarda más de lo normal. Probá de nuevo en un momento.');break;}
+      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router…');
+      await new Promise(r=>setTimeout(r,1500));
+      if(!alive())break;
+      p=(await NET.api('GET','/api/ping/'+encodeURIComponent(p.id))).ping;
+    }
+  }catch(err){if(alive())show('bad',esc(err.network?'No se pudo conectar. Revisá tu conexión e intentá de nuevo.':err.message));}
+  if(alive())btn.disabled=false;
 }
 /* ----- cuenta unificada en la ficha ----- */
 const veCuenta=()=>can('cobrar')||can('caja')||can('editarClientes');
@@ -3044,8 +3090,8 @@ function renderRouters(){
   l.innerHTML=RT.list.map(r=>{
     const old=r.visto&&Date.now()-r.visto>36*3600e3;
     const st=r.hayDatos?`<span class="${old?'bad':''}">Última lista ${esc(rtAgo(r.visto))}${old?' (hace mucho: revisá que el router siga enviando)':''}</span> · ${r.total} registros${r.ident?' · '+esc(r.ident):''}${r.ros?' · RouterOS '+esc(r.ros):''}`:'Todavía no mandó ninguna lista';
-    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div></div>
-      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
+    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div><div class="s">${rtPingEstado(r)}</div></div>
+      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
   }).join('')||'<div class="empty"><b>No hay routers cargados</b><span>Agregá el primero para que mande la lista de sus clientes.</span></div>';
 }
 function kindsBoxHTML(cur){
@@ -3095,6 +3141,69 @@ async function regenScript(id){
   const r=RT.list.find(x=>x.id===id);if(!r)return;
   if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo para ${r.nombre}: el anterior deja de valer. Si el router ya tiene el script puesto, hay que pegarlo de nuevo. ¿Seguir?`,'Generar de nuevo'))return;
   try{const j=await NET.api('POST','/api/routers/'+id+'/token',{});openRouterScript(r,j.token);}catch(err){toast(err.message||'No se pudo generar','bad');}
+}
+
+/* ----- pruebas de conexión (ping a un cliente): el router consulta cada pocos segundos si alguien pidió una ----- */
+const rtAscii=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\x09\x0a\x20-\x7e]/g,'?');
+function rtPingEstado(r){
+  if(!r.ping)return '<span class="muted">Pruebas de conexión: sin configurar</span>';
+  const seg=r.pingVisto?Math.round((Date.now()-r.pingVisto)/1000):null;
+  if(seg!=null&&seg<=90)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
+  return '<span style="color:var(--bad)">Pruebas de conexión: el router no está consultando'+(r.pingVisto?' (última vez '+esc(rtAgo(r.pingVisto))+')':' todavía')+'</span>';
+}
+function rtPingScript(token){
+  const body=`# YAPUR.NET - pruebas de conexion (ping a la IP de un cliente)
+# Cada pocos segundos pregunta a ${location.origin} si alguien pidio probar un cliente.
+# Si si, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
+:local base "${location.origin}/api/router/ping"
+:local h "Authorization: Bearer ${token}"
+:local data ""
+:do {
+  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+  :set data ($r->"data")
+} on-error={ :set data "" }
+:if ([:len $data] > 0) do={
+  :foreach item in=[:toarray $data] do={
+    :local p [:find $item ":"]
+    :if ([:typeof $p] = "num") do={
+      :local id [:pick $item 0 $p]
+      :local ip [:pick $item ($p + 1) [:len $item]]
+      :local rec 0
+      :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
+      :do {
+        /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+      } on-error={}
+      :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
+      :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+    }
+  }
+}`;
+  return rtAscii(`:do { /system script remove [find name="yapur-ping"] } on-error={}\n/system script add name=yapur-ping policy=read,test comment="YAPUR.NET prueba de conexion de clientes" source={\n${body}\n}`);
+}
+const rtPingSched=()=>`/system scheduler add name=yapur-ping interval=10s policy=read,test comment="YAPUR.NET prueba de conexion" on-event="/system script run yapur-ping"`;
+function openPingScript(r,token){
+  const script=rtPingScript(token);
+  const step=(n,t,body)=>`<div class="card flat"><h3>${n}. ${t}</h3>${body}</div>`;
+  const html=`<div class="notice info">Con esto, <b>La oficina y los técnicos</b> pueden tocar «Probar conexión» en la ficha de un cliente y ver si contesta. El router solo hace el <b>ping a la IP del cliente</b> y avisa cuántos paquetes volvieron: no lee ni cambia nada más y no lleva contraseñas.</div>
+    ${step(1,'Probar que el router llega al sistema',`<p class="small muted">En WinBox: <b>Nuevo terminal</b>. Pegá esto; tiene que mostrar un texto con <span class="mono">"ok":true</span>. Si ya lo probaste con el script de clientes, salteá este paso.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtTest())}" data-copy-label="Prueba">Copiar prueba</button></div>`)}
+    ${step(2,'Pegar el script',`<p class="small muted">Pegalo entero en el terminal del router. Crea un script llamado <span class="mono">yapur-ping</span> (si ya existía, lo reemplaza). Lleva el acceso de este router: no lo compartas.</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div>`)}
+    ${step(3,'Dejarlo programado',`<p class="small muted">Hace que el router pregunte cada 10 segundos si hay una prueba pedida. Pegalo en el mismo terminal.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
+    ${step(4,'Revisar que quedó andando',`<p class="small muted">En unos 10 segundos, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
+    <p class="small muted">¿Qué router hace la prueba? Si el <b>Nodo</b> del cliente tiene el nombre de un router con pruebas activas, lo hace ese router; si no, cualquiera que esté atendiendo. Con un solo router, es ese.</p>
+    <details class="small"><summary>Si algo falla</summary><ul class="small muted">
+      <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también el permiso <span class="mono">write</span>. Cambiá <span class="mono">policy=read,test</span> por <span class="mono">policy=read,write,test</span> en el script y en la programación.</li>
+      <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
+      <li>Para ver los pings que hizo: <span class="mono">/log print where message~"YAPUR"</span></li>
+      <li>Para correrlo a mano y ver qué pasa: <span class="mono">/system script run yapur-ping</span></li>
+      <li><b>Consultas:</b> cada 10 segundos son unas 8.600 consultas por día por router. Si querés menos, cambiá <span class="mono">interval=10s</span> por <span class="mono">interval=20s</span> en la programación (las pruebas tardan un poco más).</li>
+      <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-ping]</span></li></ul></details>
+    <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
+  openModal({title:'Pruebas de conexión · '+r.nombre,html,wide:true});
+}
+async function regenPing(id){
+  const r=RT.list.find(x=>x.id===id);if(!r)return;
+  if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de pruebas para ${r.nombre}: el anterior deja de valer. Si el router ya tiene el script de ping, hay que pegarlo de nuevo. El acceso de la lista de clientes no cambia. ¿Seguir?`,'Generar de nuevo'))return;
+  try{const j=await NET.api('POST','/api/routers/'+id+'/ping-token',{});openPingScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
 /* ----- clientes detectados e importación ----- */
@@ -3321,7 +3430,7 @@ function bindRouters(el){
   $('#aj-routers',el).addEventListener('click',e=>{
     const b=e.target.closest('[data-rt]');if(!b)return;
     const id=b.dataset.id,a=b.dataset.rt;
-    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='det')openDetected(id);
+    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='pscript')regenPing(id);else if(a==='det')openDetected(id);
   });
   loadRouters();
 }
@@ -4916,7 +5025,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='329411bce0';
+const BUILD='d0c1f0cbf2';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

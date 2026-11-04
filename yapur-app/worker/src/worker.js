@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -435,6 +435,7 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
+      CREATE TABLE IF NOT EXISTS pings(id TEXT PRIMARY KEY, cid TEXT NOT NULL, ip TEXT NOT NULL, nodo TEXT, uid TEXT NOT NULL, ts INTEGER NOT NULL, router TEXT, tomado INTEGER, hecho INTEGER, sent INTEGER, rec INTEGER, avg REAL, estado TEXT NOT NULL DEFAULT 'pend') WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS rsnap(router TEXT NOT NULL, run TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(router,run,part)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS comprobantes(id TEXT PRIMARY KEY, uid TEXT NOT NULL, ts INTEGER NOT NULL, pago TEXT, data BLOB NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS ubic(uid TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, acc REAL, PRIMARY KEY(uid,ts)) WITHOUT ROWID;
@@ -444,6 +445,8 @@ export class YapurDB extends DurableObject {
     for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
     this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
     try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
+    for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+    this.sql.exec('DELETE FROM pings WHERE ts<?', Date.now() - 2 * 864e5);
     /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
        cuando ese teléfono vuelva a pedir algo con la versión nueva, se completa con los datos reales del equipo */
     for (const r of this.q('SELECT th,uid,created,last FROM sessions WHERE dev IS NULL')) {
@@ -1132,7 +1135,7 @@ export class YapurDB extends DurableObject {
      con un script de solo lectura, la lista de sus colas, secretos PPPoE y leases DHCP estáticos. Con este token
      lo único que se puede hacer es dejar esa lista acá: no hay ningún camino para cortar o cambiar algo en un router. */
   routerPublic(r) {
-    return { id: r.id, nombre: r.nombre, kinds: String(r.kinds || 'q').split(',').filter(Boolean), creado: r.creado, visto: r.visto || null, total: r.total || 0, ident: r.ident || '', ros: r.ros || '', hayDatos: !!r.run };
+    return { id: r.id, nombre: r.nombre, kinds: String(r.kinds || 'q').split(',').filter(Boolean), creado: r.creado, visto: r.visto || null, total: r.total || 0, ident: r.ident || '', ros: r.ros || '', hayDatos: !!r.run, ping: !!r.pth, pingVisto: r.pvisto || null };
   }
   routerList() { return this.q('SELECT * FROM routers ORDER BY nombre COLLATE NOCASE').map(r => this.routerPublic(r)); }
   routerKinds(v) {
@@ -1203,6 +1206,116 @@ export class YapurDB extends DurableObject {
       this.sql.exec('DELETE FROM rsnap WHERE router=? AND run<>?', r.id, run);
     });
     return { ok: true, part, registros: c.n, total, ignorados: c.bad };
+  }
+
+  /* ----- pruebas de conexión (ping) -----
+     El sistema no entra a los routers: la oficina o el técnico pide la prueba, un router (que viene consultando con su propio token de ping) la toma,
+     hace el ping a la IP del cliente desde la red de la empresa y manda solo el resultado. Solo se prueban IPs de clientes cargados. */
+  async routerPingToken(id) {
+    const secret = b64u(rnd(24));
+    this.sql.exec('UPDATE routers SET pth=?, pvisto=NULL WHERE id=?', await sha(secret), id);
+    return id + '.' + secret;
+  }
+  async routerPingAuth(request) {
+    const ip = this.clientIp(request), key = 'rtr|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), i = tk.indexOf('.');
+    const r = i > 0 ? this.q1('SELECT * FROM routers WHERE id=?', tk.slice(0, i)) : null;
+    if (!r || !r.pth || !safeEq(await sha(tk.slice(i + 1)), r.pth)) { this.addFail(key, 8); throw httpErr(401, 'Token de router inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    return r;
+  }
+  /* una sola IPv4 válida (con o sin /32) de lo que está cargado en la ficha */
+  ipUna(t) {
+    const m = String(t == null ? '' : t).trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/32)?$/);
+    if (!m || m.slice(1).some(x => Number(x) > 255)) return '';
+    const ip = m.slice(1).map(Number).join('.');
+    return ip === '0.0.0.0' || ip.startsWith('127.') ? '' : ip;
+  }
+  pingRouters() { return this.q('SELECT id,nombre,pvisto FROM routers WHERE pth IS NOT NULL'); }
+  /* el router que corresponde al cliente: el de su «nodo» si ese router hace pruebas; si no, cualquiera que esté consultando */
+  pingRouterDe(nodo) {
+    const vivo = r => r.pvisto && Date.now() - r.pvisto < 90e3, k = String(nodo || '').trim().toLowerCase(), todos = this.pingRouters();
+    const suyo = k ? todos.find(r => r.nombre.toLowerCase() === k) : null;
+    if (suyo) return { suyo, ok: vivo(suyo) };
+    const alguno = todos.find(vivo);
+    return { suyo: null, ok: !!alguno, hay: todos.length > 0 };
+  }
+  pingView(r) {
+    const hecho = r.estado === 'hecho';
+    return { id: r.id, cid: r.cid, ip: r.ip, estado: r.estado, ts: r.ts, hecho: r.hecho || null, sent: hecho ? r.sent : null, rec: hecho ? r.rec : null, avg: hecho && r.avg != null ? r.avg : null, router: r.router ? ((this.q1('SELECT nombre FROM routers WHERE id=?', r.router) || {}).nombre || '') : '' };
+  }
+  /* pasa a «vencido» lo que nadie atendió a tiempo */
+  pingVencer() {
+    const t = Date.now(), ve = Number(this.env.PING_VENCE_MS) || 45e3;
+    this.sql.exec("UPDATE pings SET estado='vencido', hecho=? WHERE (estado='pend' AND ts<?) OR (estado='toma' AND tomado<?)", t, t - ve, t - ve);
+  }
+  pingPedir(u, b) {
+    if (!effPerms(u).ping) throw httpErr(403, 'No tenés permiso para probar la conexión de los clientes.', 'permission_denied');
+    const cid = String(isPlain(b) ? b.cid : '');
+    if (!ID_RE.test(cid)) throw httpErr(400, 'Falta el cliente.');
+    const c = this.clienteDe(cid);
+    if (!c) throw httpErr(404, 'No existe ese cliente.');
+    const ip = this.ipUna(c.ip);
+    if (!ip) throw httpErr(400, 'Este cliente no tiene una IP cargada en su ficha (o tiene más de una). Cargala para poder probarlo.');
+    this.pingVencer();
+    const ya = this.q1("SELECT * FROM pings WHERE cid=? AND estado IN ('pend','toma') AND ts>?", cid, Date.now() - 30e3);
+    if (ya) return this.pingView(ya);
+    if (this.q1('SELECT COUNT(*) n FROM pings WHERE uid=? AND ts>?', u.id, Date.now() - 60e3).n >= 12) throw httpErr(429, 'Hiciste muchas pruebas seguidas. Esperá un momento.', 'resource_exhausted');
+    const rr = this.pingRouterDe(c.nodo);
+    if (!rr.ok) {
+      if (rr.suyo) throw httpErr(409, 'El router de este cliente (' + rr.suyo.nombre + ') no está atendiendo las pruebas ahora. Avisale al administrador.', 'failed_precondition');
+      throw httpErr(409, rr.hay ? 'Ningún router está atendiendo las pruebas ahora. Avisale al administrador.' : 'Todavía no hay un router configurado para hacer pruebas de conexión.', 'failed_precondition');
+    }
+    const id = 'g' + hex(rnd(7));
+    this.sql.exec("INSERT INTO pings(id,cid,ip,nodo,uid,ts,estado) VALUES(?,?,?,?,?,?,'pend')", id, cid, ip, String(c.nodo || '').slice(0, 40), u.id, Date.now());
+    return this.pingView(this.q1('SELECT * FROM pings WHERE id=?', id));
+  }
+  pingVer(u, id) {
+    if (!effPerms(u).ping) throw httpErr(403, 'No tenés permiso para probar la conexión de los clientes.', 'permission_denied');
+    this.pingVencer();
+    const r = this.q1('SELECT * FROM pings WHERE id=?', id);
+    if (!r || (r.uid !== u.id && u.role !== 'admin')) throw httpErr(404, 'No existe esa prueba.');
+    return this.pingView(r);
+  }
+  /* el router consulta: devuelve «id:ip,id:ip» (texto simple, fácil de leer en RouterOS) y deja marcado que las tomó */
+  async routerPingPoll(request) {
+    const r = await this.routerPingAuth(request);
+    this.sql.exec('UPDATE routers SET pvisto=? WHERE id=?', Date.now(), r.id);
+    this.pingVencer();
+    const mine = r.nombre.toLowerCase(), nombres = new Set(this.pingRouters().map(x => x.nombre.toLowerCase()));
+    const out = [];
+    for (const p of this.q("SELECT id,ip,nodo FROM pings WHERE estado='pend' ORDER BY ts LIMIT 20")) {
+      const n = String(p.nodo || '').trim().toLowerCase();
+      if (n && nombres.has(n) && n !== mine) continue;   // es de otro router que también hace pruebas
+      this.sql.exec("UPDATE pings SET estado='toma', router=?, tomado=? WHERE id=? AND estado='pend'", r.id, Date.now(), p.id);
+      out.push(p.id + ':' + p.ip);
+      if (out.length >= 5) break;
+    }
+    return out.join(',');
+  }
+  /* «3ms», «3ms383us», «00:00:00.003» o «3» → milisegundos */
+  pingMs(v) {
+    const t = String(v == null ? '' : v).trim();
+    if (!t) return null;
+    let m = t.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
+    if (m) return Math.round((Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1e4) / 10;
+    if (/^\d+(?:\.\d+)?$/.test(t)) return Number(t);
+    let ms = 0, any = false; const re = /(\d+(?:\.\d+)?)(ms|us|s)/g;
+    while ((m = re.exec(t))) { any = true; ms += Number(m[1]) * (m[2] === 's' ? 1000 : m[2] === 'us' ? 0.001 : 1); }
+    return any ? Math.round(ms * 10) / 10 : null;
+  }
+  async routerPingResult(request, url) {
+    const r = await this.routerPingAuth(request);
+    const id = String(url.searchParams.get('id') || ''), sent = parseInt(url.searchParams.get('sent') || '', 10), rec = parseInt(url.searchParams.get('rec') || '', 10);
+    if (!/^g[0-9a-f]{14}$/.test(id) || !(sent >= 1 && sent <= 10) || !(rec >= 0 && rec <= sent)) throw httpErr(400, 'Faltan datos del resultado (id, sent, rec).');
+    let avg = this.pingMs(url.searchParams.get('avg'));
+    if (avg != null && !(avg >= 0 && avg <= 60000)) avg = null;
+    const p = this.q1('SELECT * FROM pings WHERE id=?', id);
+    if (!p || p.router !== r.id) throw httpErr(404, 'Esa prueba no es de este router.');
+    if (p.estado === 'hecho') return { ok: true };
+    this.sql.exec("UPDATE pings SET estado='hecho', hecho=?, sent=?, rec=?, avg=? WHERE id=?", Date.now(), sent, rec, rec > 0 ? avg : null, id);
+    return { ok: true };
   }
 
   /* ----- ubicación de los técnicos ----- */
@@ -1602,14 +1715,19 @@ export class YapurDB extends DurableObject {
     }
     let mm;
     if (p === '/api/router/ingest' && m === 'POST') return send(200, await this.routerIngest(request, url, raw));
+    if (p === '/api/router/ping' && m === 'GET') return send(200, await this.routerPingPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
+    if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
+    if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
+    if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
     if (p === '/api/routers' && m === 'GET') { await this.needAdmin(request); return send(200, { routers: this.routerList() }); }
     if (p === '/api/routers' && m === 'POST') { await this.needAdmin(request); return send(200, await this.routerCreate(readBody(raw, 1e4))); }
-    if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/items)?$/.exec(p))) {
+    if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/ping-token|\/items)?$/.exec(p))) {
       await this.needAdmin(request);
       const id = mm[1], r = this.q1('SELECT * FROM routers WHERE id=?', id);
       if (!r) throw httpErr(404, 'No existe ese router.');
       if (mm[2] === '/items' && m === 'GET') return send(200, this.routerItems(id), { 'Content-Type': 'application/json; charset=utf-8' });
       if (mm[2] === '/token' && m === 'POST') return send(200, { token: await this.routerNewToken(id) });
+      if (mm[2] === '/ping-token' && m === 'POST') return send(200, { token: await this.routerPingToken(id) });
       if (!mm[2] && m === 'PATCH') {
         const b = readBody(raw, 1e4), nombre = b.nombre === undefined ? r.nombre : String(b.nombre).trim().replace(/\s+/g, ' ').slice(0, 40);
         if (!nombre) throw httpErr(400, 'Falta el nombre del router.');
