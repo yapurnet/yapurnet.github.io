@@ -24,7 +24,7 @@ const NET=(function(){
   let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
-  const handlers={status:[],me:[],kick:[],disp:[]};
+  const handlers={status:[],me:[],kick:[],disp:[],contrato:[],sync:[]};
   const emit=(k,v)=>handlers[k].forEach(f=>{try{f(v);}catch(e){console.error(e);}});
 
   const isPlain=o=>o&&typeof o==='object'&&!Array.isArray(o);
@@ -118,7 +118,7 @@ const NET=(function(){
       baseSeq=j.seq;docSeq.clear();synced=true;fresh=true;
       const pend=buffer;buffer=[];
       pend.forEach(m=>applyDoc(m.coll,m.id,m.op,m.data,m.seq,true));
-      markAll();
+      markAll();emit('sync');
     })().finally(()=>{syncing=null;});
     return syncing;
   }
@@ -155,6 +155,7 @@ const NET=(function(){
     s.addEventListener('doc',ev=>{seen();let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);});
     s.addEventListener('me',ev=>{seen();try{const m=JSON.parse(ev.data);me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}});
     s.addEventListener('disp',ev=>{seen();try{emit('disp',JSON.parse(ev.data));}catch(e){}});
+    s.addEventListener('contrato',ev=>{seen();try{emit('contrato',JSON.parse(ev.data));}catch(e){}});
     s.addEventListener('kick',()=>{lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');});
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);

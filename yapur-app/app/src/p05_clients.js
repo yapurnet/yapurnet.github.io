@@ -41,7 +41,7 @@ function clientRow(c){
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length||!can('verPlan')?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${ctChip(c)}${billChip(c)}</div></button>`;
 }
 /* en la lista: a qué cuenta pertenece cada servicio */
 function cuentaChip(c){
@@ -199,11 +199,13 @@ function openClient(id){
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${pingBlock(c)}
+    ${comodatoBlock(c)}
     <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
   openModal({title:'Ficha del cliente',html,onMount(el){
+    comodatoBind(el,c);
     el.addEventListener('keydown',e=>{const rc=e.key==='Enter'&&e.target.closest&&e.target.closest('tr[data-receipt]');if(rc)openReceipt(rc.dataset.receipt);});
     el.addEventListener('click',e=>{
       const rc=e.target.closest('[data-receipt]');if(rc)return openReceipt(rc.dataset.receipt);   /* un pago de la lista: abre su recibo (reenviar, copiar, imprimir) */
@@ -585,7 +587,7 @@ VIEWS.clientes={
   mount(el){
     el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI o CUIT, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
       ${can('editarClientes')?'<button class="btn primary" type="button" id="cl-new">Nuevo cliente</button>':''}</div>
-      <div class="seg" id="cl-seg"></div></div><div id="cl-count" class="hint"></div><div class="list" id="cl-list"></div>`;
+      <div class="seg" id="cl-seg"></div></div><div id="cl-ct"></div><div id="cl-count" class="hint"></div><div class="list" id="cl-list"></div>`;
     $('#cl-q',el).addEventListener('input',e=>{CL.q=e.target.value;CL.limit=50;this.update();});
     const nb=$('#cl-new',el);if(nb)nb.addEventListener('click',()=>openClientForm(null));
     $('#cl-seg',el).addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;CL.estado=b.dataset.f;CL.limit=50;this.update();});
@@ -600,6 +602,8 @@ VIEWS.clientes={
     const fs=[['todos','Todos'],...(veEstado()?[['activo','Activos'],['suspendido','Suspendidos']]:[]),['pendiente','Por instalar'],['retirar','Equipos por retirar'],['nogeo','Sin ubicación']];
     if(veEstado())fs.push(['baja','Bajas']);
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
+    if(can('comodato')&&S.contratosOk)fs.push(['sincontrato','Sin contrato firmado']);
+    if(can('contratosGestion')&&S.contratosOk)fs.push(['conrevision','Contrato en revisión']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     if(veServicios())serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
@@ -607,6 +611,8 @@ VIEWS.clientes={
       if(CL.estado==='todos')return c.estado!=='baja'||bajaPend(c);   /* una baja con equipos sin retirar sigue en la lista hasta que se confirme */
       if(CL.estado==='retirar')return bajaPend(c);
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
+      if(CL.estado==='sincontrato')return c.estado!=='baja'&&!ctVig(c.id)&&!ctRev(c.id);
+      if(CL.estado==='conrevision')return !!ctRev(c.id);
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
       if(CL.estado==='dant')return deudaAntRest(c)>0;
@@ -615,6 +621,7 @@ VIEWS.clientes={
       return c.estado===CL.estado;
     };
     const rows=searchClients(CL.q,filt);
+    const cta=$('#cl-ct');if(cta){const n=can('contratosGestion')?ctPend():0;cta.innerHTML=n?`<div class="notice info" style="margin-bottom:8px"><b>${n===1?'Hay 1 contrato esperando tu revisión':'Hay '+n+' contratos esperando tu revisión'}.</b> <button class="btn small" type="button" id="cl-ct-go">Revisar</button></div>`:(can('contratosGestion')?'<div class="actions start" style="margin-bottom:8px"><button class="btn small ghost" type="button" id="cl-ct-go">Contratos de comodato</button></div>':'');const g=$('#cl-ct-go');if(g)g.onclick=()=>openContratos();}
     $('#cl-count').textContent=S.loaded.clientes?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'Cargando…';
     const list=$('#cl-list');
     if(!rows.length){

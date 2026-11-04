@@ -81,12 +81,14 @@ const PERMS=[
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo'],
   ['ping','Probar la conexión de un cliente (ping)','Un router de la empresa hace el ping a la IP del cliente y dice si responde. Solo prueba clientes con la IP cargada en su ficha.','Clientes'],
-  ['verPlan','Ver el plan contratado de cada cliente','Apagado: el servidor no le manda el plan de los clientes ni la lista de planes, y no puede copiar la cola de MikroTik.','Clientes']
+  ['verPlan','Ver el plan contratado de cada cliente','Apagado: el servidor no le manda el plan de los clientes ni la lista de planes, y no puede copiar la cola de MikroTik.','Clientes'],
+  ['comodato','Cargar los equipos en comodato y hacer firmar el contrato','Lista de equipos prestados a cada cliente y contrato firmado con el dedo en el celular. Ve el estado de los contratos de sus clientes, pero no el DNI del titular.','Clientes'],
+  ['contratosGestion','Revisar, aprobar y borrar contratos de comodato','Aprobar un cambio de titularidad (y archivar el contrato anterior), rechazar, mandar a la papelera y restaurar, y ver el registro de cada contrato con el DNI.','Clientes']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,comodato:true,contratosGestion:false},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,comodato:true,contratosGestion:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */

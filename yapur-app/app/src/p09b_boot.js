@@ -83,6 +83,7 @@ function startData(){
     },err=>{S.errors.planes=err;S.loaded.planes=true;dataChanged('planes');});}
   if(!started.clientes){started.clientes=1;watchSharded('clientes',S.clientes,'clientes');}
   if(!started.red){started.red=1;watchSharded('red',S.red,'red');}
+  if(!started.ct&&can('comodato')){started.ct=1;ctStart();}
   if(!started.ordenes){started.ordenes=1;watchSharded('ordenes',S.ordenes,'ordenes');}
   if(!started.pagos){
     if(S.realRole==='admin'||can('cobrar')||can('caja')||can('promesas')||can('resumen')){started.pagos=1;watchSharded('pagos',S.pagos,'pagos');}
