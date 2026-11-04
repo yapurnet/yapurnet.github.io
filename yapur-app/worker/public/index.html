@@ -303,6 +303,9 @@ button.port:hover{border-color:var(--accent-line)}
 .sig-pad:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sig-img{display:block;width:260px;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:var(--r-sm)}
 
+.pd-deuda{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface)}.pd-l{display:flex;justify-content:space-between;gap:12px;font-size:14px}.pd-t{border-top:1px solid var(--line);padding-top:6px;margin-top:2px;font-size:15px}
+.pd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}
+
 </style>
 </head>
 <body>
@@ -1224,7 +1227,7 @@ function openClient(id){
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${pingBlock(c)}
     ${comodatoBlock(c)}
-    <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -1240,6 +1243,7 @@ function openClient(id){
       else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
       else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
+      else if(a.dataset.act==='pagar-deuda')openPagarDeuda(c.id);
       else if(a.dataset.act==='cuenta-abrir')openClient(a.dataset.id);
       else if(a.dataset.act==='cuenta-ubic')openGeoQuick(a.dataset.id);
       else if(a.dataset.act==='cuenta-editar')openClientForm(a.dataset.id);
@@ -4699,7 +4703,8 @@ function allocate(sel,received){
 /* los renglones del recibo. En una cuenta con varios servicios, los que son iguales (mismo concepto, mismo mes y mismo precio) van en un solo renglón
    «… - 4 conexiones» con cantidad 4, así el recibo no se alarga con cada conexión y entra en media hoja; los distintos quedan cada uno con el nombre de su servicio */
 function lineasDe(ps,multi,svc,cond){
-  const base=p=>p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:'');
+  const mixto=new Set(ps.map(cond)).size>1;   /* varios medios en un recibo: cada renglón dice con cuál se pagó (en el celular la columna «Condición de pago» no entra) */
+  const base=p=>(p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''))+(mixto?' - '+cond(p):'');
   const out=[],idx=new Map();
   for(const p of ps){
     const unit=Number(p.monto)||0,b=base(p),k=multi?b+'|'+unit+'|'+cond(p):null;
@@ -4719,6 +4724,7 @@ function receiptData(recibo){
   const svc=p=>{const m=S.clientes.get(p.c);return m?m.nombre:'';};
   const total=ps.reduce((s,p)=>s+(Number(p.monto)||0),0);
   const cond=p=>p.metodo==='efectivo'?'Contado':(METODOS[p.metodo]||p.metodo||'');
+  const conds=[...new Set(ps.map(cond))],medios=[...new Set(ps.map(p=>METODOS[p.metodo]||p.metodo||''))];   /* un recibo puede juntar varios medios de pago (efectivo + transferencia) */
   const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
   let periodo=null;
   if(mens.length){
@@ -4728,12 +4734,12 @@ function receiptData(recibo){
     periodo={desde:a+'-'+pad(Math.min(cfg.desde,daysIn(a))),hasta:z+'-'+pad(Math.min(cfg.desde,daysIn(z))),vto:z+'-'+pad(Math.min(cfg.hasta,daysIn(z)))};
   }
   return {
-    nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
+    nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:conds.join(' + '),periodo,
     emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
       tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
     cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||(multi?(ps.map(p=>S.clientes.get(p.c)).find(m=>m&&m.dni)||{}).dni||'':''),dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
     lineas:lineasDe(ps,multi,svc,cond),
-    medio:METODOS[p0.metodo]||p0.metodo||''
+    medio:medios.join(' + ')
   };
 }
 function receiptText(recibo){
@@ -4975,6 +4981,7 @@ function openCobro(clientId,con1,pre){
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
     <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar deuda (escribir el monto o usar varios medios)</button></div>':''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
@@ -4986,6 +4993,7 @@ function openCobro(clientId,con1,pre){
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="cb-go">Registrar cobro</button></div>`;
   openModal({title:'Cobrar',html,onMount(el){
     let con=con0,manual=false;
+    const bd=$('#cb-deuda',el);if(bd)bd.addEventListener('click',()=>{closeModal();openPagarDeuda(c.id);});
     const comp=campo?mountComp(el,'cb',()=>$('#cb-met',el).value):null;
     if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
     const ord=new Map(grp.map((m,i)=>[m.id,i]));
@@ -5047,6 +5055,116 @@ function openCobro(clientId,con1,pre){
         const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
       }catch(err){dbError(err);go.disabled=false;}
     });
+  }});
+}
+/* ===== pagar deuda =====
+   Se escribe cuánto paga el cliente y, si hace falta, se reparte entre varios medios (15.000 en efectivo + 4.000 por transferencia): un solo recibo.
+   Lo que paga se aplica a lo más viejo primero: la deuda anterior y después los meses hasta el actual. */
+function deudaDe(c){
+  const cur=todayStr().slice(0,7),grp=cuentaMiembros(c),gm=grp.length>1,head=gm?grp[0]:c,ord=new Map(grp.map((m,i)=>[m.id,i])),meses=[];
+  (gm?grp:[c]).forEach(m=>{const b=billing(m,true);if(b.aplica)b.periods.forEach(q=>{if(q.per<=cur&&q.rest>0)meses.push({cid:m.id,per:q.per,rest:q.rest,nombre:m.nombre});});});
+  meses.sort((a,b)=>a.per.localeCompare(b.per)||((ord.get(a.cid)||0)-(ord.get(b.cid)||0)));
+  const da=deudaAntRest(c);
+  return {gm,head,meses,da,total:Math.round((da+meses.reduce((t,x)=>t+x.rest,0))*100)/100};
+}
+const tieneDeuda=c=>{try{return !!c&&deudaDe(c).total>0;}catch(e){return false;}};
+/* reparte lo que se paga (una lista de medios con su monto) entre lo adeudado, de lo más viejo a lo más nuevo; trabaja en centavos para que no sobren ni falten */
+function repartirDeuda(d,medios){
+  const cola=[];
+  if(d.da>0)cola.push({k:'da',left:Math.round(d.da*100)});
+  d.meses.forEach(x=>cola.push({k:'mes',cid:x.cid,per:x.per,nombre:x.nombre,left:Math.round(x.rest*100)}));
+  const out=[];let i=0;
+  for(const m of medios){
+    let a=Math.round(m.monto*100);
+    while(a>0&&i<cola.length){
+      const q=cola[i],t=Math.min(a,q.left);
+      out.push({k:q.k,cid:q.cid,per:q.per,nombre:q.nombre,metodo:m.metodo,monto:t/100});
+      a-=t;q.left-=t;if(q.left<=0)i++;
+    }
+  }
+  return out;
+}
+function openPagarDeuda(clientId){
+  const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
+  if(!can('cobrar')||soloCampo())return toast('Tu perfil no puede registrar cobros','bad');
+  const d=deudaDe(c);
+  if(d.total<=0)return toast('Este cliente no debe nada');
+  const head=d.head,det=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
+  const fm=v=>{const r=Math.round(v*100)/100;return r?String(r).replace('.',','):'';};   /* 4000,5: así lo lee num() */
+  const lineas=[].concat(d.da>0?[`<div class="pd-l"><span>Deuda anterior${det?' ('+esc(det)+')':''}</span><b class="tnum">${fmtMoney(d.da)}</b></div>`]:[],
+    d.meses.map(x=>`<div class="pd-l"><span>${esc(monthLabel(x.per))}${d.gm?' · '+esc(x.nombre):''}</span><b class="tnum">${fmtMoney(x.rest)}</b></div>`)).join('');
+  openModal({title:'Pagar deuda',html:`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${d.gm?' <span class="chip info">Cuenta unificada</span>':''}</div></div>
+    <div class="pd-deuda">${lineas}<div class="pd-l pd-t"><span>Total que debe</span><b class="tnum">${fmtMoney(d.total)}</b></div></div>
+    <div class="hint">Escribí cuánto paga. Si lo reparte entre varios medios, tocá «Agregar otro medio de pago». Se aplica primero a lo más viejo.</div>
+    <div id="pd-rows"></div>
+    <div class="actions start"><button class="btn small" type="button" id="pd-add">Agregar otro medio de pago</button></div>
+    <div class="hint" id="pd-sum"></div>
+    <div class="card flat" id="pd-prev" hidden><div class="legend small muted">Así queda registrado</div><div id="pd-prev-l" class="small"></div></div>
+    ${F('Fecha del cobro','pd-fecha',`<input id="pd-fecha" type="date" value="${todayStr()}">`)}
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="pd-go">Registrar pago</button></div>`,
+  onMount(el){
+    const rows=[{metodo:'efectivo',monto:fm(d.total),auto:true}];
+    const val=r=>num(r.monto)||0,suma=()=>Math.round(rows.reduce((t,r)=>t+val(r),0)*100)/100;
+    /* la fila «automática» (la última que se agregó) completa sola lo que falta */
+    const balancear=()=>{const a=rows.find(r=>r.auto);if(!a)return;a.monto=fm(Math.max(0,d.total-rows.filter(r=>r!==a).reduce((t,r)=>t+val(r),0)));};
+    const dibujar=()=>{$('#pd-rows',el).innerHTML=rows.map((r,i)=>`<div class="pd-row" data-i="${i}"><select data-met aria-label="Medio de pago">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k===r.metodo)).join('')}</select><input data-monto type="text" inputmode="decimal" autocomplete="off" value="${esc(r.monto)}" aria-label="Monto en ${esc(METODOS[r.metodo])}">${rows.length>1?`<button class="btn small ghost" type="button" data-quitar="${i}">Quitar</button>`:'<span></span>'}</div>`).join('');refrescar();};
+    const refrescar=()=>{
+      const r=suma(),h=$('#pd-sum',el),sobra=r>d.total+0.005;
+      h.className='hint'+(sobra?' bad':'');
+      h.textContent=r<=0?'Escribí cuánto paga.':sobra?`Es más que lo que debe: faltan ${fmtMoney(d.total)}.`:r>=d.total-0.005?'Cubre toda la deuda.':`Paga ${fmtMoney(r)}: quedan ${fmtMoney(Math.round((d.total-r)*100)/100)} de deuda.`;
+      const prev=$('#pd-prev',el);
+      if(r<=0||sobra){prev.hidden=true;return;}
+      const g=new Map();
+      repartirDeuda(d,rows.map(x=>({metodo:x.metodo,monto:val(x)}))).forEach(x=>{const k=x.k==='da'?'da':x.cid+'|'+x.per;if(!g.has(k))g.set(k,{t:x.k==='da'?'Deuda anterior':monthLabel(x.per)+(d.gm?' · '+x.nombre:''),p:[]});g.get(k).p.push(fmtMoney(x.monto)+' '+METODOS[x.metodo].toLowerCase());});
+      $('#pd-prev-l',el).innerHTML=[...g.values()].map(x=>`<div>${esc(x.t)}: ${esc(x.p.join(' + '))}</div>`).join('');
+      prev.hidden=false;
+    };
+    const filaDe=e=>{const f=e.target.closest('.pd-row');return f?rows[Number(f.dataset.i)]:null;};
+    $('#pd-rows',el).addEventListener('input',e=>{
+      const r=filaDe(e);if(!r||!e.target.matches('[data-monto]'))return;
+      r.monto=e.target.value;r.auto=false;
+      const a=rows.find(x=>x.auto);
+      if(a){balancear();const f=$('#pd-rows .pd-row[data-i="'+rows.indexOf(a)+'"] [data-monto]',el);if(f)f.value=a.monto;}
+      refrescar();
+    });
+    $('#pd-rows',el).addEventListener('change',e=>{
+      const r=filaDe(e);if(!r||!e.target.matches('[data-met]'))return;
+      r.metodo=e.target.value;const i=rows.indexOf(r),inp=$('#pd-rows .pd-row[data-i="'+i+'"] [data-monto]',el);if(inp)inp.setAttribute('aria-label','Monto en '+METODOS[r.metodo]);refrescar();
+    });
+    $('#pd-rows',el).addEventListener('click',e=>{
+      const q=e.target.closest('[data-quitar]');if(!q)return;
+      const i=Number(q.dataset.quitar);rows.splice(i,1);
+      if(rows.length===1)rows[0].auto=false;
+      else if(!rows.some(r=>r.auto))rows[rows.length-1].auto=true;
+      balancear();dibujar();
+    });
+    $('#pd-add',el).addEventListener('click',()=>{
+      if(rows.length>=Object.keys(METODOS).length)return toast('Ya están todos los medios de pago','bad');
+      const libre=['transferencia','mercadopago','otro','efectivo'].find(k=>!rows.some(r=>r.metodo===k))||'transferencia';
+      rows.forEach(r=>{r.auto=false;});
+      rows.push({metodo:libre,monto:'',auto:true});balancear();dibujar();
+      const f=$('#pd-rows .pd-row:last-child [data-monto]',el);if(f)f.focus();
+    });
+    $('#pd-go',el).addEventListener('click',async()=>{
+      const medios=rows.map(r=>({metodo:r.metodo,monto:val(r)})).filter(r=>r.monto>0),t=Math.round(medios.reduce((x,r)=>x+r.monto,0)*100)/100;
+      if(!t)return toast('Escribí cuánto paga','bad');
+      if(t>d.total+0.005)return toast('Es más que lo que debe: faltan '+fmtMoney(d.total),'bad');
+      const fecha=$('#pd-fecha',el).value||todayStr(),recibo=newRecibo(fecha),hora=nowTime(),items={};
+      let n=0;
+      repartirDeuda(d,medios).forEach(x=>{
+        const base={metodo:x.metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
+        items[newId()+(n++).toString(36)]=x.k==='da'?Object.assign({c:c.id,concepto:'deuda_anterior',per:null,monto:x.monto,nota:det},base):Object.assign({c:x.cid||c.id,concepto:'mensualidad',per:x.per,monto:x.monto},base);
+      });
+      const go=$('#pd-go',el);go.disabled=true;
+      const doc=payShard(fecha,d.gm?head.id:c.id);   /* una cuenta con varios servicios guarda todo el recibo en un solo bloque: se graba entero o no se graba */
+      try{await putMany('pagos',doc,items);toast('Pago registrado');
+        Object.keys(items).forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
+        openReceipt(recibo);
+        const c2=S.clientes.get(c.id);if(c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+      }catch(err){dbError(err);go.disabled=false;}
+    });
+    dibujar();
+    const f=$('#pd-rows [data-monto]',el);if(f){f.focus();f.select();}
   }});
 }
 /* quién registró el cobro: el servidor guarda su nombre junto al pago (los cobros viejos no lo tienen) */
@@ -5139,10 +5257,11 @@ async function waReintentarTodos(b){
   catch(err){toast(err.message||'No se pudo reintentar','bad');}
   b.disabled=false;
 }
-function paymentRow(p){
-  const c=S.clientes.get(p.c);
-  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')} · ${esc(METODOS[p.metodo]||p.metodo)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
-    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(p.monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}${p.comp?'<span class="chip info">Con comprobante</span>':''}${waChip(p)}</div></button>`;
+function paymentRow(p,grp){
+  /* grp===true: la fila es de un recibo entero (suma de todos sus renglones y todos los medios de pago); sin eso, de un solo pago */
+  const c=S.clientes.get(p.c),ps=grp===true?paymentsOfReceipt(p.recibo):[p],monto=ps.reduce((t,x)=>t+(Number(x.monto)||0),0),medios=[...new Set(ps.map(x=>METODOS[x.metodo]||x.metodo))].join(' + ');
+  return `<button class="item" type="button" data-receipt="${esc(p.recibo)}"><div><div class="t">${esc(c?c.nombre:'(cliente eliminado)')}</div><div class="s">${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${ps.length>1?' y '+(ps.length-1)+' más':''} · ${esc(medios)}</div><div class="s small">${esc(p.hora||'')}${cobradorName(p)?' · cobró '+esc(cobradorName(p)):''} · <span class="mono">${esc(p.recibo)}</span></div></div>
+    <div class="side"><b class="tnum"${p.anulado?' style="text-decoration:line-through"':''}>${fmtMoney(monto)}</b>${p.anulado?'<span class="chip bad">Anulado</span>':''}${p.comp?'<span class="chip info">Con comprobante</span>':''}${waChip(p)}</div></button>`;
 }
 /* el aviso automático por WhatsApp de los cobros en la calle */
 const waChip=p=>!p.wa||p.anulado?'':p.wa.e==='enviado'?'<span class="chip ok">WhatsApp enviado</span>':p.wa.e==='pendiente'&&Date.now()-(p.wa.ts||0)<5*60e3?'<span class="chip">Enviando…</span>':'<span class="chip bad">WhatsApp: no se envió</span>';
@@ -5351,7 +5470,7 @@ VIEWS.miscobros={
     body.innerHTML=`${MC.err?`<div class="notice">${esc(MC.err)}</div>`:''}
       <div class="kpis"><div class="kpi"><span class="n">${fmtMoney(sum(hoy))}</span><span class="l">Cobrado hoy</span></div><div class="kpi"><span class="n">${fmtMoney(sum(hoy,p=>p.metodo==='efectivo'))}</span><span class="l">Efectivo a entregar hoy</span></div></div>
       ${days.length?days.map(d=>{const l=mine.filter(p=>p.fecha===d),seen=new Set(),rows=l.filter(p=>seen.has(p.recibo)?false:(seen.add(p.recibo),true));
-        return `<div class="card"><div class="head-row"><h3>${d===today?'Hoy':esc(dateLabel(d))}</h3><b class="tnum">${fmtMoney(sum(l))}</b></div><div class="list">${rows.map(paymentRow).join('')}</div></div>`;}).join(''):'<div class="empty"><b>Todavía no cobraste nada</b><span>Buscá al cliente arriba y tocá «Cobrar». También podés registrar el cobro al terminar una orden.</span></div>'}`;
+        return `<div class="card"><div class="head-row"><h3>${d===today?'Hoy':esc(dateLabel(d))}</h3><b class="tnum">${fmtMoney(sum(l))}</b></div><div class="list">${rows.map(r=>paymentRow(r,true)).join('')}</div></div>`;}).join(''):'<div class="empty"><b>Todavía no cobraste nada</b><span>Buscá al cliente arriba y tocá «Cobrar». También podés registrar el cobro al terminar una orden.</span></div>'}`;
   }
 };
 
@@ -5388,7 +5507,7 @@ VIEWS.cobranzas={
       const ps=paymentsOn(todayStr()),tot=ps.filter(p=>!p.anulado).reduce((s,p)=>s+(Number(p.monto)||0),0);
       $('#cb-hoy',body).textContent=fmtMoney(tot);
       const seen=new Set(),rows=ps.filter(p=>seen.has(p.recibo)?false:(seen.add(p.recibo),true));
-      $('#cb-hoylist',body).innerHTML=rows.length?rows.slice(0,6).map(paymentRow).join(''):'<div class="hint">Todavía no hay cobros hoy.</div>';
+      $('#cb-hoylist',body).innerHTML=rows.length?rows.slice(0,6).map(r=>paymentRow(r,true)).join(''):'<div class="hint">Todavía no hay cobros hoy.</div>';
     }else if(CB.sub==='caja'){
       if(full||!$('#cb-fecha-caja')){
         body.innerHTML=`<div class="card"><div class="head-row"><h2>Caja</h2><input id="cb-fecha-caja" type="date" style="width:auto" value="${esc(CB.fecha)}" aria-label="Fecha de la caja"></div><div id="cb-caja"></div></div>`;
@@ -5483,7 +5602,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='34d7d44230';
+const BUILD='12e4597193';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

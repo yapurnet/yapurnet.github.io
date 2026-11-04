@@ -45,6 +45,19 @@ t('precio especial manda',priceOf({planId:'p1',precio:15000})===15000&&priceOf({
 let al=allocate([{per:'2026-08',rest:15000},{per:'2026-09',rest:20000}],20000);
 t('parcial se aplica al mas viejo',al.length===2&&al[0].monto===15000&&al[1].monto===5000,al);
 al=allocate([{per:'2026-08',rest:15000}],18000);t('sobrante al ultimo mes',al.length===1&&al[0].monto===18000,al);
+/* pagar deuda: lo que se paga se reparte entre lo adeudado (lo más viejo primero) y los medios de pago, en centavos */
+{
+  const d={da:2000,meses:[{cid:'a',per:'2026-10',rest:17000,nombre:'X'},{cid:'a',per:'2026-11',rest:17000,nombre:'X'}]};
+  const r=repartirDeuda(d,[{metodo:'efectivo',monto:15000},{metodo:'transferencia',monto:4000}]);
+  t('pagar deuda: 15.000 efectivo + 4.000 transferencia cancelan la deuda anterior y entran en octubre',r.length===3&&r[0].k==='da'&&r[0].monto===2000&&r[0].metodo==='efectivo'&&r[1].per==='2026-10'&&r[1].monto===13000&&r[1].metodo==='efectivo'&&r[2].per==='2026-10'&&r[2].monto===4000&&r[2].metodo==='transferencia',r);
+  t('pagar deuda: la suma de lo repartido es lo que se pagó',r.reduce((s,x)=>s+x.monto,0)===19000);
+  const r2=repartirDeuda(d,[{metodo:'efectivo',monto:36000}]);
+  t('pagar deuda: pagando todo cancela cada mes con un renglón',r2.length===3&&r2.reduce((s,x)=>s+x.monto,0)===36000&&r2[2].per==='2026-11'&&r2[2].monto===17000,r2);
+  const r3=repartirDeuda(d,[{metodo:'efectivo',monto:0.1},{metodo:'otro',monto:0.2}]);
+  t('pagar deuda: los centavos no se pierden ni sobran',r3.reduce((s,x)=>Math.round((s+x.monto)*100)/100,0)===0.3&&r3.length===2,r3);
+  t('pagar deuda: no reparte más de lo que se debe',repartirDeuda(d,[{metodo:'efectivo',monto:99999}]).reduce((s,x)=>s+x.monto,0)===36000);
+  t('pagar deuda: sin monto no hay renglones',repartirDeuda(d,[{metodo:'efectivo',monto:0}]).length===0);
+}
 // recibo
 S.ajustes.empresa='YAPUR.NET';S.clientes.set('c1',{id:'c1',nombre:'Cliente Prueba',codigo:'7'});
 S.pagos.set('r1',{id:'r1',c:'c1',concepto:'mensualidad',per:'2026-09',monto:15000,fecha:'2026-10-19',hora:'13:40',recibo:'R261019-ABC',metodo:'efectivo'});
