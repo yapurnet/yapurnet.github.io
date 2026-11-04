@@ -5,14 +5,19 @@ const paymentsOfReceipt=r=>[...S.pagos.values()].filter(p=>p.recibo===r);
 const paymentsOn=d=>[...S.pagos.values()].filter(p=>p.fecha===d).sort((a,b)=>(b.hora||'').localeCompare(a.hora||''));
 function allocate(sel,received){
   let left=received;const out=[];
-  for(const p of sel){if(left<=0)break;const a=Math.min(p.rest,left);out.push({per:p.per,monto:a});left-=a;}
+  for(const p of sel){if(left<=0)break;const a=Math.min(p.rest,left);out.push(p.cid?{cid:p.cid,per:p.per,monto:a}:{per:p.per,monto:a});left-=a;}   /* cid: el servicio, cuando se cobra una cuenta con varios */
   if(left>0&&out.length)out[out.length-1].monto+=left;
   return out;
 }
 /* Datos del recibo (formato del recibo en papel): quién emite, a quién, qué se cobra y el período */
 function receiptData(recibo){
-  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return null;
-  const p0=ps[0],c=S.clientes.get(p0.c),R=S.ajustes.recibo||{};
+  const ps0=paymentsOfReceipt(recibo);if(!ps0.length)return null;
+  /* un recibo de una cuenta con varios servicios lleva los datos de la cuenta principal y el nombre de cada servicio en su renglón */
+  const multi=new Set(ps0.map(p=>p.c)).size>1,c0=S.clientes.get(ps0[0].c),head=multi?cuentaHead(c0):null,orden=new Map();
+  if(multi&&head)cuentaMiembros(head).forEach((m,i)=>orden.set(m.id,i));
+  const ps=ps0.sort((a,b)=>((orden.has(a.c)?orden.get(a.c):99)-(orden.has(b.c)?orden.get(b.c):99))||(a.per||'').localeCompare(b.per||''));
+  const p0=ps[0],c=multi&&head?head:c0,R=S.ajustes.recibo||{};
+  const svc=p=>{const m=S.clientes.get(p.c);return m?m.nombre:'';};
   const total=ps.reduce((s,p)=>s+(Number(p.monto)||0),0);
   const cond=p=>p.metodo==='efectivo'?'Contado':(METODOS[p.metodo]||p.metodo||'');
   const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
@@ -20,16 +25,16 @@ function receiptData(recibo){
   if(mens.length){
     /* el período va del día en que empieza el ciclo del cliente al mismo día del mes siguiente, y el pago vence el día de vencimiento del ciclo en el mes siguiente
        (ciclo 1, noviembre: 01/11 al 01/12, vto. 10/12 · ciclo 2, noviembre: 13/11 al 13/12, vto. 20/12) */
-    const a=mens[0].per,z=addMonths(mens[mens.length-1].per,1),cfg=cicloCfg(cicloOf(c));
+    const pers=mens.map(p=>p.per).sort(),a=pers[0],z=addMonths(pers[pers.length-1],1),cfg=cicloCfg(cicloOf(c));
     periodo={desde:a+'-'+pad(Math.min(cfg.desde,daysIn(a))),hasta:z+'-'+pad(Math.min(cfg.desde,daysIn(z))),vto:z+'-'+pad(Math.min(cfg.hasta,daysIn(z)))};
   }
   return {
     nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
     emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
       tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
-    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
+    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||(multi?(ps.map(p=>S.clientes.get(p.c)).find(m=>m&&m.dni)||{}).dni||'':''),dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
     lineas:ps.map(p=>({
-      desc:p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''),
+      desc:(p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''))+(multi&&svc(p)?' - '+svc(p):''),
       cant:1,cond:cond(p),unit:Number(p.monto)||0})),
     medio:METODOS[p0.metodo]||p0.metodo||''
   };
@@ -44,7 +49,7 @@ function receiptText(recibo){
   const cont=[e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / ');if(cont)L.push(cont);
   L.push('','RECIBO - NO VÁLIDO COMO FACTURA (ORIGINAL)',(e.pv?'Punto de venta: '+e.pv+'   ':'')+'Comp. Nro: '+d.nro,'Fecha de emisión: '+dmy(d.fecha)+(d.hora?' '+d.hora:''),'');
   L.push('Cliente: '+c.nombre+(c.codigo?' (#'+c.codigo+')':''));
-  if(c.dni)L.push('DNI / CUIT: '+c.dni);
+  if(c.dni)L.push('DNI / CUIT / CUIL: '+c.dni);
   if(c.dir)L.push('Dirección: '+c.dir);
   L.push('Condición de venta: '+d.cond,'Condición frente al IVA: '+c.iva);
   if(d.periodo)L.push('Período facturado: '+dmy(d.periodo.desde)+' al '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto));
@@ -64,7 +69,7 @@ function receiptHTML(d){
     <div class="b">${[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).length?`<div>${esc([e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / '))}</div>`:''}
       ${e.dom?`<div>${esc(e.dom)}</div>`:''}${e.tel||e.web?`<div>${esc([e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / '))}</div>`:''}
       <div>${e.pv?'Punto de venta: <b>'+esc(e.pv)+'</b> · ':''}Comp. Nro: <b>${esc(d.nro)}</b> · Fecha de emisión: <b>${esc(dmy(d.fecha))}</b>${d.hora?' '+esc(d.hora):''}</div></div>
-    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
+    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT / CUIL: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
       <div>Condición de venta: ${esc(d.cond)} · Condición frente al IVA: ${esc(c.iva)}</div>
       ${d.periodo?`<div>Período facturado desde: ${esc(dmy(d.periodo.desde))} hasta: ${esc(dmy(d.periodo.hasta))} · Vto. para el pago: ${esc(dmy(d.periodo.vto))}</div>`:''}</div>
     <table><thead><tr><th>Producto / Servicio</th><th class="r w1">Cant.</th><th class="cp w2">Condición de pago</th><th class="r w3">Precio unit.</th><th class="r w3">Subtotal</th></tr></thead><tbody>
@@ -108,7 +113,7 @@ function receiptCanvas(d){
     y+=7;b1.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
     /* cliente */
     const b2=[[['Cliente: ',false],[c.nombre,true],[c.codigo?' (#'+c.codigo+')':'',false]]];
-    if(c.dni)b2.push([['DNI / CUIT: '+c.dni,false]]);if(c.dir)b2.push([['Dirección: '+c.dir,false]]);
+    if(c.dni)b2.push([['DNI / CUIT / CUIL: '+c.dni,false]]);if(c.dir)b2.push([['Dirección: '+c.dir,false]]);
     b2.push([['Condición de venta: '+d.cond+' · Condición frente al IVA: '+c.iva,false]]);
     if(d.periodo)b2.push([['Período facturado desde: '+dmy(d.periodo.desde)+' hasta: '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto),false]]);
     y+=7;b2.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
@@ -196,7 +201,7 @@ function printReceipt(d){
 }
 function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
-  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c),pc=ps.find(x=>x.comp);
+  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c0=S.clientes.get(ps[0].c),gm=c0&&new Set(ps.map(x=>x.c)).size>1?cuentaMiembros(c0):[],c=gm.length?(gm.find(x=>x.tel)||gm[0]):c0,pc=ps.find(x=>x.comp);   /* recibo de una cuenta: el WhatsApp de la principal, o el de algún servicio */
   const w=(ps.find(x=>x.wa)||{}).wa||null,oficina=can('cobrar')||can('caja'),solo=soloCampo();
   const sale=solo&&S.ajustes.waActivo&&!waFalla(w);   /* al técnico le sale solo: no tiene que mandarlo él (el cliente lo recibiría dos veces) */
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
@@ -264,16 +269,19 @@ function openCobro(clientId,con1,pre){
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
   const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reinstalaciones, reclamos y otros (a precio fijo la instalación y la reinstalación) */
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
-  const open=b.periods.filter(p=>p.rest>0);
-  const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
+  /* cuenta unificada: se cobran juntos los meses de todos sus servicios (un solo recibo) */
+  const grp=campo?[]:cuentaMiembros(c),gm=grp.length>1,head=gm?grp[0]:c;
+  const bm=(gm?grp:[c]).map(m=>({m,b:m===c?b:billing(m,true)})).map(x=>Object.assign(x,{open:x.b.periods.filter(p=>p.rest>0)}));
+  const open=[].concat(...bm.map(x=>x.open)),priceTot=bm.reduce((s,x)=>s+(x.b.aplica?x.b.price:0),0);
+  const mens=(gm?bm.some(x=>x.b.aplica):b.aplica)&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
   const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
-  const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
-    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:'')}</div></div>
+  const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
+    <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
-    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
-    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
+    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${gm?`<div class="hint">Este cobro se registra en el servicio ${esc(c.nombre)}.</div>`:''}${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${campo?compHTML('cb'):''}
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
@@ -283,7 +291,8 @@ function openCobro(clientId,con1,pre){
     let con=con0,manual=false;
     const comp=campo?mountComp(el,'cb',()=>$('#cb-met',el).value):null;
     if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
-    const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per));
+    const ord=new Map(grp.map((m,i)=>[m.id,i]));
+    const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({cid:i.dataset.cid||c.id,per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per)||((ord.get(a.cid)||0)-(ord.get(b.cid)||0)));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
     const sum=()=>{
       const m=$('#cb-monto',el),h=$('#cb-sum',el);
@@ -291,7 +300,7 @@ function openCobro(clientId,con1,pre){
         if(!manual)m.value=total()||'';
         const r=num(m.value)||0,t=total();
         h.className='hint'+(r<t?' bad':'');
-        h.textContent=!sel().length?'Marcá los meses que paga.':r===t?`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`:r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
+        h.textContent=!sel().length?(gm?'Marcá lo que paga.':'Marcá los meses que paga.'):r===t?(gm?`Cubre ${sel().length} ${sel().length===1?'mensualidad':'mensualidades'}.`:`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`):r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
       }else if(con==='deuda_anterior'){
         const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
         h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
@@ -328,13 +337,15 @@ function openCobro(clientId,con1,pre){
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
-        allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base);});
+        allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
       }else items[newId()]=Object.assign({concepto:con,per:null,monto,nota:$('#cb-nota-o',el).value.trim()},base);
       const go=$('#cb-go',el);go.disabled=true;
-      try{await putMany('pagos',payShard(fecha,c.id),items);toast('Cobro registrado');
+      /* una cuenta con varios servicios guarda todo el recibo en un solo bloque (el de la cuenta principal): se graba entero o no se graba */
+      const doc=payShard(fecha,gm?head.id:c.id);
+      try{await putMany('pagos',doc,items);toast('Cobro registrado');
         const ids=Object.keys(items);
         // El recibo se muestra con los datos recién escritos aunque la suscripción tarde en llegar.
-        ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:payShard(fecha,c.id)}));});rebuildDerived();dataChanged('pagos');
+        ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
         const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
       }catch(err){dbError(err);go.disabled=false;}

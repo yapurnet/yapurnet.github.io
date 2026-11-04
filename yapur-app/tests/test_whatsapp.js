@@ -209,6 +209,27 @@ async function configurado() {
     r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [falla2.id]: { wa: { e: 'enviado' } } } } }, O);
     t('ni la oficina', r.s === 403, r);
 
+    /* --- recibo de una cuenta con varios servicios: sale a nombre de la cuenta principal y a su WhatsApp --- */
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: {
+      emp: { nombre: 'Manaos Distribuidora SRL Larga', tel: '3844 56-2605', estado: 'activo' },
+      su1: { nombre: 'Pachilla Sucursal Uno', cuenta: 'emp', estado: 'activo' },
+      su2: { nombre: 'Pachilla Sucursal Dos', cuenta: 'emp', tel: '3844 11-0000', estado: 'activo' }
+    } } }, A);
+    mk.clear();
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: {
+      g1: { c: 'su1', concepto: 'mensualidad', per: HOY.slice(0, 7), monto: 23000, fecha: HOY, hora: '11:00', recibo: 'RGRUPO1', metodo: 'efectivo' },
+      g2: { c: 'su2', concepto: 'mensualidad', per: HOY.slice(0, 7), monto: 23000, fecha: HOY, hora: '11:00', recibo: 'RGRUPO1', metodo: 'efectivo' }
+    } } }, O);
+    t('cuenta: la oficina cobra dos servicios de la cuenta en un solo recibo', r.s === 200, r);
+    r = await call('POST', '/api/recibos/reenviar', { recibo: 'RGRUPO1' }, O);
+    const gq = mk.reqs[0] || {}, gp = (((((gq.body || {}).template || {}).components || [])[0]) || {}).parameters || [];
+    t('cuenta: el recibo va al WhatsApp de la cuenta principal (no al de un servicio), una sola vez', r.s === 200 && r.j.ok === true && mk.reqs.length === 1 && gq.body.to === '5493844562605', [r, mk.reqs.length, gq.body && gq.body.to]);
+    t('cuenta: el aviso lleva el nombre de la cuenta y el total de los dos servicios', gp.length === 5 && gp[0].text === 'Manaos Distribuidora SRL' && gp[1].text === '$ 46.000' && gp[3].text === 'RGRUPO1', gp.map(p => p.text));
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { emp: { tel: 'no tiene' } } } }, A);
+    mk.clear();
+    r = await call('POST', '/api/recibos/reenviar', { recibo: 'RGRUPO1' }, O);
+    t('cuenta: si la principal no tiene teléfono, usa el de un servicio', r.s === 200 && r.j.ok === true && mk.reqs.length === 1 && mk.reqs[0].body.to === '5493844110000', [r, mk.reqs.length, mk.reqs[0] && mk.reqs[0].body.to]);
+
     /* --- apagarlo --- */
     r = await call('PUT', '/api/doc/ajustes/general', { data: { empresa: 'YAPUR.NET', waAuto: false } }, A);
     t('el administrador apaga el envío automático', r.s === 200 && r.j.data.waAuto === false && r.j.data.waActivo === false, r);

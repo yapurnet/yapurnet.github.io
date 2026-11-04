@@ -18,7 +18,7 @@ function parseCsv(text){
 const HSYN={
   codigo:['codigo','cod','nro cliente','n cliente','numero de cliente','n de cliente','nro','id'],
   nombre:['nombre','cliente','nombre y apellido','apellido y nombre','razon social','titular'],
-  dni:['dni','documento','cuit','cuil'],
+  dni:['dni','documento','cuit','cuil','dni cuit','dni cuil','dni cuit cuil','dni o cuit','cuit cuil','cuit o cuil','d n i','d n i cuit','nro documento'],
   tel:['telefono','tel','celular','whatsapp','movil','telefono 1'],
   tel2:['telefono 2','tel 2','otro telefono','celular 2','telefono2'],
   dir:['direccion','domicilio','calle','direccion y numero'],
@@ -127,7 +127,7 @@ function analyzeImport(rows,opts){
         }
       }else if(opts.existentes==='completar'){
         const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
-        fill('dni',g('dni'));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
+        fill('dni',fmtDoc(g('dni')));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
         fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
         if(plan){fill('planId',plan.id);
           if(patch.planId&&hasNum(ex.precio)){const hp=Array.isArray(ex.hp)?ex.hp:[],ref=hp.length?addMonths(hp[hp.length-1].h,1):curMonth();
@@ -150,7 +150,7 @@ function analyzeImport(rows,opts){
     if(g('lat')&&g('lng'))geo=parseCoords(g('lat').replace(',','.')+', '+g('lng').replace(',','.'));
     else if(g('geo'))geo=parseCoords(g('geo'));
     if(!geo)out.sinGeo++;
-    out.recs.push({codigo:cod||'',nombre,dni:g('dni'),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
+    out.recs.push({codigo:cod||'',nombre,dni:fmtDoc(g('dni')),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
       lat:geo?geo.lat:null,lng:geo?geo.lng:null,estado,alta:parseDateAny(g('alta'))||todayStr(),desde,ciclo:parseCiclo(g('ciclo'),opts.ciclo||1),precio:precio,notas:g('notas'),creado:Date.now(),mod:Date.now()});
   }
   return out;

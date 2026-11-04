@@ -139,7 +139,7 @@ const METODOS_PAGO = ['efectivo', 'transferencia', 'mercadopago', 'otro'];
 const COMP_METODOS = ['transferencia'];
 const COMP_ID_RE = /^[a-f0-9]{20}$/;
 const COMP_MAX = 450e3;   // bytes de la foto ya comprimida (la app la reduce antes de subirla)
-const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt'];
+const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt', 'cuenta'];
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch, ctx) {
@@ -785,9 +785,12 @@ export class YapurDB extends DurableObject {
     const vivos = its.filter(i => !i.anulado);
     const now = Date.now(), fin = (e, o) => { const wa = Object.assign({ e, ts: Date.now(), tel: null, err: null, id: null, n: 0 }, o); this.waMarcar(docId, ks, wa); return wa; };
     if (!vivos.length) return fin('error', { err: 'El recibo está anulado: no se envía.' });
-    const cl = this.clienteDe(vivos[0].c);
+    /* recibo de una cuenta con varios servicios: sale a nombre de la cuenta principal y al WhatsApp de ella (o, si no tiene, al de algún servicio) */
+    const mie = this.clienteDe(vivos[0].c), ids = new Set(vivos.map(i => i.c)), cab = mie && mie.cuenta && ids.size > 1 ? this.clienteDe(mie.cuenta) : null;
+    const cl = cab || mie, tels = [];
+    if (cab) { tels.push(cab.tel, cab.tel2); for (const id of ids) { const s = this.clienteDe(id); if (s) tels.push(s.tel, s.tel2); } } else tels.push(cl && cl.tel, cl && cl.tel2);
     let to = '';
-    for (const t of [cl && cl.tel, cl && cl.tel2]) { to = waNumero(t); if (to) break; }
+    for (const t of tels) { to = waNumero(t); if (to) break; }
     if (!to) return fin('sin_tel', { err: !cl ? 'No se encontró al cliente.' : (cl.tel || cl.tel2) ? 'El teléfono del cliente no sirve para WhatsApp (tiene que tener el código de área, sin 0 ni 15).' : 'El cliente no tiene teléfono cargado.' });
     if (!this.waCupo(to, manual)) return fin('error', { tel: to, err: 'Se llegó al máximo de avisos por WhatsApp de hoy para este número. Probá mañana o mandalo a mano.' });
     this.waMarcar(docId, ks, { e: 'pendiente', ts: now, tel: to, err: null, id: null, n: 0 });

@@ -56,7 +56,7 @@ const S={
   ajustes:{empresa:'YAPUR.NET',tecnicos:[],perfiles:[],diaVenc:10,ciclos:null,feriados:null,servicios:null,promesaMax:10},
   planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),red:new Map(),rv:0,
   loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false,red:false},
-  errors:{},paidIdx:new Map(),payByClient:new Map(),billCache:new Map(),cutCache:new Map(),
+  errors:{},paidIdx:new Map(),payByClient:new Map(),billCache:new Map(),cutCache:new Map(),cuentaIdx:new Map(),
   tecId:''
 };
 const RANK={tecnico:1,oficina:2,admin:3};
@@ -65,7 +65,7 @@ const ROLE_NAME={tecnico:'Técnico',oficina:'Oficina',admin:'Administrador'};
 const PERMS=[
   ['clientesTodos','Ver todos los clientes','Apagado: solo ve los clientes de sus órdenes abiertas.','Clientes'],
   ['telefono','Ver teléfonos','','Clientes'],
-  ['dni','Ver DNI','','Clientes'],
+  ['dni','Ver DNI / CUIT / CUIL','','Clientes'],
   ['editarClientes','Dar de alta y editar clientes','Ficha completa, plan, estado y facturación.','Clientes'],
   ['ubicacion','Cargar ubicaciones y datos técnicos','Coordenadas, usuario, nodo y equipo.','Clientes'],
   ['ordenesTodas','Ver y asignar las órdenes de todos','Apagado: solo ve las suyas y las que nadie tomó.','Órdenes'],
@@ -127,7 +127,8 @@ function watchSharded(coll,target,key){
 /* ===== cálculo de cobranzas ===== */
 function rebuildDerived(){
   S.paidIdx=new Map();S.payByClient=new Map();S.billCache=new Map();S.cutCache=new Map();
-  S.payDA=new Map();
+  S.payDA=new Map();S.cuentaIdx=new Map();
+  for(const c of S.clientes.values())if(c.cuenta&&c.cuenta!==c.id){let l=S.cuentaIdx.get(c.cuenta);if(!l){l=[];S.cuentaIdx.set(c.cuenta,l);}l.push(c);}
   for(const p of S.pagos.values()){
     let l=S.payByClient.get(p.c);if(!l){l=[];S.payByClient.set(p.c,l);}l.push(p);
     if(!p.anulado&&p.concepto==='deuda_anterior')S.payDA.set(p.c,(S.payDA.get(p.c)||0)+(Number(p.monto)||0));
@@ -197,7 +198,32 @@ function cicloCfg(n){
   const g=k=>{const v=Number(o[k]);return v>=1&&v<=28?Math.floor(v):d[k];};
   return {desde:g('desde'),hasta:g('hasta'),corte:g('corte')};
 }
-const cicloOf=c=>c&&Number(c.ciclo)===2?2:1;
+/* ===== cuenta unificada =====
+   Una empresa (o una persona) con varios servicios o sucursales: cada servicio sigue siendo un cliente, con su domicilio, ubicación, plan, IP y precio,
+   pero se cobra todo junto y sale un solo recibo. c.cuenta = id del cliente principal (el que lleva el nombre y el CUIT de la empresa).
+   Toda la cuenta sigue el ciclo de cobro del principal: un recibo único tiene un solo período y un solo vencimiento. */
+const cuentaHead=c=>{const h=c&&c.cuenta&&c.cuenta!==c.id?S.clientes.get(c.cuenta):null;return h&&!h.cuenta?h:c;};
+/* el principal primero y después los otros servicios por nombre; [] si el cliente no está en una cuenta con más de un servicio */
+function cuentaMiembros(c){
+  const h=cuentaHead(c),l=h&&h.id?S.cuentaIdx.get(h.id):null;
+  if(!l||!l.length)return [];
+  return [h].concat(l.filter(x=>x.id!==h.id&&cuentaHead(x)===h).sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre))));
+}
+const enCuenta=c=>cuentaMiembros(c).length>1;
+const cicloOf=c=>{const h=cuentaHead(c);return h&&Number(h.ciclo)===2?2:1;};
+/* ===== DNI, CUIT y CUIL =====
+   Un DNI tiene 7 u 8 dígitos. Un CUIT o CUIL tiene 11 y se escribe 27-23373806-4: el último es un verificador que sirve para detectar errores de tipeo. */
+const docDigits=s=>String(s==null?'':s).replace(/\D/g,'');
+function fmtDoc(s){
+  const t=String(s==null?'':s).trim(),d=docDigits(t);
+  return d.length===11&&/^[\d\s.\-\/]+$/.test(t)?d.slice(0,2)+'-'+d.slice(2,10)+'-'+d.slice(10):t;
+}
+function cuitOk(s){
+  const d=docDigits(s);if(d.length!==11)return false;
+  const w=[5,4,3,2,7,6,5,4,3,2];let t=0;for(let i=0;i<10;i++)t+=w[i]*Number(d[i]);
+  let v=11-t%11;if(v===11)v=0;else if(v===10)v=9;
+  return v===Number(d[10]);
+}
 const cicloTxt=n=>{const k=cicloCfg(n);return `paga del ${k.desde} al ${k.hasta}, corte el ${k.corte}`;};
 const dm=d=>d?d.slice(8,10)+'/'+d.slice(5,7):'';
 const dateAdd=(d,n)=>{const [y,m,dd]=d.split('-').map(Number);const x=new Date(y,m-1,dd+n);return x.getFullYear()+'-'+pad(x.getMonth()+1)+'-'+pad(x.getDate());};
