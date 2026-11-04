@@ -4745,6 +4745,7 @@ function receiptData(recibo){
 function receiptText(recibo){
   const d=receiptData(recibo);if(!d)return '';
   const e=d.emisor,c=d.cliente,L=[];
+  if(d.anulado)L.push('*** RECIBO ANULADO: ESTE RECIBO NO TIENE VALIDEZ ***','');
   if(e.leyenda)L.push(e.leyenda);
   L.push(e.razon);
   const ident=[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / ');if(ident)L.push(ident);
@@ -4868,7 +4869,7 @@ function mandarReciboWA(ev,d,tel,href){
   const via=reciboVia(),afuera=()=>NET.openExternal(href);
   if(!via){if(window.YapurApp){ev.preventDefault();afuera();}return;}   /* sin imagen posible: el enlace con el texto del recibo (en el APK lo abre el puente) */
   ev.preventDefault();
-  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total);   /* el texto que acompaña la imagen dice a nombre de quién es: el abonado */
+  const nombre='Recibo-'+(d.anulado?'ANULADO-':'')+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap=(d.anulado?'RECIBO ANULADO (sin validez) ':'Recibo ')+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total);   /* el texto que acompaña la imagen dice a nombre de quién es: el abonado */
   try{
     const cv=receiptCanvas(d);
     if(via==='nativo'){
@@ -4910,7 +4911,7 @@ function openReceipt(recibo){
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
-    <div class="actions start" style="margin-top:12px">${d.anulado||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">Enviar por WhatsApp</a>`:'<button class="btn primary" type="button" id="rc-wa">Enviar por WhatsApp</button>'}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
+    <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
     ${pc&&puedeVerComp(pc)?`<div class="actions start"><button class="btn" type="button" id="rc-comp">Ver comprobante de la transferencia</button></div><div class="hint" id="rc-comp-st"></div><img id="rc-comp-img" class="comp-full" alt="Comprobante de la transferencia" hidden>`:''}
@@ -5604,7 +5605,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='8b4c93673e';
+const BUILD='e96d7a6c6d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
