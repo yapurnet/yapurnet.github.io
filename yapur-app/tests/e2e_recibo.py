@@ -79,6 +79,15 @@ async def main():
         check('la imagen crece con la cantidad de renglones (seis meses es más alta que uno)', seis > info['h'] + 150, [seis, info['h']])
         anu = await pg.evaluate("(r) => { const cv = receiptCanvas(receiptData(r)), im = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let rojos = 0; for (let i = 0; i < im.length; i += 4) if (im[i] > 150 && im[i + 1] < 120 && im[i + 2] < 120) rojos++; return rojos; }", 'R261102-INS')
         check('un recibo anulado lleva el sello ANULADO en rojo', anu > 500, anu)
+        # un recibo anulado también se puede mandar por WhatsApp (la oficina le avisa al cliente), claramente marcado sin validez
+        await pg.evaluate("openReceipt('R261102-INS')"); await pg.wait_for_selector('#rc-wa')
+        bw = await pg.evaluate("(() => { const a = document.querySelector('#rc-wa'); return {txt: a.textContent.trim(), href: decodeURIComponent(a.getAttribute('href') || '')}; })()")
+        check('el recibo anulado ofrece «Enviar recibo anulado por WhatsApp»', bw['txt'] == 'Enviar recibo anulado por WhatsApp', bw)
+        check('y el mensaje dice que está anulado y no tiene validez', 'RECIBO ANULADO' in bw['href'] and 'NO TIENE VALIDEZ' in bw['href'], bw['href'][:300])
+        await pg.click('.sheet [data-close]')
+        await pg.evaluate("openReceipt('R261102-J2R')"); await pg.wait_for_selector('#rc-wa')
+        check('(y el recibo vigente no cambió)', (await pg.inner_text('#rc-wa')).strip() == 'Enviar por WhatsApp')
+        await pg.click('.sheet [data-close]')
 
         # 3) media hoja A4: el recibo entra en 148 mm de alto y en una sola hoja
         pr = await ctx.new_page()

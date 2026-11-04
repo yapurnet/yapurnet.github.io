@@ -138,6 +138,7 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - **Un solo recibo:** sale un recibo con **«Contado + Transferencia»** y cada renglón dice con qué medio se pagó. En «Cobrado hoy» aparece una sola fila con el total y los medios; la **Caja del día** suma cada medio por separado.
 - **Pagos parciales:** si escribe menos de lo que debe, el resto queda como deuda (la pantalla avisa cuánto). No deja escribir más que la deuda más el mes en curso: para pagar meses adelantados se usa **Cobrar**.
 - **Cuenta unificada:** junta los meses de todos los servicios y los cobra en un solo recibo.
+- **Recibo anulado:** si se anula un recibo (por ejemplo para cargarlo de nuevo con otro monto), el recibo anulado sigue guardado con el sello rojo **ANULADO**. La oficina puede mandárselo igual al cliente con **«Enviar recibo anulado por WhatsApp»**: llega la imagen con el sello y el mensaje dice que no tiene validez, así el cliente sabe que ese recibo ya no sirve.
 - **Quién no lo ve:** el técnico (no ve la deuda ni cobra mensualidades).
 
 ## Probar la conexión de un cliente (ping)
