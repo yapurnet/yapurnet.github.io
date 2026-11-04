@@ -418,6 +418,9 @@ const can=k=>!!S.perms[k];
 const soloCampo=()=>!can('cobrar')&&can('cobrarCampo');
 /* Quien no maneja la facturación (el técnico) no ve si un cliente está activo o suspendido por falta de pago. Sí ve «Por instalar» y «Baja», que usa para trabajar. */
 const veEstado=()=>can('editarClientes')||can('cobrar')||can('caja');
+/* cuántos clientes tiene la empresa es un dato del negocio: el técnico no ve el total (ni «Ver más (N)») */
+const veTotales=()=>can('editarClientes')||can('cobrar')||can('caja');
+const TOPE_CONTEO=20;
 /* los servicios adicionales (Multimedia…) los ve quien factura; el técnico no (el servidor tampoco se los manda) */
 const veServicios=()=>can('editarClientes')||can('cobrar')||can('caja')||can('precios');
 const isAdmin=()=>S.role==='admin'&&!S.preview;
@@ -1643,13 +1646,13 @@ VIEWS.clientes={
     };
     const rows=searchClients(CL.q,filt);
     const cta=$('#cl-ct');if(cta){const n=can('contratosGestion')?ctPend():0;cta.innerHTML=n?`<div class="notice info" style="margin-bottom:8px"><b>${n===1?'Hay 1 contrato esperando tu revisión':'Hay '+n+' contratos esperando tu revisión'}.</b> <button class="btn small" type="button" id="cl-ct-go">Revisar</button></div>`:(can('contratosGestion')?'<div class="actions start" style="margin-bottom:8px"><button class="btn small ghost" type="button" id="cl-ct-go">Contratos de comodato</button></div>':'');const g=$('#cl-ct-go');if(g)g.onclick=()=>openContratos();}
-    $('#cl-count').textContent=S.loaded.clientes?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'Cargando…';
+    $('#cl-count').textContent=!S.loaded.clientes?'Cargando…':(veTotales()||rows.length<=TOPE_CONTEO)?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'';   /* sin permiso, solo se cuenta una búsqueda corta */
     const list=$('#cl-list');
     if(!rows.length){
       list.innerHTML=!can('clientesTodos')&&!CL.q?'<div class="empty"><b>No tenés clientes asignados</b><span>Acá aparecen los clientes de tus órdenes abiertas.</span></div>':S.clientes.size?'<div class="empty"><b>Ningún cliente coincide</b><span>Probá con otra búsqueda o cambiá el filtro.</span></div>':`<div class="empty"><b>Todavía no hay clientes</b><span>${can('editarClientes')?'Cargá el primero o importá tu lista desde un archivo CSV en Ajustes.':'La oficina todavía no cargó clientes.'}</span></div>`;
       return;
     }
-    list.innerHTML=rows.slice(0,CL.limit).map(clientRow).join('')+(rows.length>CL.limit?`<button class="btn more" type="button" data-more>Ver más (${rows.length-CL.limit})</button>`:'');
+    list.innerHTML=rows.slice(0,CL.limit).map(clientRow).join('')+(rows.length>CL.limit?`<button class="btn more" type="button" data-more>Ver más${veTotales()?` (${rows.length-CL.limit})`:''}</button>`:'');
   }
 };
 
@@ -5480,7 +5483,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='79b68794ed';
+const BUILD='34d7d44230';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
