@@ -4995,7 +4995,7 @@ function openCobro(clientId,con1,pre){
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
     <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
-    ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar deuda (escribir el monto o usar varios medios)</button></div>':''}
+    ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar todo o la deuda (escribir el monto, varios medios)</button></div>':''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
@@ -5108,9 +5108,11 @@ function openPagarDeuda(clientId){
   const fm=v=>{const r=Math.round(v*100)/100;return r?String(r).replace('.',','):'';};   /* 4000,5: así lo lee num() */
   const lineas=[].concat(d.da>0?[`<div class="pd-l"><span>Deuda anterior${det?' ('+esc(det)+')':''}</span><b class="tnum">${fmtMoney(d.da)}</b></div>`]:[],
     d.meses.filter(x=>x.venc).map(x=>`<div class="pd-l"><span>${esc(monthLabel(x.per))}${d.gm?' · '+esc(x.nombre):''}</span><b class="tnum">${fmtMoney(x.rest)}</b></div>`)).join('');
-  const encurso=d.meses.filter(x=>!x.venc),extra=encurso.length?`<div class="hint" style="margin-top:6px">${encurso.map(x=>esc(monthLabel(x.per))+(d.gm?' · '+esc(x.nombre):'')+' ('+fmtMoney(x.rest)+') todavía no vence: no es deuda.').join(' ')} Si el cliente también lo paga, sumalo al monto: se aplica después de la deuda.</div>`:'';
+  const encurso=d.meses.filter(x=>!x.venc),extra=encurso.length?`<div class="hint" style="margin-top:6px">${encurso.map(x=>esc(monthLabel(x.per))+(d.gm?' · '+esc(x.nombre):'')+' ('+fmtMoney(x.rest)+') todavía no vence: no es deuda.').join(' ')} Si el cliente también lo paga, tocá «Pagar todo».</div>`:'';
+  const hayExtra=d.max>d.total+0.005;
   openModal({title:'Pagar deuda',html:`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${d.gm?' <span class="chip info">Cuenta unificada</span>':''}</div></div>
     <div class="pd-deuda">${lineas}<div class="pd-l pd-t"><span>Total que debe</span><b class="tnum">${fmtMoney(d.total)}</b></div></div>${extra}
+    ${hayExtra?`<div class="actions start" id="pd-alcance"><button class="btn small primary" type="button" data-meta="todo">Pagar todo (${fmtMoney(d.max)})</button><button class="btn small" type="button" data-meta="deuda">Solo la deuda (${fmtMoney(d.total)})</button></div>`:''}
     <div class="hint">Escribí cuánto paga. Si lo reparte entre varios medios, tocá «Agregar otro medio de pago». Se aplica primero a lo más viejo.</div>
     <div id="pd-rows"></div>
     <div class="actions start"><button class="btn small" type="button" id="pd-add">Agregar otro medio de pago</button></div>
@@ -5119,10 +5121,11 @@ function openPagarDeuda(clientId){
     ${F('Fecha del cobro','pd-fecha',`<input id="pd-fecha" type="date" value="${todayStr()}">`)}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="pd-go">Registrar pago</button></div>`,
   onMount(el){
-    const rows=[{metodo:'efectivo',monto:fm(d.total),auto:true}];
+    let meta=d.total;   /* lo que completa solo la fila automática: la deuda, o «todo» (deuda + mes en curso) */
+    const rows=[{metodo:'efectivo',monto:fm(meta),auto:true}];
     const val=r=>num(r.monto)||0,suma=()=>Math.round(rows.reduce((t,r)=>t+val(r),0)*100)/100;
     /* la fila «automática» (la última que se agregó) completa sola lo que falta */
-    const balancear=()=>{const a=rows.find(r=>r.auto);if(!a)return;a.monto=fm(Math.max(0,d.total-rows.filter(r=>r!==a).reduce((t,r)=>t+val(r),0)));};
+    const balancear=()=>{const a=rows.find(r=>r.auto);if(!a)return;a.monto=fm(Math.max(0,meta-rows.filter(r=>r!==a).reduce((t,r)=>t+val(r),0)));};
     const dibujar=()=>{$('#pd-rows',el).innerHTML=rows.map((r,i)=>`<div class="pd-row" data-i="${i}"><select data-met aria-label="Medio de pago">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k===r.metodo)).join('')}</select><input data-monto type="text" inputmode="decimal" autocomplete="off" value="${esc(r.monto)}" aria-label="Monto en ${esc(METODOS[r.metodo])}">${rows.length>1?`<button class="btn small ghost" type="button" data-quitar="${i}">Quitar</button>`:'<span></span>'}</div>`).join('');refrescar();};
     const refrescar=()=>{
       const r=suma(),h=$('#pd-sum',el),sobra=r>d.max+0.005;
@@ -5152,6 +5155,17 @@ function openPagarDeuda(clientId){
       const i=Number(q.dataset.quitar);rows.splice(i,1);
       if(rows.length===1)rows[0].auto=false;
       else if(!rows.some(r=>r.auto))rows[rows.length-1].auto=true;
+      balancear();dibujar();
+    });
+    const al=$('#pd-alcance',el);
+    if(al)al.addEventListener('click',e=>{
+      const b=e.target.closest('[data-meta]');if(!b)return;
+      meta=b.dataset.meta==='todo'?d.max:d.total;
+      al.querySelectorAll('[data-meta]').forEach(x=>x.classList.toggle('primary',x===b));
+      rows.forEach(r=>{r.auto=false;});
+      /* si lo que ya escribió en las otras filas pasa del nuevo monto, se vuelve a una sola fila */
+      if(rows.length>1&&rows.slice(0,-1).reduce((t,r)=>t+val(r),0)>meta+0.005)rows.splice(1);
+      rows[rows.length-1].auto=true;   /* la última fila completa lo que falta */
       balancear();dibujar();
     });
     $('#pd-add',el).addEventListener('click',()=>{
@@ -5618,7 +5632,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='76198cdcda';
+const BUILD='964ab80655';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
