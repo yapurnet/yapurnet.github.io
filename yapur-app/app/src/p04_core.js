@@ -365,6 +365,8 @@ const mapsNav=o=>'https://www.google.com/maps/dir/?api=1&travelmode=driving&dest
 const wazeNav=o=>'https://waze.com/ul?ll='+llStr(o)+'&navigate=yes';
 function waNumber(tel){let d=String(tel||'').replace(/\D/g,'').replace(/^0+/,'');if(!d)return '';if(!d.startsWith('54'))d='54'+(d.startsWith('9')?'':'9')+d;return d;}
 const waUrl=(tel,text)=>'https://wa.me/'+waNumber(tel)+'?text='+encodeURIComponent(text);
+/* en la computadora: directo a WhatsApp Web (sin la pantalla intermedia de wa.me, que pide elegir entre la app y la web) */
+const waWebUrl=(tel,text)=>'https://web.whatsapp.com/send?phone='+waNumber(tel)+'&text='+encodeURIComponent(text);
 function geoActions(o){
   if(!hasGeo(o))return '<span class="chip warn">Sin ubicación cargada</span>';
   return `<a class="btn small primary" href="${mapsNav(o)}" target="_blank" rel="noopener">Cómo llegar</a>

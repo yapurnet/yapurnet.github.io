@@ -172,8 +172,14 @@ function reciboVia(){
       return null;
     }
     if(navigator.clipboard&&navigator.clipboard.write&&window.ClipboardItem)return 'portapapeles';
+    if('download' in document.createElement('a')&&window.Blob&&window.URL&&URL.createObjectURL)return 'descarga';   /* navegadores viejos (Windows 8.1): no copian imágenes, pero sí descargan el archivo */
   }catch(e){}
   return null;
+}
+/* la pestaña de WhatsApp Web se reutiliza: cada recibo se abre en la misma pestaña (con otra pestaña, WhatsApp Web pide «Usar aquí» cada vez y la anterior se apaga) */
+function abrirWhatsAppWeb(url){
+  try{if(window.open(url,'yapur-wa'))return true;}catch(_){}
+  NET.openExternal(url);return false;
 }
 function mandarReciboWA(ev,d,tel,href){
   const via=reciboVia(),afuera=()=>NET.openExternal(href);
@@ -191,7 +197,11 @@ function mandarReciboWA(ev,d,tel,href){
       try{
         if(!blob)throw new Error('sin imagen');
         if(via==='compartir')await navigator.share({files:[new File([blob],nombre,{type:'image/png'})],text:cap});
-        else{await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast('Recibo copiado como imagen: pegalo en el chat (Ctrl+V)');window.open(waUrl(tel,cap),'_blank','noopener');}
+        else if(via==='descarga'){   /* el navegador no copia imágenes: se baja el recibo y se abre el chat para adjuntarlo con el clip */
+          const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);
+          toast('Se descargó el recibo ('+nombre+'). En WhatsApp Web tocá el clip, elegí «Fotos y videos» y seleccioná ese archivo.');
+          abrirWhatsAppWeb(waWebUrl(tel,cap));
+        }else{await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast('Recibo copiado como imagen: pegalo en el chat (Ctrl+V)');abrirWhatsAppWeb(waWebUrl(tel,cap));}
       }catch(err){if(err&&err.name==='AbortError')return;afuera();}
     },'image/png');
   }catch(err){afuera();}
@@ -221,6 +231,7 @@ function openReceipt(recibo){
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
+    ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${reciboVia()==='portapapeles'?'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo.':'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.'}</div>`:''}
     <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
