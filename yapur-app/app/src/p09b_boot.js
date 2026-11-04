@@ -106,7 +106,9 @@ function onAjustesChanged(){
 function onMeChanged(m){
   if(!S.ready){S.me=m;return;}
   if(m.role!==S.me.role){location.reload();return;}
+  const antes=S.me.perms||{},gana=Object.keys(m.perms||{}).some(k=>m.perms[k]&&!antes[k]);   /* si le dieron un permiso, el servidor ahora le manda más datos (el plan, los precios…) */
   S.me=m;computePerms();updateHeader();startData();
+  if(gana)NET.resync();
   const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:tabs[0][0]);
   toast('Se actualizaron tus permisos');
 }
