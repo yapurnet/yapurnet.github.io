@@ -95,7 +95,7 @@ function cobroOrdenHTML(o,c){
 function openFinishOrder(o){
   const c=S.clientes.get(o.clientId);
   /* activar / reactivar / dar de baja cambia la facturación: solo se ofrece a quien puede editar clientes (al técnico le fallaba y se perdía hasta la ubicación) */
-  const sug=c&&can('editarClientes')&&((o.tipo==='instalacion'&&c.estado==='pendiente')?['activo','Dejar al cliente como activo y empezar a cobrarle este mes']:(o.tipo==='reconexion'&&c.estado==='suspendido')?['activo','Reactivar al cliente (levantar la suspensión)']:(o.tipo==='retiro'&&c.estado!=='baja')?['baja','Dar de baja al cliente']:null);
+  const sug=c&&can('editarClientes')&&((o.tipo==='instalacion'&&c.estado==='pendiente')?['activo','Dejar al cliente como activo y empezar a cobrarle este mes']:(o.tipo==='reconexion'&&c.estado==='suspendido')?['activo','Reactivar al cliente (levantar la suspensión)']:(o.tipo==='retiro'&&c.estado!=='baja')?['baja','Dar de baja al cliente (y dar por retirados los equipos)']:(o.tipo==='retiro'&&bajaPend(c))?['baja','Confirmar que se retiraron los equipos del cliente']:null);
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
@@ -129,7 +129,7 @@ function openFinishOrder(o){
         if(!g.empty&&c)Object.assign(cp,{lat:g.lat,lng:g.lng});
         if(nf&&c&&(nf.nap!==(c.nap||null)||nf.puerto!==(c.napPuerto||null)))Object.assign(cp,{nap:nf.nap,napPuerto:nf.puerto});
         const ck=$('#ff-est',el);
-        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
+        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
         let rec=null;
         if(cobra){
