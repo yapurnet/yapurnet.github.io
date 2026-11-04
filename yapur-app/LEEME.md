@@ -133,9 +133,10 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 
 - **Dónde:** en la ficha del cliente, el botón **Pagar deuda** (aparece cuando debe algo; lo ven oficina y administrador). También hay un acceso directo adentro de **Cobrar**.
 - **Cómo:** arriba muestra lo que debe (deuda anterior, cada mes y el total). Escribís **cuánto paga** y el medio (efectivo, transferencia, Mercado Pago u otro). Si lo reparte, tocás **Agregar otro medio de pago**: por ejemplo 15.000 en efectivo y la transferencia se completa sola con los 4.000 que faltan. **Registrar pago** y listo.
-- **A qué se aplica:** a lo más viejo primero (la deuda anterior, y después los meses hasta el actual). Antes de registrar, la pantalla muestra «Así queda registrado» con cuánto va a cada mes y con qué medio.
+- **Qué cuenta como deuda:** la «Deuda anterior» y los meses que ya vencieron. El mes en curso que todavía no vence («Mes a vencer») **no es deuda**: se aclara abajo del total y, si el cliente también lo paga, se suma al monto (se aplica después de la deuda). Si un cliente no figura con deuda, no aparece el botón: su deuda de meses viejos tiene que estar cargada en la ficha (Editar → «Deuda anterior que falta cobrar»).
+- **A qué se aplica:** a lo más viejo primero. Antes de registrar, la pantalla muestra «Así queda registrado» con cuánto va a cada mes y con qué medio.
 - **Un solo recibo:** sale un recibo con **«Contado + Transferencia»** y cada renglón dice con qué medio se pagó. En «Cobrado hoy» aparece una sola fila con el total y los medios; la **Caja del día** suma cada medio por separado.
-- **Pagos parciales:** si escribe menos de lo que debe, el resto queda como deuda (la pantalla avisa cuánto). No deja escribir más de lo que debe: para pagar meses adelantados se usa **Cobrar**.
+- **Pagos parciales:** si escribe menos de lo que debe, el resto queda como deuda (la pantalla avisa cuánto). No deja escribir más que la deuda más el mes en curso: para pagar meses adelantados se usa **Cobrar**.
 - **Cuenta unificada:** junta los meses de todos los servicios y los cobra en un solo recibo.
 - **Quién no lo ve:** el técnico (no ve la deuda ni cobra mensualidades).
 

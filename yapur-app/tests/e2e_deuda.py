@@ -55,22 +55,25 @@ async def main():
     api('POST', '/api/users', {'usuario': 'tec', 'nombre': 'Fernando Paz', 'role': 'tecnico', 'clave': 'fernando1', 'permisos': {'clientesTodos': True, 'cobrarCampo': True}}, TA)
     api('PUT', '/api/doc/planes/p17', {'data': {'nombre': 'Hogar 150', 'bajada': 15, 'subida': 15, 'precio': 17000}}, TA)
     base = {'estado': 'activo', 'planId': 'p17', 'dir': 'Calle 1', 'tel': '3844000001', 'alta': '2026-01-10'}
-    fix = {'cJ': dict(base, nombre='Toloza Jorge', desde=cur, deudaAnt={'m': 2000, 'det': 'Septiembre 2026', 'f': hoy}),
+    sig = '%04d-%02d' % (y + 1, 1) if m == 12 else '%04d-%02d' % (y, m + 1)
+    fix = {'cJ': dict(base, nombre='Toloza Jorge', desde=sig, deudaAnt={'m': 19000, 'det': 'Septiembre (2.000) y octubre (17.000)', 'f': hoy}),
            'cM': dict(base, nombre='Dos Meses', desde=prev),
-           'cOk': dict(base, nombre='Al Dia', desde=cur)}
+           'cOk': dict(base, nombre='Al Dia', desde=cur),
+           'cD': dict(base, nombre='Debe Mes Pasado', desde=prev)}
     for cid, c in fix.items(): api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         pg = await login(br, 'ofi', 'brenda123')
-        await pg.wait_for_function('S.clientes.size === 3 && S.loaded.pagos', timeout=15000)
+        await pg.wait_for_function('S.clientes.size === 4 && S.loaded.pagos', timeout=15000)
         await pg.evaluate("openClient('cJ')"); await pg.wait_for_selector('[data-act=pagar-deuda]')
         check('un cliente con deuda tiene el botón «Pagar deuda» en la ficha', True)
         await pg.evaluate("closeModal(); openClient('cOk')"); await pg.wait_for_selector('[data-act=cobrar]')
-        check('un cliente que solo debe el mes en curso también tiene «Pagar deuda»', await pg.query_selector('[data-act=pagar-deuda]') is not None)
+        check('un cliente que solo tiene el mes en curso (todavía sin vencer) no tiene deuda: no hay «Pagar deuda»', await pg.evaluate("billing(S.clientes.get('cOk')).periods.filter(p=>p.per==='%s').every(p=>p.venc)" % cur) or await pg.query_selector('[data-act=pagar-deuda]') is None)
         await pg.evaluate("closeModal(); openClient('cJ')"); await pg.click('[data-act=pagar-deuda]')
         await pg.wait_for_selector('#pd-rows .pd-row')
         s = await sheet(pg)
-        check('muestra lo que debe: deuda anterior, el mes y el total', 'Deuda anterior' in s and '2.000' in s and '17.000' in s and 'Total que debe' in s and '19.000' in s, s[:300])
+        s = s.replace('\xa0', ' ')
+        check('muestra lo que debe: la deuda anterior (septiembre y octubre) y el total 19.000', 'Deuda anterior' in s and 'Septiembre (2.000) y octubre (17.000)' in s and 'Total que debe' in s and '19.000' in s, s[:300])
         check('arranca con una fila en efectivo por el total', await pg.input_value('.pd-row [data-monto]') == '19000' and await pg.input_value('.pd-row [data-met]') == 'efectivo')
         check('y dice que cubre toda la deuda', 'Cubre toda la deuda' in await pg.inner_text('#pd-sum'))
         await pg.click('#pd-add')
@@ -79,7 +82,7 @@ async def main():
         await pg.wait_for_function("document.querySelector('.pd-row[data-i=\"1\"] [data-monto]').value === '4000'", timeout=3000)
         check('al escribir 15.000 en efectivo, la transferencia se completa sola con 4.000', 'Cubre toda la deuda' in await pg.inner_text('#pd-sum'))
         prev_txt = await pg.inner_text('#pd-prev-l')
-        check('muestra cómo queda aplicado (lo más viejo primero)', 'Deuda anterior: $ 2.000 efectivo' in prev_txt.replace('\xa0', ' ') or 'Deuda anterior' in prev_txt and '4.000 transferencia' in prev_txt, prev_txt)
+        check('muestra cómo queda aplicado: la deuda anterior, 15.000 efectivo + 4.000 transferencia', 'Deuda anterior' in prev_txt and '15.000 efectivo' in prev_txt.replace('\xa0', ' ') and '4.000 transferencia' in prev_txt.replace('\xa0', ' '), prev_txt)
         if SHOTS: await pg.screenshot(path=os.path.join(SHOTS, 'deuda-form.png'))
         await pg.click('#pd-go'); await pg.wait_for_selector('.rc', timeout=8000)
         rc = (await pg.inner_text('.rc')).replace('\xa0', ' ')
@@ -90,31 +93,41 @@ async def main():
         check('en el servidor: un recibo, 19.000 en total', len(recs) == 1 and sum(p['monto'] for p in ps) == 19000, ps)
         ef = sum(p['monto'] for p in ps if p['metodo'] == 'efectivo'); tr = sum(p['monto'] for p in ps if p['metodo'] == 'transferencia')
         check('15.000 en efectivo y 4.000 en transferencia', ef == 15000 and tr == 4000, (ef, tr))
-        da = [p for p in ps if p['concepto'] == 'deuda_anterior']; me = [p for p in ps if p['concepto'] == 'mensualidad']
-        check('la deuda anterior (2.000) se cancela primero y el resto va al mes', sum(p['monto'] for p in da) == 2000 and all(p['metodo'] == 'efectivo' for p in da) and sum(p['monto'] for p in me) == 17000 and {p['per'] for p in me} == {cur}, ps)
-        check('ya no debe nada: la ficha no ofrece pagar deuda', await pg.evaluate("deudaAntRest(S.clientes.get('cJ')) === 0 && billing(S.clientes.get('cJ')).periods.every(p=>p.per>'%s'||p.rest===0)" % cur))
+        check('todo se aplica a la deuda anterior (septiembre y octubre) y no toca el mes que viene', all(p['concepto'] == 'deuda_anterior' for p in ps) and len(ps) == 2, ps)
+        check('y la deuda anterior queda saldada', await pg.evaluate("deudaAntRest(S.clientes.get('cJ')) === 0"))
         await pg.evaluate("closeModal(); openClient('cJ')"); await pg.wait_for_selector('[data-act=cobrar]')
         check('y el botón «Pagar deuda» desaparece', await pg.query_selector('[data-act=pagar-deuda]') is None)
 
-        # pago parcial en un solo medio
+        # pago parcial / con el mes en curso: la deuda es lo vencido; el mes que todavía no vence se puede sumar
+        venc_cur = await pg.evaluate("billing(S.clientes.get('cM')).periods.find(p=>p.per==='%s').venc" % cur)
+        deuda = 34000 if venc_cur else 17000
         await pg.evaluate("closeModal(); openClient('cM')"); await pg.click('[data-act=pagar-deuda]'); await pg.wait_for_selector('#pd-rows .pd-row')
         s = (await sheet(pg)).replace('\xa0', ' ')
-        check('dos meses sin pagar: total 34.000', 'Total que debe' in s and '34.000' in s, s[:300])
-        await pg.fill('.pd-row [data-monto]', '20000')
+        check('con un mes vencido: el total que debe es %s' % ('34.000' if venc_cur else '17.000'), 'Total que debe' in s and ('34.000' if venc_cur else '17.000') in s, s[:400])
+        if not venc_cur:
+            check('el mes en curso, sin vencer, se aclara que no es deuda', 'todavía no vence' in s and 'no es deuda' in s, s)
+        await pg.fill('.pd-row [data-monto]', '10000')
         h = (await pg.inner_text('#pd-sum')).replace('\xa0', ' ')
-        check('pagando 20.000 avisa que quedan 14.000', 'quedan' in h and '14.000' in h, h)
+        check('pagando 10.000 avisa cuánto queda de deuda', 'quedan' in h and ('24.000' if venc_cur else '7.000') in h, h)
         await pg.fill('.pd-row [data-monto]', '99999')
-        check('si escribe de más, avisa y no deja registrar', 'Es más que lo que debe' in await pg.inner_text('#pd-sum'))
+        check('si escribe de más, avisa y no deja registrar', 'Es más que lo que se puede cobrar' in await pg.inner_text('#pd-sum'))
         await pg.click('#pd-go')
         check('…el pago no se registró', len(pagos(TA, 'cM')) == 0 and await pg.query_selector('#pd-go') is not None)
-        await pg.fill('.pd-row [data-monto]', '20000'); await pg.click('#pd-go'); await pg.wait_for_selector('.rc', timeout=8000)
+        await pg.fill('.pd-row [data-monto]', '20000')
+        h = (await pg.inner_text('#pd-sum')).replace('\xa0', ' ')
+        if not venc_cur:
+            check('con 20.000 cubre la deuda y suma 3.000 del mes en curso', 'Cubre toda la deuda y' in h and '3.000' in h and 'mes en curso' in h, h)
+        await pg.click('#pd-go'); await pg.wait_for_selector('.rc', timeout=8000)
         ps = pagos(TA, 'cM')
-        check('el parcial cancela el mes más viejo (17.000) y 3.000 del siguiente', [(p['per'], p['monto']) for p in ps] == [(prev, 17000), (cur, 3000)] and all(p['metodo'] == 'efectivo' for p in ps), ps)
-        await pg.evaluate("closeModal(); openClient('cM')"); await pg.wait_for_selector('[data-act=pagar-deuda]')
-        check('queda debiendo 14.000 y sigue el botón', await pg.evaluate("deudaDe(S.clientes.get('cM')).total") == 14000)
+        check('se aplica al mes más viejo (17.000) y 3.000 del siguiente', [(p['per'], p['monto']) for p in ps] == [(prev, 17000), (cur, 3000)] and all(p['metodo'] == 'efectivo' for p in ps), ps)
+        await pg.evaluate("closeModal(); openClient('cM')"); await pg.wait_for_selector('[data-act=cobrar]')
+        if venc_cur:
+            check('queda debiendo 14.000 y sigue el botón', await pg.evaluate("deudaDe(S.clientes.get('cM')).total") == 14000 and await pg.query_selector('[data-act=pagar-deuda]') is not None)
+        else:
+            check('ya no debe nada vencido: no hay «Pagar deuda» y el mes en curso sigue con 14.000', await pg.query_selector('[data-act=pagar-deuda]') is None and await pg.evaluate("billing(S.clientes.get('cM'),true).periods.find(p=>p.per==='%s').rest" % cur) == 14000)
 
         # desde «Cobrar»
-        await pg.evaluate("closeModal(); openCobro('cM')"); await pg.wait_for_selector('#cb-deuda')
+        await pg.evaluate("closeModal(); openCobro('cD')"); await pg.wait_for_selector('#cb-deuda')
         await pg.click('#cb-deuda'); await pg.wait_for_selector('#pd-rows .pd-row')
         check('desde «Cobrar» hay un acceso directo a «Pagar deuda»', 'Total que debe' in await sheet(pg))
         await pg.evaluate("closeModal()")
@@ -129,7 +142,7 @@ async def main():
 
         # el técnico no ve «Pagar deuda»
         pt = await login(br, 'tec', 'fernando1')
-        await pt.wait_for_function('S.clientes.size === 3', timeout=15000)
+        await pt.wait_for_function('S.clientes.size === 4', timeout=15000)
         await pt.evaluate("openClient('cM')"); await pt.wait_for_selector('.sheet h2')
         check('el técnico no ve «Pagar deuda» ni la deuda del cliente', await pt.query_selector('[data-act=pagar-deuda]') is None and 'quedan' not in await sheet(pt))
         await br.close()
