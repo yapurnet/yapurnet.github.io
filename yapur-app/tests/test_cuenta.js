@@ -52,11 +52,18 @@ const R='R261104-CTA',base={recibo:R,fecha:cur+'-04',hora:'09:30',metodo:'efecti
 ['man','pc','pe','pf'].forEach((id,i)=>S.pagos.set('q'+i,Object.assign({id:'q'+i,c:id,monto:23000},base)));
 rebuildDerived();
 const d=receiptData(R),rt=receiptText(R);
-t('recibo de la cuenta: un solo comprobante con el total de los cuatro servicios',d.total===92000&&d.lineas.length===4&&rt.includes('IMPORTE TOTAL: ')&&rt.includes('92.000'),d.total);
+t('recibo de la cuenta: un solo comprobante con el total de los cuatro servicios',d.total===92000&&rt.includes('IMPORTE TOTAL: ')&&rt.includes('92.000'),d.total);
+t('recibo de la cuenta: los 4 servicios iguales salen en UN renglón (cant. 4 x 23.000), para que entre en media hoja',d.lineas.length===1&&d.lineas[0].cant===4&&d.lineas[0].unit===23000&&d.lineas[0].desc.includes('4 conexiones')&&d.lineas[0].desc.includes(monthLabel(cur).toLowerCase())&&rt.includes('x4')&&rt.includes('4 conexiones'),d.lineas);
 t('recibo de la cuenta: va a nombre de la principal con su CUIT',d.cliente.nombre==='Manaos distribuidora'&&d.cliente.dni==='27-23373806-4'&&rt.includes('DNI / CUIT / CUIL: 27-23373806-4')&&rt.includes('Cliente: Manaos distribuidora'),d.cliente);
-t('recibo de la cuenta: cada renglón dice a qué servicio corresponde',d.lineas[0].desc.endsWith('- Manaos distribuidora')&&d.lineas.some(l=>l.desc.includes('Pachilla Maria Carolina FM'))&&d.lineas.some(l=>l.desc.includes('suc. España'))&&d.lineas.some(l=>l.desc.includes('(C. Central)')),d.lineas.map(l=>l.desc));
+// si los servicios no son iguales, cada distinto lleva el nombre de su servicio y solo se juntan los iguales
+const R2='R261104-MIX';
+[['man',23000],['pc',23000],['pe',23000],['pf',30000]].forEach(([id,m],i)=>S.pagos.set('x'+i,Object.assign({id:'x'+i,c:id,monto:m},base,{recibo:R2})));
+rebuildDerived();
+const dmx=receiptData(R2);
+t('recibo de la cuenta: con precios distintos junta los iguales y deja aparte el distinto con su nombre',dmx.total===99000&&dmx.lineas.length===2&&dmx.lineas[0].cant===3&&dmx.lineas[0].desc.includes('3 conexiones')&&dmx.lineas[1].cant===1&&dmx.lineas[1].unit===30000&&dmx.lineas[1].desc.includes('Carolina FM'),dmx.lineas);
+for(const k of ['x0','x1','x2','x3'])S.pagos.delete(k);rebuildDerived();
 t('recibo de la cuenta: el período sale con el ciclo de la cuenta (1: del 01 al 01 siguiente, vto. 10)',d.periodo&&d.periodo.desde===cur+'-01'&&d.periodo.vto===addMonths(cur,1)+'-10',d.periodo);
-t('recibo de la cuenta: la imagen y el HTML también lo traen',receiptHTML(d).includes('Pachilla Maria Carolina FM')&&receiptHTML(d).includes('27-23373806-4'));
+t('recibo de la cuenta: el HTML lleva el CUIT y la cantidad',receiptHTML(d).includes('27-23373806-4')&&receiptHTML(d).includes('4 conexiones'));
 // un pago de un solo servicio mantiene su nombre y no cambia (los recibos viejos se reimprimen igual)
 S.pagos.set('v1',Object.assign({id:'v1',c:'pf',monto:23000},base,{recibo:'R-VIEJO',per:prev}));rebuildDerived();
 const dv=receiptData('R-VIEJO');
