@@ -158,6 +158,10 @@ async function openStream(token) {
     t('deuda anterior: el técnico no puede tocarla (es dato de facturación)', r.s === 403 && /facturaci/i.test(r.j.error), r);
     r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { deudaAnt: { m: 20000, det: 'Octubre 2026', f: '2026-10-30' } } } } }, O);
     t('deuda anterior: la oficina la carga', r.s === 200 && r.j.data.items.cv1.deudaAnt.m === 20000, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { cuenta: 'cv9' } } } }, T);
+    t('cuenta unificada: el técnico no puede juntar clientes en una cuenta (es dato de facturación)', r.s === 403 && /facturaci/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { cuenta: 'cv9' } } } }, O);
+    t('cuenta unificada: la oficina sí puede', r.s === 200 && r.j.data.items.cv1.cuenta === 'cv9', r);
     r = await call('GET', '/api/doc/clientes/c01', undefined, O);
     t('deuda anterior: la oficina la ve', r.s === 200 && r.j.data.items.cv1.deudaAnt && r.j.data.items.cv1.deudaAnt.m === 20000, r.j);
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);

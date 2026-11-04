@@ -364,7 +364,7 @@ const S={
   ajustes:{empresa:'YAPUR.NET',tecnicos:[],perfiles:[],diaVenc:10,ciclos:null,feriados:null,servicios:null,promesaMax:10},
   planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),red:new Map(),rv:0,
   loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false,red:false},
-  errors:{},paidIdx:new Map(),payByClient:new Map(),billCache:new Map(),cutCache:new Map(),
+  errors:{},paidIdx:new Map(),payByClient:new Map(),billCache:new Map(),cutCache:new Map(),cuentaIdx:new Map(),
   tecId:''
 };
 const RANK={tecnico:1,oficina:2,admin:3};
@@ -373,7 +373,7 @@ const ROLE_NAME={tecnico:'Técnico',oficina:'Oficina',admin:'Administrador'};
 const PERMS=[
   ['clientesTodos','Ver todos los clientes','Apagado: solo ve los clientes de sus órdenes abiertas.','Clientes'],
   ['telefono','Ver teléfonos','','Clientes'],
-  ['dni','Ver DNI','','Clientes'],
+  ['dni','Ver DNI / CUIT / CUIL','','Clientes'],
   ['editarClientes','Dar de alta y editar clientes','Ficha completa, plan, estado y facturación.','Clientes'],
   ['ubicacion','Cargar ubicaciones y datos técnicos','Coordenadas, usuario, nodo y equipo.','Clientes'],
   ['ordenesTodas','Ver y asignar las órdenes de todos','Apagado: solo ve las suyas y las que nadie tomó.','Órdenes'],
@@ -435,7 +435,8 @@ function watchSharded(coll,target,key){
 /* ===== cálculo de cobranzas ===== */
 function rebuildDerived(){
   S.paidIdx=new Map();S.payByClient=new Map();S.billCache=new Map();S.cutCache=new Map();
-  S.payDA=new Map();
+  S.payDA=new Map();S.cuentaIdx=new Map();
+  for(const c of S.clientes.values())if(c.cuenta&&c.cuenta!==c.id){let l=S.cuentaIdx.get(c.cuenta);if(!l){l=[];S.cuentaIdx.set(c.cuenta,l);}l.push(c);}
   for(const p of S.pagos.values()){
     let l=S.payByClient.get(p.c);if(!l){l=[];S.payByClient.set(p.c,l);}l.push(p);
     if(!p.anulado&&p.concepto==='deuda_anterior')S.payDA.set(p.c,(S.payDA.get(p.c)||0)+(Number(p.monto)||0));
@@ -505,7 +506,32 @@ function cicloCfg(n){
   const g=k=>{const v=Number(o[k]);return v>=1&&v<=28?Math.floor(v):d[k];};
   return {desde:g('desde'),hasta:g('hasta'),corte:g('corte')};
 }
-const cicloOf=c=>c&&Number(c.ciclo)===2?2:1;
+/* ===== cuenta unificada =====
+   Una empresa (o una persona) con varios servicios o sucursales: cada servicio sigue siendo un cliente, con su domicilio, ubicación, plan, IP y precio,
+   pero se cobra todo junto y sale un solo recibo. c.cuenta = id del cliente principal (el que lleva el nombre y el CUIT de la empresa).
+   Toda la cuenta sigue el ciclo de cobro del principal: un recibo único tiene un solo período y un solo vencimiento. */
+const cuentaHead=c=>{const h=c&&c.cuenta&&c.cuenta!==c.id?S.clientes.get(c.cuenta):null;return h&&!h.cuenta?h:c;};
+/* el principal primero y después los otros servicios por nombre; [] si el cliente no está en una cuenta con más de un servicio */
+function cuentaMiembros(c){
+  const h=cuentaHead(c),l=h&&h.id?S.cuentaIdx.get(h.id):null;
+  if(!l||!l.length)return [];
+  return [h].concat(l.filter(x=>x.id!==h.id&&cuentaHead(x)===h).sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre))));
+}
+const enCuenta=c=>cuentaMiembros(c).length>1;
+const cicloOf=c=>{const h=cuentaHead(c);return h&&Number(h.ciclo)===2?2:1;};
+/* ===== DNI, CUIT y CUIL =====
+   Un DNI tiene 7 u 8 dígitos. Un CUIT o CUIL tiene 11 y se escribe 27-23373806-4: el último es un verificador que sirve para detectar errores de tipeo. */
+const docDigits=s=>String(s==null?'':s).replace(/\D/g,'');
+function fmtDoc(s){
+  const t=String(s==null?'':s).trim(),d=docDigits(t);
+  return d.length===11&&/^[\d\s.\-\/]+$/.test(t)?d.slice(0,2)+'-'+d.slice(2,10)+'-'+d.slice(10):t;
+}
+function cuitOk(s){
+  const d=docDigits(s);if(d.length!==11)return false;
+  const w=[5,4,3,2,7,6,5,4,3,2];let t=0;for(let i=0;i<10;i++)t+=w[i]*Number(d[i]);
+  let v=11-t%11;if(v===11)v=0;else if(v===10)v=9;
+  return v===Number(d[10]);
+}
 const cicloTxt=n=>{const k=cicloCfg(n);return `paga del ${k.desde} al ${k.hasta}, corte el ${k.corte}`;};
 const dm=d=>d?d.slice(8,10)+'/'+d.slice(5,7):'';
 const dateAdd=(d,n)=>{const [y,m,dd]=d.split('-').map(Number);const x=new Date(y,m-1,dd+n);return x.getFullYear()+'-'+pad(x.getMonth()+1)+'-'+pad(x.getDate());};
@@ -970,8 +996,8 @@ const ESTADO_CLS={activo:'ok',suspendido:'bad',pendiente:'info',baja:''};
 const planName=id=>{const p=S.planes.get(id);return p?p.nombre:'Sin plan';};
 const planSpeed=p=>p?`${p.bajada}/${p.subida} Mbps`:'';
 function clientHay(c){
-  const hv=S.pv+'.'+S.rv;
-  if(!c._hay||c._hayV!==hv){c._hay=norm([c.codigo,c.nombre,can('dni')?c.dni:'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;}
+  const hv=S.pv+'.'+S.rv,h=cuentaHead(c),hn=h&&h!==c?h.nombre:'';
+  if(!c._hay||c._hayV!==hv||c._hayH!==hn){c._hay=norm([c.codigo,c.nombre,hn,can('dni')?c.dni:'',can('dni')?docDigits(c.dni):'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;c._hayH=hn;}
   return c._hay;
 }
 function visibleSet(){
@@ -986,7 +1012,7 @@ function searchClients(q,filter,limit){
   for(const c of S.clientes.values()){
     if(vis&&!vis.has(c.id))continue;
     if(filter&&!filter(c))continue;
-    if(parts.length){const h=clientHay(c);if(!parts.every(p=>h.includes(p)))continue;}
+    if(parts.length){const h=clientHay(c);if(!parts.every(p=>h.includes(p)||(docDigits(p).length>=7&&h.includes(docDigits(p)))))continue;}   /* un CUIT se encuentra con o sin guiones */
     out.push(c);
   }
   out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
@@ -1003,10 +1029,16 @@ function clientRow(c){
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${billChip(c)}</div></button>`;
+}
+/* en la lista: a qué cuenta pertenece cada servicio */
+function cuentaChip(c){
+  if(!veCuenta())return '';
+  const ms=cuentaMiembros(c);if(ms.length<2)return '';
+  return `<span class="chip info">${ms[0]===c?'Cuenta · '+ms.length+' servicios':'Cuenta: '+esc(ms[0].nombre)}</span>`;
 }
 function mountClientPicker(host,opts){
-  host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;
+  host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI o CUIT, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;
   const inp=$('.cp-in',host),list=$('.cp-list',host);
   const draw=()=>{
     const q=inp.value.trim();
@@ -1127,7 +1159,7 @@ function bindGeoField(root){
 }
 
 /* ----- ficha ----- */
-function stripInternal(o){const r=Object.assign({},o);delete r.id;delete r._doc;delete r._hay;delete r._hayV;return r;}
+function stripInternal(o){const r=Object.assign({},o);delete r.id;delete r._doc;delete r._hay;delete r._hayV;delete r._hayH;return r;}
 async function saveClient(c,patch){
   const obj=Object.assign(stripInternal(c),patch,{mod:Date.now()});
   await putItem('clientes',clientShard(c.id),c.id,obj);
@@ -1148,11 +1180,12 @@ function openClient(id){
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     ${deudaAntBlock(c)}
-    <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
+    ${cuentaBlock(c)}
+    <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI / CUIT / CUIL',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -1167,6 +1200,12 @@ function openClient(id){
       else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
       else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
+      else if(a.dataset.act==='cuenta-abrir')openClient(a.dataset.id);
+      else if(a.dataset.act==='cuenta-ubic')openGeoQuick(a.dataset.id);
+      else if(a.dataset.act==='cuenta-editar')openClientForm(a.dataset.id);
+      else if(a.dataset.act==='cuenta-add')openCuentaPicker(c.id,'agregar');
+      else if(a.dataset.act==='cuenta-unir')openCuentaPicker(c.id,'unir');
+      else if(a.dataset.act==='cuenta-quitar')quitarDeCuenta(c.id);
       else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
@@ -1174,6 +1213,57 @@ function openClient(id){
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- cuenta unificada en la ficha ----- */
+const veCuenta=()=>can('cobrar')||can('caja')||can('editarClientes');
+function cuentaBlock(c){
+  if(!veCuenta())return '';
+  const ms=cuentaMiembros(c),ed=can('editarClientes');
+  if(ms.length<2){
+    if(!ed)return '';
+    return `<div class="hint">Cuenta unificada: si este cliente tiene varios servicios o sucursales a nombre de una misma empresa, se pueden juntar para cobrarlos y recibirlos en un solo recibo. <span class="actions start" style="display:inline-flex;gap:6px;margin-left:4px"><button class="btn small ghost" type="button" data-act="cuenta-add">Sumarle servicios</button><button class="btn small ghost" type="button" data-act="cuenta-unir">Unir a otra cuenta</button></span></div>`;
+  }
+  const head=ms[0],verPrecio=can('precios')||can('cobrar')||can('caja'),bs=ms.map(m=>billing(m,false));
+  const total=bs.reduce((s,b)=>s+(b.aplica?b.price:0),0),deuda=ms.reduce((s,m,i)=>s+(bs[i].aplica?bs[i].deuda:0),0);
+  const rows=ms.map((m,i)=>`<div class="item" style="cursor:default;grid-template-columns:minmax(0,1fr)${m.id===c.id?';border-color:var(--accent-line)':''}"><div><div class="t" style="overflow-wrap:anywhere">${esc(m.nombre)}</div>
+      <div class="s">${esc(m.dir||'Sin domicilio')}${m.loc?' · '+esc(m.loc):''}</div>
+      <div class="s small">${esc(servicioTxt(m))}${verPrecio&&bs[i].aplica?' · '+esc(fmtMoney(bs[i].price))+'/mes':''}${hasGeo(m)?'':' · sin ubicación'}</div></div>
+      <div class="tags">${m===head?'<span class="chip accent">Principal</span>':''}${estChip(m)}${verPrecio&&bs[i].aplica&&bs[i].deuda>0?`<span class="chip bad">Debe ${esc(fmtMoney(bs[i].deuda))}</span>`:''}</div>
+      <div class="actions start" style="display:flex;flex-wrap:wrap;gap:6px">${m.id===c.id?'':`<button class="btn small" type="button" data-act="cuenta-abrir" data-id="${esc(m.id)}">Abrir</button>`}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="cuenta-ubic" data-id="${esc(m.id)}">${hasGeo(m)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}${can('editarClientes')?`<button class="btn small ghost" type="button" data-act="cuenta-editar" data-id="${esc(m.id)}">Editar domicilio</button>`:''}</div></div>`).join('');
+  return `<div class="card flat"><div class="head-row"><h3>Cuenta unificada · ${esc(head.nombre)}</h3></div>
+    <div class="hint">${ms.length} servicios. Se cobran juntos y sale un solo recibo. Cada servicio conserva su domicilio, su ubicación y su plan. Toda la cuenta sigue el ciclo ${cicloOf(head)} (${esc(cicloTxt(cicloOf(head)))}).${verPrecio?` Total por mes: <b>${esc(fmtMoney(total))}</b>${deuda>0?` · vencido: <b>${esc(fmtMoney(deuda))}</b>`:''}.`:''}</div>
+    <div class="list" style="margin-top:8px">${rows}</div>
+    ${ed?`<div class="actions start" style="margin-top:8px">${c===head?'<button class="btn small" type="button" data-act="cuenta-add">Sumar otro servicio a la cuenta</button>':'<button class="btn small ghost" type="button" data-act="cuenta-quitar">Sacar este servicio de la cuenta</button>'}</div>`:''}</div>`;
+}
+/* guarda el cambio de cuenta y lo deja ya a la vista (la lista llega un instante después) */
+async function cuentaGuardar(m,patch){
+  await saveClient(m,patch);
+  S.clientes.set(m.id,Object.assign({},m,patch,{mod:Date.now()}));dataChanged('clientes');
+}
+/* modo 'agregar': c es la cuenta principal y se elige el servicio que se suma · modo 'unir': c es el servicio y se elige la cuenta a la que va */
+function openCuentaPicker(id,modo){
+  const c=S.clientes.get(id);if(!c)return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede editar clientes','bad');
+  const agregar=modo==='agregar',tiene=x=>(S.cuentaIdx.get(x.id)||[]).length>0;
+  if(!agregar&&tiene(c))return toast('Este cliente es la cuenta principal de otros servicios: no puede pasar a otra cuenta','bad');
+  if(agregar&&c.cuenta&&cuentaHead(c)!==c)return toast('Este servicio ya pertenece a otra cuenta','bad');
+  const filter=x=>x.id!==c.id&&x.estado!=='baja'&&!x.cuenta&&(agregar?!tiene(x):true);
+  openModal({title:agregar?'Sumar un servicio a la cuenta de '+c.nombre:'Unir '+c.nombre+' a una cuenta',html:`<p class="hint">${agregar?'Buscá el servicio (el nombre o parte del nombre) para sumarlo a esta cuenta.':'Buscá la cuenta principal (por ejemplo la de la empresa).'} Se cobran juntos y sale un solo recibo; cada servicio mantiene su domicilio y su ubicación.</p><div id="cu-pick"></div>
+    <div class="actions"><button class="btn ghost" type="button" id="cu-volver">Volver</button></div>`,onMount(el){
+    $('#cu-volver',el).addEventListener('click',()=>openClient(c.id));
+    const pk=mountClientPicker($('#cu-pick',el),{filter,placeholder:agregar?'Buscar el servicio por nombre, calle o CUIT':'Buscar la cuenta por nombre o CUIT',onPick:async x=>{
+      const m=agregar?x:c,h=agregar?c:x;
+      const cambia=cicloOf(m)!==cicloOf(h);
+      if(!await askConfirm(`${m.nombre} pasa a la cuenta de ${h.nombre}: se cobran juntos y sale un solo recibo.`+(cambia?` Su ciclo de cobro cambia del ${cicloOf(m)} al ${cicloOf(h)}, así que cambian sus fechas de vencimiento y de corte.`:''),'Unir a la cuenta'))return openClient(c.id);
+      try{await cuentaGuardar(m,{cuenta:h.id});toast('Servicio sumado a la cuenta');openClient(h.id);}catch(err){dbError(err);}
+    }});pk.focus();
+  }});
+}
+async function quitarDeCuenta(id){
+  const c=S.clientes.get(id);if(!c||!c.cuenta)return;
+  const h=cuentaHead(c);
+  if(!await askConfirm(`${c.nombre} deja la cuenta de ${h&&h!==c?h.nombre:'la empresa'}: vuelve a cobrarse y a recibir recibos por separado. Lo ya cobrado no cambia.`,'Sacar de la cuenta'))return openClient(id);
+  try{await cuentaGuardar(c,{cuenta:null,ciclo:cicloOf(c)});toast('Servicio fuera de la cuenta');openClient(id);}catch(err){dbError(err);}   /* conserva el ciclo con el que venía cobrándose */
 }
 /* ----- deuda anterior en la ficha ----- */
 function deudaAntBlock(c){
@@ -1210,7 +1300,7 @@ function openGeoQuick(id){
 }
 
 /* ----- reporte del técnico (el texto de WhatsApp con NOMBRE / DNI / IP / PAGO) → datos del cliente y del cobro ----- */
-const REP_KEYS={nombre:'nombre',nombreyapellido:'nombre',cliente:'nombre',dni:'dni',documento:'dni',ip:'ip',pago:'pago',tel:'tel',telefono:'tel',celular:'tel',cel:'tel',whatsapp:'tel',direccion:'dir',domicilio:'dir',dir:'dir',calle:'dir',localidad:'loc',barrio:'loc',plan:'plan'};
+const REP_KEYS={nombre:'nombre',nombreyapellido:'nombre',cliente:'nombre',dni:'dni',documento:'dni',cuit:'dni',cuil:'dni',ip:'ip',pago:'pago',tel:'tel',telefono:'tel',celular:'tel',cel:'tel',whatsapp:'tel',direccion:'dir',domicilio:'dir',dir:'dir',calle:'dir',localidad:'loc',barrio:'loc',plan:'plan'};
 /* "65mil", "65 mil pesos", "$65.000", "65000" → 65000 */
 function parseMonto(t){
   const m=String(t==null?'':t).match(/(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(mil\b|k\b)?/i);if(!m)return null;
@@ -1233,7 +1323,7 @@ function parseReporte(txt){
     const k=REP_KEYS[norm(m[1]).replace(/[^a-z]/g,'')];if(!k||out[k]!=null)return;
     out[k]=m[2].trim();
   });
-  if(out.dni!=null)out.dni=out.dni.replace(/\D/g,'');
+  if(out.dni!=null)out.dni=fmtDoc(out.dni.replace(/\D/g,''));
   if(out.ip!=null){const ip=out.ip.match(/\d{1,3}(?:\.\d{1,3}){3}/);out.ip=ip?ip[0]:'';}
   if(out.pago!=null)out.pago=parsePago(out.pago);
   return out;
@@ -1266,7 +1356,7 @@ function openClientForm(id){
       <div class="actions start"><button class="btn small" type="button" id="cf-rep-go">Completar los datos</button></div><div class="hint" id="cf-rep-out"></div></div></details>`:''}
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
-      <div class="grid2">${F('DNI','cf-dni',`<input id="cf-dni" inputmode="numeric" class="mono" value="${esc(c.dni||'')}">`)}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
+      <div class="grid2">${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="${esc(c.dni||'')}">`,'<span id="cf-dni-h">Un CUIT o CUIL se escribe con guiones: 27-23373806-4.</span>')}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
       ${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</fieldset>`:''}
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Domicilio</legend>
       ${full?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
@@ -1285,13 +1375,17 @@ function openClientForm(id){
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
-      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`)}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
+      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
+    const docIn=$('#cf-dni',el),docH=$('#cf-dni-h',el);
+    if(docIn&&docH){const dm0=docH.textContent,chk=()=>{const d=docDigits(docIn.value);docH.className='';docH.textContent=dm0;
+      if(d.length===11){docH.className=cuitOk(docIn.value)?'ok':'bad';docH.textContent=cuitOk(docIn.value)?'CUIT o CUIL válido. Se guarda como '+fmtDoc(docIn.value)+'.':'El dígito verificador no coincide: revisá que no falte o sobre algún número.';}
+      else if(d.length>8||(d.length&&d.length<7))docH.className='bad';};docIn.addEventListener('input',chk);chk();}
     const upd=()=>{const t=$('#cf-total',el);if(!t)return;const pv=v('cf-precio');t.textContent='Total por mes: '+fmtMoney(priceOf({planId:v('cf-plan')||null,precio:pv?num(pv):null,extras:$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra)}));};
     const billChanged=()=>{
       if(!old||!full)return false;
@@ -1313,12 +1407,12 @@ function openClientForm(id){
       if(!got.length&&!repPago){out.className='hint bad';out.textContent='No encontré datos. Pegá el texto con líneas como «NOMBRE: …», «DNI: …», «IP: …» y «PAGO: …».';return;}
       $('#cf-estado',el).value='activo';$('#cf-desde',el).value=addMonths(curMonth(),1);
       const falta=[['cf-tel','teléfono'],['cf-dir','calle y número']].filter(([i])=>!v(i)).map(x=>x[1]);
-      const dup=[...S.clientes.values()].find(x=>(r.dni&&String(x.dni||'').replace(/\D/g,'')===r.dni)||(r.ip&&x.ip===r.ip));
+      const dup=[...S.clientes.values()].find(x=>(r.dni&&docDigits(x.dni)===docDigits(r.dni))||(r.ip&&x.ip===r.ip));
       out.className='hint'+(dup?' bad':'');
       out.textContent='Cargué: '+got.join(', ')+'. Quedó activo y empieza a cobrar en '+monthLabel(addMonths(curMonth(),1))+'.'
         +(repPago?' Pago detectado: '+(METODOS[repPago.metodo]||repPago.metodo).toLowerCase()+' '+fmtMoney(repPago.monto)+' ('+(CONCEPTOS[repPago.concepto]||repPago.concepto).toLowerCase()+'): al guardar se abre el cobro ya completado.':'')
         +(falta.length?' Falta completar: '+falta.join(' y ')+'.':'')
-        +(dup?' Ojo: ya hay un cliente con ese '+(r.dni&&String(dup.dni||'').replace(/\D/g,'')===r.dni?'DNI':'IP')+' ('+dup.nombre+').':'');
+        +(dup?' Ojo: ya hay un cliente con ese '+(r.dni&&docDigits(dup.dni)===docDigits(r.dni)?'DNI o CUIT':'IP')+' ('+dup.nombre+').':'');
     });
     $('#cform',el).addEventListener('submit',async e=>{
       e.preventDefault();
@@ -1333,7 +1427,7 @@ function openClientForm(id){
         if(cod&&[...S.clientes.values()].some(x=>x.codigo===cod&&x.id!==(old&&old.id)))return toast('Ese N° de cliente ya existe','bad');
         const precio=v('cf-precio');
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
-        Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:v('cf-dni'),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
+        Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
       }
       if(full&&$('#cf-da',el)){
@@ -1373,7 +1467,7 @@ function openClientForm(id){
 /* ----- vista ----- */
 VIEWS.clientes={
   mount(el){
-    el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
+    el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI o CUIT, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
       ${can('editarClientes')?'<button class="btn primary" type="button" id="cl-new">Nuevo cliente</button>':''}</div>
       <div class="seg" id="cl-seg"></div></div><div id="cl-count" class="hint"></div><div class="list" id="cl-list"></div>`;
     $('#cl-q',el).addEventListener('input',e=>{CL.q=e.target.value;CL.limit=50;this.update();});
@@ -2329,7 +2423,7 @@ function parseCsv(text){
 const HSYN={
   codigo:['codigo','cod','nro cliente','n cliente','numero de cliente','n de cliente','nro','id'],
   nombre:['nombre','cliente','nombre y apellido','apellido y nombre','razon social','titular'],
-  dni:['dni','documento','cuit','cuil'],
+  dni:['dni','documento','cuit','cuil','dni cuit','dni cuil','dni cuit cuil','dni o cuit','cuit cuil','cuit o cuil','d n i','d n i cuit','nro documento'],
   tel:['telefono','tel','celular','whatsapp','movil','telefono 1'],
   tel2:['telefono 2','tel 2','otro telefono','celular 2','telefono2'],
   dir:['direccion','domicilio','calle','direccion y numero'],
@@ -2438,7 +2532,7 @@ function analyzeImport(rows,opts){
         }
       }else if(opts.existentes==='completar'){
         const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
-        fill('dni',g('dni'));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
+        fill('dni',fmtDoc(g('dni')));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
         fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
         if(plan){fill('planId',plan.id);
           if(patch.planId&&hasNum(ex.precio)){const hp=Array.isArray(ex.hp)?ex.hp:[],ref=hp.length?addMonths(hp[hp.length-1].h,1):curMonth();
@@ -2461,7 +2555,7 @@ function analyzeImport(rows,opts){
     if(g('lat')&&g('lng'))geo=parseCoords(g('lat').replace(',','.')+', '+g('lng').replace(',','.'));
     else if(g('geo'))geo=parseCoords(g('geo'));
     if(!geo)out.sinGeo++;
-    out.recs.push({codigo:cod||'',nombre,dni:g('dni'),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
+    out.recs.push({codigo:cod||'',nombre,dni:fmtDoc(g('dni')),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
       lat:geo?geo.lat:null,lng:geo?geo.lng:null,estado,alta:parseDateAny(g('alta'))||todayStr(),desde,ciclo:parseCiclo(g('ciclo'),opts.ciclo||1),precio:precio,notas:g('notas'),creado:Date.now(),mod:Date.now()});
   }
   return out;
@@ -3917,14 +4011,19 @@ const paymentsOfReceipt=r=>[...S.pagos.values()].filter(p=>p.recibo===r);
 const paymentsOn=d=>[...S.pagos.values()].filter(p=>p.fecha===d).sort((a,b)=>(b.hora||'').localeCompare(a.hora||''));
 function allocate(sel,received){
   let left=received;const out=[];
-  for(const p of sel){if(left<=0)break;const a=Math.min(p.rest,left);out.push({per:p.per,monto:a});left-=a;}
+  for(const p of sel){if(left<=0)break;const a=Math.min(p.rest,left);out.push(p.cid?{cid:p.cid,per:p.per,monto:a}:{per:p.per,monto:a});left-=a;}   /* cid: el servicio, cuando se cobra una cuenta con varios */
   if(left>0&&out.length)out[out.length-1].monto+=left;
   return out;
 }
 /* Datos del recibo (formato del recibo en papel): quién emite, a quién, qué se cobra y el período */
 function receiptData(recibo){
-  const ps=paymentsOfReceipt(recibo).sort((a,b)=>(a.per||'').localeCompare(b.per||''));if(!ps.length)return null;
-  const p0=ps[0],c=S.clientes.get(p0.c),R=S.ajustes.recibo||{};
+  const ps0=paymentsOfReceipt(recibo);if(!ps0.length)return null;
+  /* un recibo de una cuenta con varios servicios lleva los datos de la cuenta principal y el nombre de cada servicio en su renglón */
+  const multi=new Set(ps0.map(p=>p.c)).size>1,c0=S.clientes.get(ps0[0].c),head=multi?cuentaHead(c0):null,orden=new Map();
+  if(multi&&head)cuentaMiembros(head).forEach((m,i)=>orden.set(m.id,i));
+  const ps=ps0.sort((a,b)=>((orden.has(a.c)?orden.get(a.c):99)-(orden.has(b.c)?orden.get(b.c):99))||(a.per||'').localeCompare(b.per||''));
+  const p0=ps[0],c=multi&&head?head:c0,R=S.ajustes.recibo||{};
+  const svc=p=>{const m=S.clientes.get(p.c);return m?m.nombre:'';};
   const total=ps.reduce((s,p)=>s+(Number(p.monto)||0),0);
   const cond=p=>p.metodo==='efectivo'?'Contado':(METODOS[p.metodo]||p.metodo||'');
   const mens=ps.filter(p=>p.concepto==='mensualidad'&&p.per);
@@ -3932,16 +4031,16 @@ function receiptData(recibo){
   if(mens.length){
     /* el período va del día en que empieza el ciclo del cliente al mismo día del mes siguiente, y el pago vence el día de vencimiento del ciclo en el mes siguiente
        (ciclo 1, noviembre: 01/11 al 01/12, vto. 10/12 · ciclo 2, noviembre: 13/11 al 13/12, vto. 20/12) */
-    const a=mens[0].per,z=addMonths(mens[mens.length-1].per,1),cfg=cicloCfg(cicloOf(c));
+    const pers=mens.map(p=>p.per).sort(),a=pers[0],z=addMonths(pers[pers.length-1],1),cfg=cicloCfg(cicloOf(c));
     periodo={desde:a+'-'+pad(Math.min(cfg.desde,daysIn(a))),hasta:z+'-'+pad(Math.min(cfg.desde,daysIn(z))),vto:z+'-'+pad(Math.min(cfg.hasta,daysIn(z)))};
   }
   return {
     nro:recibo,anulado:!!p0.anulado,fecha:p0.fecha,hora:p0.hora||'',total,cond:cond(p0),periodo,
     emisor:{leyenda:String(R.leyenda||'').trim(),razon:String(R.razon||'').trim()||S.ajustes.empresa||'',cuit:String(R.cuit||'').trim(),iibb:String(R.iibb||'').trim(),dom:String(R.dom||'').trim(),
       tel:String(R.tel||'').trim(),web:String(R.web||'').trim(),pv:String(R.pv||'').trim(),alias:Array.isArray(R.alias)?R.alias.map(x=>String(x).trim()).filter(Boolean):[]},
-    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||'',dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
+    cliente:{nombre:c?c.nombre:'—',codigo:c&&c.codigo||'',dni:c&&c.dni||(multi?(ps.map(p=>S.clientes.get(p.c)).find(m=>m&&m.dni)||{}).dni||'':''),dir:c?[c.dir,c.loc].filter(Boolean).join(', '):'',iva:'Consumidor Final'},
     lineas:ps.map(p=>({
-      desc:p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''),
+      desc:(p.concepto==='mensualidad'?'Abono Mensual Servicio de Internet'+(p.per?' ('+monthLabel(p.per).toLowerCase()+')':''):(CONCEPTOS[p.concepto]||'Otro')+(p.nota?': '+p.nota:''))+(multi&&svc(p)?' - '+svc(p):''),
       cant:1,cond:cond(p),unit:Number(p.monto)||0})),
     medio:METODOS[p0.metodo]||p0.metodo||''
   };
@@ -3956,7 +4055,7 @@ function receiptText(recibo){
   const cont=[e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / ');if(cont)L.push(cont);
   L.push('','RECIBO - NO VÁLIDO COMO FACTURA (ORIGINAL)',(e.pv?'Punto de venta: '+e.pv+'   ':'')+'Comp. Nro: '+d.nro,'Fecha de emisión: '+dmy(d.fecha)+(d.hora?' '+d.hora:''),'');
   L.push('Cliente: '+c.nombre+(c.codigo?' (#'+c.codigo+')':''));
-  if(c.dni)L.push('DNI / CUIT: '+c.dni);
+  if(c.dni)L.push('DNI / CUIT / CUIL: '+c.dni);
   if(c.dir)L.push('Dirección: '+c.dir);
   L.push('Condición de venta: '+d.cond,'Condición frente al IVA: '+c.iva);
   if(d.periodo)L.push('Período facturado: '+dmy(d.periodo.desde)+' al '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto));
@@ -3976,7 +4075,7 @@ function receiptHTML(d){
     <div class="b">${[e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).length?`<div>${esc([e.cuit&&'CUIT: '+e.cuit,e.iibb&&'Ingresos Brutos: '+e.iibb].filter(Boolean).join(' / '))}</div>`:''}
       ${e.dom?`<div>${esc(e.dom)}</div>`:''}${e.tel||e.web?`<div>${esc([e.tel,e.web&&'Web: '+e.web].filter(Boolean).join(' / '))}</div>`:''}
       <div>${e.pv?'Punto de venta: <b>'+esc(e.pv)+'</b> · ':''}Comp. Nro: <b>${esc(d.nro)}</b> · Fecha de emisión: <b>${esc(dmy(d.fecha))}</b>${d.hora?' '+esc(d.hora):''}</div></div>
-    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
+    <div class="b"><div>Cliente: <b>${esc(c.nombre)}</b>${c.codigo?' (#'+esc(c.codigo)+')':''}</div>${c.dni?`<div>DNI / CUIT / CUIL: ${esc(c.dni)}</div>`:''}${c.dir?`<div>Dirección: ${esc(c.dir)}</div>`:''}
       <div>Condición de venta: ${esc(d.cond)} · Condición frente al IVA: ${esc(c.iva)}</div>
       ${d.periodo?`<div>Período facturado desde: ${esc(dmy(d.periodo.desde))} hasta: ${esc(dmy(d.periodo.hasta))} · Vto. para el pago: ${esc(dmy(d.periodo.vto))}</div>`:''}</div>
     <table><thead><tr><th>Producto / Servicio</th><th class="r w1">Cant.</th><th class="cp w2">Condición de pago</th><th class="r w3">Precio unit.</th><th class="r w3">Subtotal</th></tr></thead><tbody>
@@ -4020,7 +4119,7 @@ function receiptCanvas(d){
     y+=7;b1.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
     /* cliente */
     const b2=[[['Cliente: ',false],[c.nombre,true],[c.codigo?' (#'+c.codigo+')':'',false]]];
-    if(c.dni)b2.push([['DNI / CUIT: '+c.dni,false]]);if(c.dir)b2.push([['Dirección: '+c.dir,false]]);
+    if(c.dni)b2.push([['DNI / CUIT / CUIL: '+c.dni,false]]);if(c.dir)b2.push([['Dirección: '+c.dir,false]]);
     b2.push([['Condición de venta: '+d.cond+' · Condición frente al IVA: '+c.iva,false]]);
     if(d.periodo)b2.push([['Período facturado desde: '+dmy(d.periodo.desde)+' hasta: '+dmy(d.periodo.hasta)+' · Vto. para el pago: '+dmy(d.periodo.vto),false]]);
     y+=7;b2.forEach(sg=>{y+=text(wrap(sg,W-P*2,12.5),P,y,12.5,17);});y+=7;rule(y);y+=1;
@@ -4108,7 +4207,7 @@ function printReceipt(d){
 }
 function openReceipt(recibo){
   const d=receiptData(recibo);if(!d)return toast('No se encontró el recibo','bad');
-  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c=S.clientes.get(ps[0].c),pc=ps.find(x=>x.comp);
+  const txt=receiptText(recibo),ps=paymentsOfReceipt(recibo),c0=S.clientes.get(ps[0].c),gm=c0&&new Set(ps.map(x=>x.c)).size>1?cuentaMiembros(c0):[],c=gm.length?(gm.find(x=>x.tel)||gm[0]):c0,pc=ps.find(x=>x.comp);   /* recibo de una cuenta: el WhatsApp de la principal, o el de algún servicio */
   const w=(ps.find(x=>x.wa)||{}).wa||null,oficina=can('cobrar')||can('caja'),solo=soloCampo();
   const sale=solo&&S.ajustes.waActivo&&!waFalla(w);   /* al técnico le sale solo: no tiene que mandarlo él (el cliente lo recibiría dos veces) */
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
@@ -4176,16 +4275,19 @@ function openCobro(clientId,con1,pre){
   if(!can('cobrar')&&!can('cobrarCampo'))return toast('Tu perfil no puede registrar cobros','bad');
   const campo=soloCampo();   /* quien cobra en la calle: solo instalaciones, reinstalaciones, reclamos y otros (a precio fijo la instalación y la reinstalación) */
   const b=campo?{aplica:false,periods:[],price:0}:billing(c,true),cur=todayStr().slice(0,7),cl=campo?null:cutLine(c);
-  const open=b.periods.filter(p=>p.rest>0);
-  const mens=b.aplica&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
+  /* cuenta unificada: se cobran juntos los meses de todos sus servicios (un solo recibo) */
+  const grp=campo?[]:cuentaMiembros(c),gm=grp.length>1,head=gm?grp[0]:c;
+  const bm=(gm?grp:[c]).map(m=>({m,b:m===c?b:billing(m,true)})).map(x=>Object.assign(x,{open:x.b.periods.filter(p=>p.rest>0)}));
+  const open=[].concat(...bm.map(x=>x.open)),priceTot=bm.reduce((s,x)=>s+(x.b.aplica?x.b.price:0),0);
+  const mens=(gm?bm.some(x=>x.b.aplica):b.aplica)&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
   const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
-  const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
-    <div class="small muted">${esc(servicioTxt(c))}${mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:'')}</div></div>
+  const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
+    <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
-    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?open.map(p=>`<label class="per"><input type="checkbox" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
-    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
+    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${gm?`<div class="hint">Este cobro se registra en el servicio ${esc(c.nombre)}.</div>`:''}${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${campo?compHTML('cb'):''}
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
@@ -4195,7 +4297,8 @@ function openCobro(clientId,con1,pre){
     let con=con0,manual=false;
     const comp=campo?mountComp(el,'cb',()=>$('#cb-met',el).value):null;
     if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
-    const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per));
+    const ord=new Map(grp.map((m,i)=>[m.id,i]));
+    const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({cid:i.dataset.cid||c.id,per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per)||((ord.get(a.cid)||0)-(ord.get(b.cid)||0)));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
     const sum=()=>{
       const m=$('#cb-monto',el),h=$('#cb-sum',el);
@@ -4203,7 +4306,7 @@ function openCobro(clientId,con1,pre){
         if(!manual)m.value=total()||'';
         const r=num(m.value)||0,t=total();
         h.className='hint'+(r<t?' bad':'');
-        h.textContent=!sel().length?'Marcá los meses que paga.':r===t?`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`:r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
+        h.textContent=!sel().length?(gm?'Marcá lo que paga.':'Marcá los meses que paga.'):r===t?(gm?`Cubre ${sel().length} ${sel().length===1?'mensualidad':'mensualidades'}.`:`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`):r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
       }else if(con==='deuda_anterior'){
         const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
         h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
@@ -4240,13 +4343,15 @@ function openCobro(clientId,con1,pre){
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
-        allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base);});
+        allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
       }else items[newId()]=Object.assign({concepto:con,per:null,monto,nota:$('#cb-nota-o',el).value.trim()},base);
       const go=$('#cb-go',el);go.disabled=true;
-      try{await putMany('pagos',payShard(fecha,c.id),items);toast('Cobro registrado');
+      /* una cuenta con varios servicios guarda todo el recibo en un solo bloque (el de la cuenta principal): se graba entero o no se graba */
+      const doc=payShard(fecha,gm?head.id:c.id);
+      try{await putMany('pagos',doc,items);toast('Cobro registrado');
         const ids=Object.keys(items);
         // El recibo se muestra con los datos recién escritos aunque la suscripción tarde en llegar.
-        ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:payShard(fecha,c.id)}));});rebuildDerived();dataChanged('pagos');
+        ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
         const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
       }catch(err){dbError(err);go.disabled=false;}
@@ -4687,7 +4792,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='d49d151fb6';
+const BUILD='da9225dd10';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

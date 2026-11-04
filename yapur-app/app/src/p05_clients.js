@@ -5,8 +5,8 @@ const ESTADO_CLS={activo:'ok',suspendido:'bad',pendiente:'info',baja:''};
 const planName=id=>{const p=S.planes.get(id);return p?p.nombre:'Sin plan';};
 const planSpeed=p=>p?`${p.bajada}/${p.subida} Mbps`:'';
 function clientHay(c){
-  const hv=S.pv+'.'+S.rv;
-  if(!c._hay||c._hayV!==hv){c._hay=norm([c.codigo,c.nombre,can('dni')?c.dni:'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;}
+  const hv=S.pv+'.'+S.rv,h=cuentaHead(c),hn=h&&h!==c?h.nombre:'';
+  if(!c._hay||c._hayV!==hv||c._hayH!==hn){c._hay=norm([c.codigo,c.nombre,hn,can('dni')?c.dni:'',can('dni')?docDigits(c.dni):'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;c._hayH=hn;}
   return c._hay;
 }
 function visibleSet(){
@@ -21,7 +21,7 @@ function searchClients(q,filter,limit){
   for(const c of S.clientes.values()){
     if(vis&&!vis.has(c.id))continue;
     if(filter&&!filter(c))continue;
-    if(parts.length){const h=clientHay(c);if(!parts.every(p=>h.includes(p)))continue;}
+    if(parts.length){const h=clientHay(c);if(!parts.every(p=>h.includes(p)||(docDigits(p).length>=7&&h.includes(docDigits(p)))))continue;}   /* un CUIT se encuentra con o sin guiones */
     out.push(c);
   }
   out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre)));
@@ -38,10 +38,16 @@ function clientRow(c){
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${billChip(c)}</div></button>`;
+}
+/* en la lista: a qué cuenta pertenece cada servicio */
+function cuentaChip(c){
+  if(!veCuenta())return '';
+  const ms=cuentaMiembros(c);if(ms.length<2)return '';
+  return `<span class="chip info">${ms[0]===c?'Cuenta · '+ms.length+' servicios':'Cuenta: '+esc(ms[0].nombre)}</span>`;
 }
 function mountClientPicker(host,opts){
-  host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;
+  host.innerHTML=`<input type="search" class="cp-in" placeholder="${esc(opts.placeholder||'Buscar por nombre, DNI o CUIT, N° de cliente, teléfono o usuario')}" autocomplete="off" aria-label="Buscar cliente"><div class="list cp-list" style="margin-top:8px"></div>`;
   const inp=$('.cp-in',host),list=$('.cp-list',host);
   const draw=()=>{
     const q=inp.value.trim();
@@ -162,7 +168,7 @@ function bindGeoField(root){
 }
 
 /* ----- ficha ----- */
-function stripInternal(o){const r=Object.assign({},o);delete r.id;delete r._doc;delete r._hay;delete r._hayV;return r;}
+function stripInternal(o){const r=Object.assign({},o);delete r.id;delete r._doc;delete r._hay;delete r._hayV;delete r._hayH;return r;}
 async function saveClient(c,patch){
   const obj=Object.assign(stripInternal(c),patch,{mod:Date.now()});
   await putItem('clientes',clientShard(c.id),c.id,obj);
@@ -183,11 +189,12 @@ function openClient(id){
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     ${deudaAntBlock(c)}
-    <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI',esc(c.dni)):''}
+    ${cuentaBlock(c)}
+    <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI / CUIT / CUIL',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    <div class="actions start">${can('cobrar')&&b.aplica?'<button class="btn primary" type="button" data-act="cobrar">Cobrar</button>':''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&b.aplica?`<button class="btn primary" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&instalado(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div></div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -202,6 +209,12 @@ function openClient(id){
       else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
       else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
+      else if(a.dataset.act==='cuenta-abrir')openClient(a.dataset.id);
+      else if(a.dataset.act==='cuenta-ubic')openGeoQuick(a.dataset.id);
+      else if(a.dataset.act==='cuenta-editar')openClientForm(a.dataset.id);
+      else if(a.dataset.act==='cuenta-add')openCuentaPicker(c.id,'agregar');
+      else if(a.dataset.act==='cuenta-unir')openCuentaPicker(c.id,'unir');
+      else if(a.dataset.act==='cuenta-quitar')quitarDeCuenta(c.id);
       else if(a.dataset.act==='saldar-da')saldarDeudaAnt(c.id);
       else if(a.dataset.act==='orden')openOrderForm({clientId:c.id});
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
@@ -209,6 +222,57 @@ function openClient(id){
       else if(a.dataset.act==='promesa-x')anularPromesa(c.id);
     });
   }});
+}
+/* ----- cuenta unificada en la ficha ----- */
+const veCuenta=()=>can('cobrar')||can('caja')||can('editarClientes');
+function cuentaBlock(c){
+  if(!veCuenta())return '';
+  const ms=cuentaMiembros(c),ed=can('editarClientes');
+  if(ms.length<2){
+    if(!ed)return '';
+    return `<div class="hint">Cuenta unificada: si este cliente tiene varios servicios o sucursales a nombre de una misma empresa, se pueden juntar para cobrarlos y recibirlos en un solo recibo. <span class="actions start" style="display:inline-flex;gap:6px;margin-left:4px"><button class="btn small ghost" type="button" data-act="cuenta-add">Sumarle servicios</button><button class="btn small ghost" type="button" data-act="cuenta-unir">Unir a otra cuenta</button></span></div>`;
+  }
+  const head=ms[0],verPrecio=can('precios')||can('cobrar')||can('caja'),bs=ms.map(m=>billing(m,false));
+  const total=bs.reduce((s,b)=>s+(b.aplica?b.price:0),0),deuda=ms.reduce((s,m,i)=>s+(bs[i].aplica?bs[i].deuda:0),0);
+  const rows=ms.map((m,i)=>`<div class="item" style="cursor:default;grid-template-columns:minmax(0,1fr)${m.id===c.id?';border-color:var(--accent-line)':''}"><div><div class="t" style="overflow-wrap:anywhere">${esc(m.nombre)}</div>
+      <div class="s">${esc(m.dir||'Sin domicilio')}${m.loc?' · '+esc(m.loc):''}</div>
+      <div class="s small">${esc(servicioTxt(m))}${verPrecio&&bs[i].aplica?' · '+esc(fmtMoney(bs[i].price))+'/mes':''}${hasGeo(m)?'':' · sin ubicación'}</div></div>
+      <div class="tags">${m===head?'<span class="chip accent">Principal</span>':''}${estChip(m)}${verPrecio&&bs[i].aplica&&bs[i].deuda>0?`<span class="chip bad">Debe ${esc(fmtMoney(bs[i].deuda))}</span>`:''}</div>
+      <div class="actions start" style="display:flex;flex-wrap:wrap;gap:6px">${m.id===c.id?'':`<button class="btn small" type="button" data-act="cuenta-abrir" data-id="${esc(m.id)}">Abrir</button>`}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="cuenta-ubic" data-id="${esc(m.id)}">${hasGeo(m)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}${can('editarClientes')?`<button class="btn small ghost" type="button" data-act="cuenta-editar" data-id="${esc(m.id)}">Editar domicilio</button>`:''}</div></div>`).join('');
+  return `<div class="card flat"><div class="head-row"><h3>Cuenta unificada · ${esc(head.nombre)}</h3></div>
+    <div class="hint">${ms.length} servicios. Se cobran juntos y sale un solo recibo. Cada servicio conserva su domicilio, su ubicación y su plan. Toda la cuenta sigue el ciclo ${cicloOf(head)} (${esc(cicloTxt(cicloOf(head)))}).${verPrecio?` Total por mes: <b>${esc(fmtMoney(total))}</b>${deuda>0?` · vencido: <b>${esc(fmtMoney(deuda))}</b>`:''}.`:''}</div>
+    <div class="list" style="margin-top:8px">${rows}</div>
+    ${ed?`<div class="actions start" style="margin-top:8px">${c===head?'<button class="btn small" type="button" data-act="cuenta-add">Sumar otro servicio a la cuenta</button>':'<button class="btn small ghost" type="button" data-act="cuenta-quitar">Sacar este servicio de la cuenta</button>'}</div>`:''}</div>`;
+}
+/* guarda el cambio de cuenta y lo deja ya a la vista (la lista llega un instante después) */
+async function cuentaGuardar(m,patch){
+  await saveClient(m,patch);
+  S.clientes.set(m.id,Object.assign({},m,patch,{mod:Date.now()}));dataChanged('clientes');
+}
+/* modo 'agregar': c es la cuenta principal y se elige el servicio que se suma · modo 'unir': c es el servicio y se elige la cuenta a la que va */
+function openCuentaPicker(id,modo){
+  const c=S.clientes.get(id);if(!c)return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede editar clientes','bad');
+  const agregar=modo==='agregar',tiene=x=>(S.cuentaIdx.get(x.id)||[]).length>0;
+  if(!agregar&&tiene(c))return toast('Este cliente es la cuenta principal de otros servicios: no puede pasar a otra cuenta','bad');
+  if(agregar&&c.cuenta&&cuentaHead(c)!==c)return toast('Este servicio ya pertenece a otra cuenta','bad');
+  const filter=x=>x.id!==c.id&&x.estado!=='baja'&&!x.cuenta&&(agregar?!tiene(x):true);
+  openModal({title:agregar?'Sumar un servicio a la cuenta de '+c.nombre:'Unir '+c.nombre+' a una cuenta',html:`<p class="hint">${agregar?'Buscá el servicio (el nombre o parte del nombre) para sumarlo a esta cuenta.':'Buscá la cuenta principal (por ejemplo la de la empresa).'} Se cobran juntos y sale un solo recibo; cada servicio mantiene su domicilio y su ubicación.</p><div id="cu-pick"></div>
+    <div class="actions"><button class="btn ghost" type="button" id="cu-volver">Volver</button></div>`,onMount(el){
+    $('#cu-volver',el).addEventListener('click',()=>openClient(c.id));
+    const pk=mountClientPicker($('#cu-pick',el),{filter,placeholder:agregar?'Buscar el servicio por nombre, calle o CUIT':'Buscar la cuenta por nombre o CUIT',onPick:async x=>{
+      const m=agregar?x:c,h=agregar?c:x;
+      const cambia=cicloOf(m)!==cicloOf(h);
+      if(!await askConfirm(`${m.nombre} pasa a la cuenta de ${h.nombre}: se cobran juntos y sale un solo recibo.`+(cambia?` Su ciclo de cobro cambia del ${cicloOf(m)} al ${cicloOf(h)}, así que cambian sus fechas de vencimiento y de corte.`:''),'Unir a la cuenta'))return openClient(c.id);
+      try{await cuentaGuardar(m,{cuenta:h.id});toast('Servicio sumado a la cuenta');openClient(h.id);}catch(err){dbError(err);}
+    }});pk.focus();
+  }});
+}
+async function quitarDeCuenta(id){
+  const c=S.clientes.get(id);if(!c||!c.cuenta)return;
+  const h=cuentaHead(c);
+  if(!await askConfirm(`${c.nombre} deja la cuenta de ${h&&h!==c?h.nombre:'la empresa'}: vuelve a cobrarse y a recibir recibos por separado. Lo ya cobrado no cambia.`,'Sacar de la cuenta'))return openClient(id);
+  try{await cuentaGuardar(c,{cuenta:null,ciclo:cicloOf(c)});toast('Servicio fuera de la cuenta');openClient(id);}catch(err){dbError(err);}   /* conserva el ciclo con el que venía cobrándose */
 }
 /* ----- deuda anterior en la ficha ----- */
 function deudaAntBlock(c){
@@ -245,7 +309,7 @@ function openGeoQuick(id){
 }
 
 /* ----- reporte del técnico (el texto de WhatsApp con NOMBRE / DNI / IP / PAGO) → datos del cliente y del cobro ----- */
-const REP_KEYS={nombre:'nombre',nombreyapellido:'nombre',cliente:'nombre',dni:'dni',documento:'dni',ip:'ip',pago:'pago',tel:'tel',telefono:'tel',celular:'tel',cel:'tel',whatsapp:'tel',direccion:'dir',domicilio:'dir',dir:'dir',calle:'dir',localidad:'loc',barrio:'loc',plan:'plan'};
+const REP_KEYS={nombre:'nombre',nombreyapellido:'nombre',cliente:'nombre',dni:'dni',documento:'dni',cuit:'dni',cuil:'dni',ip:'ip',pago:'pago',tel:'tel',telefono:'tel',celular:'tel',cel:'tel',whatsapp:'tel',direccion:'dir',domicilio:'dir',dir:'dir',calle:'dir',localidad:'loc',barrio:'loc',plan:'plan'};
 /* "65mil", "65 mil pesos", "$65.000", "65000" → 65000 */
 function parseMonto(t){
   const m=String(t==null?'':t).match(/(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(mil\b|k\b)?/i);if(!m)return null;
@@ -268,7 +332,7 @@ function parseReporte(txt){
     const k=REP_KEYS[norm(m[1]).replace(/[^a-z]/g,'')];if(!k||out[k]!=null)return;
     out[k]=m[2].trim();
   });
-  if(out.dni!=null)out.dni=out.dni.replace(/\D/g,'');
+  if(out.dni!=null)out.dni=fmtDoc(out.dni.replace(/\D/g,''));
   if(out.ip!=null){const ip=out.ip.match(/\d{1,3}(?:\.\d{1,3}){3}/);out.ip=ip?ip[0]:'';}
   if(out.pago!=null)out.pago=parsePago(out.pago);
   return out;
@@ -301,7 +365,7 @@ function openClientForm(id){
       <div class="actions start"><button class="btn small" type="button" id="cf-rep-go">Completar los datos</button></div><div class="hint" id="cf-rep-out"></div></div></details>`:''}
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
-      <div class="grid2">${F('DNI','cf-dni',`<input id="cf-dni" inputmode="numeric" class="mono" value="${esc(c.dni||'')}">`)}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
+      <div class="grid2">${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="${esc(c.dni||'')}">`,'<span id="cf-dni-h">Un CUIT o CUIL se escribe con guiones: 27-23373806-4.</span>')}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
       ${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</fieldset>`:''}
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Domicilio</legend>
       ${full?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
@@ -320,13 +384,17 @@ function openClientForm(id){
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
-      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo">${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`)}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
+      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
+    const docIn=$('#cf-dni',el),docH=$('#cf-dni-h',el);
+    if(docIn&&docH){const dm0=docH.textContent,chk=()=>{const d=docDigits(docIn.value);docH.className='';docH.textContent=dm0;
+      if(d.length===11){docH.className=cuitOk(docIn.value)?'ok':'bad';docH.textContent=cuitOk(docIn.value)?'CUIT o CUIL válido. Se guarda como '+fmtDoc(docIn.value)+'.':'El dígito verificador no coincide: revisá que no falte o sobre algún número.';}
+      else if(d.length>8||(d.length&&d.length<7))docH.className='bad';};docIn.addEventListener('input',chk);chk();}
     const upd=()=>{const t=$('#cf-total',el);if(!t)return;const pv=v('cf-precio');t.textContent='Total por mes: '+fmtMoney(priceOf({planId:v('cf-plan')||null,precio:pv?num(pv):null,extras:$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra)}));};
     const billChanged=()=>{
       if(!old||!full)return false;
@@ -348,12 +416,12 @@ function openClientForm(id){
       if(!got.length&&!repPago){out.className='hint bad';out.textContent='No encontré datos. Pegá el texto con líneas como «NOMBRE: …», «DNI: …», «IP: …» y «PAGO: …».';return;}
       $('#cf-estado',el).value='activo';$('#cf-desde',el).value=addMonths(curMonth(),1);
       const falta=[['cf-tel','teléfono'],['cf-dir','calle y número']].filter(([i])=>!v(i)).map(x=>x[1]);
-      const dup=[...S.clientes.values()].find(x=>(r.dni&&String(x.dni||'').replace(/\D/g,'')===r.dni)||(r.ip&&x.ip===r.ip));
+      const dup=[...S.clientes.values()].find(x=>(r.dni&&docDigits(x.dni)===docDigits(r.dni))||(r.ip&&x.ip===r.ip));
       out.className='hint'+(dup?' bad':'');
       out.textContent='Cargué: '+got.join(', ')+'. Quedó activo y empieza a cobrar en '+monthLabel(addMonths(curMonth(),1))+'.'
         +(repPago?' Pago detectado: '+(METODOS[repPago.metodo]||repPago.metodo).toLowerCase()+' '+fmtMoney(repPago.monto)+' ('+(CONCEPTOS[repPago.concepto]||repPago.concepto).toLowerCase()+'): al guardar se abre el cobro ya completado.':'')
         +(falta.length?' Falta completar: '+falta.join(' y ')+'.':'')
-        +(dup?' Ojo: ya hay un cliente con ese '+(r.dni&&String(dup.dni||'').replace(/\D/g,'')===r.dni?'DNI':'IP')+' ('+dup.nombre+').':'');
+        +(dup?' Ojo: ya hay un cliente con ese '+(r.dni&&docDigits(dup.dni)===docDigits(r.dni)?'DNI o CUIT':'IP')+' ('+dup.nombre+').':'');
     });
     $('#cform',el).addEventListener('submit',async e=>{
       e.preventDefault();
@@ -368,7 +436,7 @@ function openClientForm(id){
         if(cod&&[...S.clientes.values()].some(x=>x.codigo===cod&&x.id!==(old&&old.id)))return toast('Ese N° de cliente ya existe','bad');
         const precio=v('cf-precio');
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
-        Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:v('cf-dni'),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
+        Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
       }
       if(full&&$('#cf-da',el)){
@@ -408,7 +476,7 @@ function openClientForm(id){
 /* ----- vista ----- */
 VIEWS.clientes={
   mount(el){
-    el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
+    el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI o CUIT, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
       ${can('editarClientes')?'<button class="btn primary" type="button" id="cl-new">Nuevo cliente</button>':''}</div>
       <div class="seg" id="cl-seg"></div></div><div id="cl-count" class="hint"></div><div class="list" id="cl-list"></div>`;
     $('#cl-q',el).addEventListener('input',e=>{CL.q=e.target.value;CL.limit=50;this.update();});
