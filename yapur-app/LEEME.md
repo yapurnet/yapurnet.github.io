@@ -154,6 +154,14 @@ La oficina y los técnicos en la calle pueden ver si un cliente **contesta** sin
 - **Consultas:** a 10 segundos son unas 8.600 consultas por día por router (cuentan para el límite del plan gratis; ver abajo). Para bajarlas, cambiá `interval=10s` por `20s` en la programación.
 - **Sin probar en un router real:** el script usa `/tool fetch` y `/ping` de RouterOS 6.4x/7.x, pero **no se pudo correr en un MikroTik desde acá**. La parte del servidor y de la app sí está probada con un router simulado. Si el router dice «not enough permissions», cambiá `read,test` por `read,write,test`; si dice algo de `check-certificate`, borrá ese parámetro. Para ver qué hizo: `/log print where message~"YAPUR"`. Para apagarlo: `/system scheduler remove [find name=yapur-ping]`. No muestra los milisegundos de respuesta: solo cuántos paquetes volvieron.
 
+## Mandar recibos desde la PC con WhatsApp Web (también en Windows 8.1)
+
+- **Cómo:** en el recibo, **Enviar por WhatsApp**. La app copia el recibo como imagen y abre **WhatsApp Web** directo en el chat del cliente (sin la pantalla intermedia de wa.me). Hacés clic en el cuadro de mensaje, **Ctrl+V** y Enter. La pantalla del recibo lo recuerda.
+- **Una sola pestaña:** todos los recibos se abren en la misma pestaña de WhatsApp Web. Si se abriera otra pestaña, WhatsApp Web pediría «Usar aquí» cada vez y apagaría la anterior.
+- **Navegadores viejos (Windows 8.1):** si el navegador no puede copiar imágenes, el recibo **se descarga** como archivo PNG y se abre el chat; ahí se toca el **clip → Fotos y videos** y se elige el archivo descargado. La pantalla lo avisa.
+- **Lo que no se puede:** que el recibo se mande solo desde WhatsApp Web. El navegador no deja pegar ni mandar por su cuenta (y los programas que lo fuerzan están prohibidos por WhatsApp y arriesgan el bloqueo del número): siempre es Ctrl+V + Enter. El envío automático sin tocar nada es el de la **API oficial** (el que ya usan los cobros de los técnicos).
+- **Windows 8.1:** ya no recibe navegadores nuevos (la última versión de Chrome y de Edge es la 109) y la app de WhatsApp para escritorio no funciona ahí: queda WhatsApp Web. **No pude probar WhatsApp Web en ese Windows**: lo primero es abrir web.whatsapp.com en esa PC y ver que cargue y se pueda vincular con el celular.
+
 ## Recibo por WhatsApp automático (cobros del técnico)
 
 Todo lo que cobra un técnico en la calle **genera un recibo** (con su número, a su nombre y en la caja del día) que la oficina ve en **Cobranzas → Caja del día** (cada fila dice «cobró Pedro» y abre el recibo), y **le llega solo al cliente por WhatsApp** apenas el técnico registra el cobro.
