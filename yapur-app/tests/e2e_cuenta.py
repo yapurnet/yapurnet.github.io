@@ -47,6 +47,7 @@ async def main():
 
         # 1) DNI / CUIT / CUIL en el formulario: rótulo, verificador y formato
         await pg.evaluate("openClientForm('man')"); await pg.wait_for_selector('#cf-dni')
+        check('el formulario avisa dónde se juntan las otras conexiones de un cliente', 'Cuenta unificada' in await sheet() and 'otras conexiones' in await sheet())
         lab = await pg.inner_text('label[for=cf-dni]')
         check('el formulario dice «DNI / CUIT / CUIL»', lab.strip() == 'DNI / CUIT / CUIL', lab)
         await pg.fill('#cf-dni', '27- 23373806-5')
@@ -66,9 +67,13 @@ async def main():
         check('buscar el CUIT con guiones o sin nada trae la empresa', await rows('27-23373806-4') == 'man' and await rows('27233738064') == 'man')
 
         # 3) juntar los servicios desde la ficha
-        await pg.evaluate("openClient('man')"); await pg.wait_for_selector('[data-act=cuenta-add]')
-        check('la ficha de un cliente suelto ofrece sumarle servicios', 'Cuenta unificada' in await sheet())
-        await pg.click('[data-act=cuenta-add]'); await pg.wait_for_selector('.cp-in')
+        await pg.evaluate("openClient('man')"); await pg.wait_for_selector('[data-act=cuenta-menu]')
+        check('la ficha de un cliente suelto tiene el botón «Cuenta unificada» junto a Cobrar', (lambda r: 'Cuenta unificada' in r and 'Cobrar' in r)(await pg.evaluate("document.querySelector('[data-act=cuenta-menu]').parentElement.textContent")))
+        if SHOTS: await pg.screenshot(path=os.path.join(SHOTS, 'cuenta-boton.png'))
+        await pg.click('[data-act=cuenta-menu]'); await pg.wait_for_selector('#cm-add')
+        check('el menú explica para qué sirve y ofrece los dos caminos', 'varias conexiones' in await sheet() and 'un solo recibo' in await sheet() and await pg.locator('#cm-unir').count() == 1, await sheet())
+        if SHOTS: await pg.screenshot(path=os.path.join(SHOTS, 'cuenta-menu.png'))
+        await pg.click('#cm-add'); await pg.wait_for_selector('.cp-in')
         await pg.fill('.cp-in', 'pachilla')
         names = await pg.evaluate("[...document.querySelectorAll('.cp-list [data-pick] .t')].map(e => e.textContent)")
         check('el buscador ofrece las tres conexiones (y no a la empresa misma)', len(names) == 3 and not any('Manaos' in n for n in names), names)
@@ -81,8 +86,9 @@ async def main():
         await pg.wait_for_selector('.sheet-body h3')
         check('vuelve a la ficha de la empresa con la cuenta armada', 'Cuenta unificada · Manaos distribuidora' in await sheet() and '2 servicios' in await sheet(), (await sheet())[:200])
         # desde el otro lado: un servicio de ciclo 2 se une a la cuenta (cambia su ciclo: lo avisa)
-        await pg.evaluate("openClient('pe')"); await pg.wait_for_selector('[data-act=cuenta-unir]')
-        await pg.click('[data-act=cuenta-unir]'); await pg.wait_for_selector('.cp-in'); await pg.fill('.cp-in', 'manaos')
+        await pg.evaluate("openClient('pe')"); await pg.wait_for_selector('[data-act=cuenta-menu]')
+        await pg.click('[data-act=cuenta-menu]'); await pg.wait_for_selector('#cm-unir'); await pg.click('#cm-unir')
+        await pg.wait_for_selector('.cp-in'); await pg.fill('.cp-in', 'manaos')
         await pg.wait_for_selector('.cp-list [data-pick=man]'); await pg.evaluate("document.querySelector('.cp-list [data-pick=man]').click()")
         await pg.wait_for_selector('[data-act=yes]')
         msg = await sheet()

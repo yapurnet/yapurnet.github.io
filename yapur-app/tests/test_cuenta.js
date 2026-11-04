@@ -77,7 +77,7 @@ t('la lista marca la cuenta: «Cuenta: empresa» en el servicio y «Cuenta · 4 
 // la ficha muestra la cuenta con la dirección y la ubicación de cada servicio
 const blk=cuentaBlock(S.clientes.get('pe'));
 t('la ficha lista los servicios con domicilio y ubicación',blk.includes('Cuenta unificada')&&blk.includes('España 450')&&blk.includes('Sin domicilio')&&blk.includes('Cargar ubicación')&&blk.includes('4 servicios'),blk.slice(0,300));
-t('la ficha de un cliente suelto ofrece sumarle servicios o unirlo a otra cuenta',cuentaBlock(S.clientes.get('otro')).includes('data-act="cuenta-add"')&&cuentaBlock(S.clientes.get('otro')).includes('data-act="cuenta-unir"'));
+t('un cliente suelto no muestra bloque en la ficha (tiene su botón «Cuenta unificada»)',cuentaBlock(S.clientes.get('otro'))==='');
 S.perms.editarClientes=false;S.perms.cobrar=false;S.perms.caja=false;
 t('quien no cobra ni edita no ve la cuenta',cuentaBlock(S.clientes.get('pe'))===''&&cuentaChip(S.clientes.get('pe'))==='');
 S.perms.editarClientes=true;S.perms.cobrar=true;S.perms.caja=true;
