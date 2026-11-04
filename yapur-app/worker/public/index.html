@@ -4295,7 +4295,7 @@ function mandarReciboWA(ev,d,tel,href){
   const via=reciboVia(),afuera=()=>NET.openExternal(href);
   if(!via){if(window.YapurApp){ev.preventDefault();afuera();}return;}   /* sin imagen posible: el enlace con el texto del recibo (en el APK lo abre el puente) */
   ev.preventDefault();
-  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.emisor.razon||'')+' · '+fmtMoney(d.total);
+  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total);   /* el texto que acompaña la imagen dice a nombre de quién es: el abonado */
   try{
     const cv=receiptCanvas(d);
     if(via==='nativo'){
@@ -4916,7 +4916,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='2b4641d948';
+const BUILD='329411bce0';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

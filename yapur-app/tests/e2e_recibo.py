@@ -100,7 +100,7 @@ async def main():
         await n1.evaluate("openReceipt('R261102-J2R')"); await n1.wait_for_selector('#rc-wa')
         await n1.click('#rc-wa')
         calls = await n1.evaluate('window.__calls')
-        check('en el APK, «Enviar por WhatsApp» le da al celular la imagen PNG del recibo con el número del cliente', len(calls) == 1 and calls[0][0] == 'shareImage' and calls[0][1] == 'Recibo-R261102-J2R.png' and calls[0][2].startswith('iVBORw0KGgo') and calls[0][3] > 5000 and calls[0][4] == '5493844562605' and 'R261102-J2R' in calls[0][5] and '$' in calls[0][5], calls)
+        check('en el APK, «Enviar por WhatsApp» le da al celular la imagen PNG del recibo con el número del cliente y, de texto, el nombre del abonado (no el del emisor)', len(calls) == 1 and calls[0][0] == 'shareImage' and calls[0][1] == 'Recibo-R261102-J2R.png' and calls[0][2].startswith('iVBORw0KGgo') and calls[0][3] > 5000 and calls[0][4] == '5493844562605' and 'R261102-J2R' in calls[0][5] and '$' in calls[0][5] and 'Saslaver Ana Fiorela' in calls[0][5] and 'YAPUR Miguel' not in calls[0][5], calls)
         check('y no abre el enlace con el texto largo', not any(c[0] == 'openUrl' for c in calls), calls)
         await n1.evaluate("window.__calls.length = 0; window.__res = 'No se pudo abrir WhatsApp.'")
         await n1.click('#rc-wa')
