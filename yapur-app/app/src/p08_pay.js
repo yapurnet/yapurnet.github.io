@@ -176,7 +176,7 @@ function mandarReciboWA(ev,d,tel,href){
   const via=reciboVia(),afuera=()=>NET.openExternal(href);
   if(!via){if(window.YapurApp){ev.preventDefault();afuera();}return;}   /* sin imagen posible: el enlace con el texto del recibo (en el APK lo abre el puente) */
   ev.preventDefault();
-  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.emisor.razon||'')+' · '+fmtMoney(d.total);
+  const nombre='Recibo-'+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap='Recibo '+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total);   /* el texto que acompaña la imagen dice a nombre de quién es: el abonado */
   try{
     const cv=receiptCanvas(d);
     if(via==='nativo'){
