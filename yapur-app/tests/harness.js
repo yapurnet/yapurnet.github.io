@@ -16,7 +16,8 @@ async function start(opt) {
   const port = opt.port || 20000 + Math.floor(Math.random() * 20000);
   const args = ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', dir, '--inspector-port', String(port + 1)];
   if (opt.code) args.push('--var', 'CODIGO_INSTALACION:' + opt.code);
-  for (const [k, v] of Object.entries(opt.vars || {})) args.push('--var', k + ':' + v);
+  /* en las pruebas los empleados entran sin pedir aprobación del equipo (salvo que la prueba lo active con DISP_APROBAR:1) */
+  for (const [k, v] of Object.entries(Object.assign({ DISP_APROBAR: '0' }, opt.vars || {}))) args.push('--var', k + ':' + v);
   const p = spawn(findWrangler(), args, { cwd: WORKER_DIR, env: Object.assign({}, process.env, { CI: '1', WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1' }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   p.stdout.on('data', d => out += d); p.stderr.on('data', d => out += d);

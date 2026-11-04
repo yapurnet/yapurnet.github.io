@@ -206,6 +206,7 @@ VIEWS.ajustes={
     <div class="card"><div class="head-row"><h2>Usuarios y accesos</h2><button class="btn primary" type="button" id="aj-newp">Nuevo usuario</button></div>
       <p class="muted small">Cada persona entra con su usuario y su clave. Vos elegís qué puede ver y hacer. Los técnicos aparecen para asignarles órdenes.</p>
       <div class="list" id="aj-users"></div></div>
+    ${dispCard()}
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-cero">Empezar a cobrar de cero</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
@@ -214,6 +215,7 @@ VIEWS.ajustes={
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
+      <dt>Equipos</dt><dd>Cada teléfono o navegador desde el que entra alguien queda registrado (en «Dispositivos»). Un empleado en un equipo nuevo no ve nada hasta que lo aprobás, y podés bloquear cualquier equipo en el momento.</dd>
       <dt>Permisos</dt><dd>Los controla el servidor, no solo la pantalla: un técnico no recibe los pagos ni puede cambiar precios aunque pruebe con otra herramienta.</dd>
       <dt>Pagos</dt><dd>Un pago registrado no se edita: solo se anula, y queda anotado quién lo hizo.</dd></dl></div>`;
     /* índice: saltar a cada sección sin recorrer toda la pantalla */
@@ -256,6 +258,7 @@ VIEWS.ajustes={
     $('#aj-fer-list',el).addEventListener('click',async e=>{
       const b=e.target.closest('[data-fer-del]');if(!b)return;
       try{await saveAjustes({feriados:feriadosList().filter(x=>x.f!==b.dataset.ferDel)});toast('Feriado quitado');}catch(err){dbError(err);}});
+    dispMount(el);
     $('#aj-newp',el).addEventListener('click',()=>openUserForm(null));
     $('#aj-users',el).addEventListener('click',async e=>{
       const b=e.target.closest('[data-u-act]');if(!b)return;

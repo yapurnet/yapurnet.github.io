@@ -190,7 +190,7 @@ tr:last-child td{border-bottom:0}
 
 /* ---------- cuenta, conexión ---------- */
 button.chip{font-family:inherit;cursor:pointer}
-button.chip[hidden],.netbar[hidden]{display:none}
+button.chip[hidden],.netbar[hidden],.devbar[hidden]{display:none}
 .jrbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-inline:-16px;padding:8px 16px;font-size:14px;line-height:1.35;background:var(--ok-soft);color:var(--ok);border-bottom:1px solid var(--line)}
 .jrbar[hidden]{display:none}
 .jrbar b{font-weight:700}
@@ -205,6 +205,7 @@ button.chip[hidden],.netbar[hidden]{display:none}
 .dias{display:flex;flex-wrap:wrap;gap:6px}
 .dias label{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--line);border-radius:99px;background:var(--surface);font-size:14px;cursor:pointer}
 .netbar{margin-inline:-16px;padding:6px 16px;background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid var(--line)}
+.devbar{display:block;width:calc(100% + 32px);border:0;border-bottom:1px solid var(--line);font-family:inherit;cursor:pointer;background:var(--bad-soft);color:var(--bad)}
 [hidden]{display:none!important}
 /* ---------- aviso de actualización ---------- */
 .upd{position:fixed;z-index:70;left:0;right:0;top:var(--sat);display:flex;flex-direction:column;gap:1px;background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
@@ -300,6 +301,7 @@ button.port:hover{border-color:var(--accent-line)}
   <div class="who"><button type="button" class="chip accent" id="roleChip" title="Mi cuenta" hidden>…</button><button class="btn small ghost" id="viewAsBtn" type="button" hidden>Ver como…</button></div>
 </header>
 <div id="netBar" class="netbar" hidden></div>
+<button id="devBar" class="netbar devbar" type="button" hidden></button>
 <div id="jrBar" class="jrbar" role="status" hidden></div>
 <nav class="tabs" id="tabs" role="tablist" aria-label="Secciones"></nav>
 <main id="view" class="wrap"><div class="empty"><b>Cargando…</b><span>Conectando con el servidor.</span></div></main>
@@ -726,6 +728,14 @@ const NET=(function(){
   const bridge=window.YapurApp||null;
   const native=!!bridge;
   const base='';
+  /* identificador de ESTE equipo: se genera una vez y se conserva aunque se cierre la sesión; el servidor lo usa para saber desde qué equipos entra cada persona */
+  const DID_OK=/^[A-Za-z0-9_-]{16,64}$/;
+  let did=lsGet('did')||'';
+  if(!DID_OK.test(did)){
+    try{const a=new Uint8Array(18);crypto.getRandomValues(a);did=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
+    catch(e){did=(Date.now().toString(36)+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2)).replace(/[^a-z0-9]/g,'').padEnd(24,'x').slice(0,40);}
+    lsSet('did',did);
+  }
   let token=lsGet('tok')||'';
   let me=null;try{me=JSON.parse(lsGet('me')||'null');}catch(e){}
   if(!token)me=null;
@@ -734,7 +744,7 @@ const NET=(function(){
   let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
-  const handlers={status:[],me:[],kick:[]};
+  const handlers={status:[],me:[],kick:[],disp:[]};
   const emit=(k,v)=>handlers[k].forEach(f=>{try{f(v);}catch(e){console.error(e);}});
 
   const isPlain=o=>o&&typeof o==='object'&&!Array.isArray(o);
@@ -754,7 +764,7 @@ const NET=(function(){
     const tm=ctl?setTimeout(()=>ctl.abort(),opt.timeout||25000):null;
     let r;
     try{
-      r=await fetch(base+path,{method,signal:ctl?ctl.signal:undefined,headers:Object.assign({'Content-Type':'application/json'},token&&!opt.anon?{Authorization:'Bearer '+token}:{}),body:body===undefined?undefined:JSON.stringify(body)});
+      r=await fetch(base+path,{method,signal:ctl?ctl.signal:undefined,headers:Object.assign({'Content-Type':'application/json','X-Did':did},token&&!opt.anon?{Authorization:'Bearer '+token}:{}),body:body===undefined?undefined:JSON.stringify(body)});
     }catch(e){throw netErr();}
     finally{if(tm)clearTimeout(tm);}
     let j=null;try{j=await r.json();}catch(e){}
@@ -781,8 +791,8 @@ const NET=(function(){
     closeStream();synced=false;fresh=false;started=false;for(const k of Object.keys(data))delete data[k];
     kvClear();
   }
-  async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
-  async function setup(b){const j=await api('POST','/api/setup',b,{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
+  async function login(usuario,clave){const j=await api('POST','/api/login',{usuario,clave,did},{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
+  async function setup(b){const j=await api('POST','/api/setup',Object.assign({did},b),{anon:true,noKick:true});setSession(j.token,j.me);return j.me;}
   async function logout(){try{if(token)await api('POST','/api/logout',{},{noKick:true,timeout:5000});}catch(e){}clearSession();}
   async function status(){return api('GET','/api/status',undefined,{anon:true,noKick:true,timeout:9000});}
   /* ----- copia local para abrir sin señal (los pagos no se guardan en el equipo) ----- */
@@ -864,6 +874,7 @@ const NET=(function(){
     s.addEventListener('ping',seen);
     s.addEventListener('doc',ev=>{seen();let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);});
     s.addEventListener('me',ev=>{seen();try{const m=JSON.parse(ev.data);me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}});
+    s.addEventListener('disp',ev=>{seen();try{emit('disp',JSON.parse(ev.data));}catch(e){}});
     s.addEventListener('kick',()=>{lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');});
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);
@@ -979,7 +990,7 @@ const NET=(function(){
     },true);
   }
   return {
-    native,get base(){return base;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
+    native,get base(){return base;},get did(){return did;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
     api,init,bring,login,setup,logout,status,saveFile,
     get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
     openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},
@@ -2326,6 +2337,7 @@ VIEWS.ajustes={
     <div class="card"><div class="head-row"><h2>Usuarios y accesos</h2><button class="btn primary" type="button" id="aj-newp">Nuevo usuario</button></div>
       <p class="muted small">Cada persona entra con su usuario y su clave. Vos elegís qué puede ver y hacer. Los técnicos aparecen para asignarles órdenes.</p>
       <div class="list" id="aj-users"></div></div>
+    ${dispCard()}
     <div class="card"><h2>Clientes y cobranzas</h2><p class="muted small">Importá tu lista actual desde un CSV y descargá copias de resguardo cuando quieras.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-imp">Importar clientes (CSV)</button><button class="btn" type="button" id="aj-prb">Subir precios en bloque</button><button class="btn" type="button" id="aj-cero">Empezar a cobrar de cero</button><button class="btn" type="button" id="aj-exc">Descargar clientes</button><button class="btn" type="button" id="aj-exp">Descargar pagos</button></div></div>
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
@@ -2334,6 +2346,7 @@ VIEWS.ajustes={
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
+      <dt>Equipos</dt><dd>Cada teléfono o navegador desde el que entra alguien queda registrado (en «Dispositivos»). Un empleado en un equipo nuevo no ve nada hasta que lo aprobás, y podés bloquear cualquier equipo en el momento.</dd>
       <dt>Permisos</dt><dd>Los controla el servidor, no solo la pantalla: un técnico no recibe los pagos ni puede cambiar precios aunque pruebe con otra herramienta.</dd>
       <dt>Pagos</dt><dd>Un pago registrado no se edita: solo se anula, y queda anotado quién lo hizo.</dd></dl></div>`;
     /* índice: saltar a cada sección sin recorrer toda la pantalla */
@@ -2376,6 +2389,7 @@ VIEWS.ajustes={
     $('#aj-fer-list',el).addEventListener('click',async e=>{
       const b=e.target.closest('[data-fer-del]');if(!b)return;
       try{await saveAjustes({feriados:feriadosList().filter(x=>x.f!==b.dataset.ferDel)});toast('Feriado quitado');}catch(err){dbError(err);}});
+    dispMount(el);
     $('#aj-newp',el).addEventListener('click',()=>openUserForm(null));
     $('#aj-users',el).addEventListener('click',async e=>{
       const b=e.target.closest('[data-u-act]');if(!b)return;
@@ -2418,6 +2432,89 @@ VIEWS.ajustes={
     if(sig!==ACC.sig){ACC.sig=sig;if(ACC.loaded)loadUsers();}
   }
 };
+
+/* ===== equipos: desde qué teléfonos y navegadores entra cada persona =====
+   El servidor registra cada equipo (modelo, app o navegador, IP, lugar aproximado, primer y último uso). Un empleado que entra desde un
+   equipo nuevo queda «esperando aprobación» y no ve nada hasta que el administrador lo aprueba; cualquier equipo se puede bloquear en el acto. */
+const DISP={lista:[],requiere:true,pend:0,loaded:false,loading:false,visto:0};
+const dispFecha=ts=>{if(!ts)return '—';const d=new Date(ts);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());};
+const DISP_ESTADO={pend:['warn','Esperando tu aprobación'],ok:['ok','Autorizado'],bloq:['bad','Bloqueado']};
+
+/* aviso de arriba (solo el administrador): cuántos equipos esperan */
+function dispBar(){
+  const b=$('#devBar');if(!b)return;
+  const n=S.realRole==='admin'?DISP.pend:0;
+  b.hidden=!n;
+  if(n)b.textContent=n===1?'1 equipo pide entrar y espera tu aprobación. Tocá para verlo.':n+' equipos piden entrar y esperan tu aprobación. Tocá para verlos.';
+}
+async function dispRefresh(){
+  if(S.realRole!=='admin'||DISP.loading)return;
+  DISP.loading=true;
+  try{const j=await NET.api('GET','/api/dispositivos');Object.assign(DISP,{lista:j.lista,requiere:j.requiere,pend:j.pend,loaded:true});}
+  catch(e){console.error(e);}
+  DISP.loading=false;dispBar();dispRender();
+}
+/* llegó el aviso en vivo de un equipo nuevo */
+async function dispAviso(d){
+  if(S.realRole!=='admin')return;
+  const antes=new Set(DISP.lista.filter(x=>x.estado==='pend').map(x=>x.id));
+  await dispRefresh();
+  const nuevo=DISP.lista.find(x=>x.estado==='pend'&&!antes.has(x.id));
+  if(nuevo)toast(nuevo.nombre+' pide entrar desde '+(nuevo.label||'un equipo nuevo'),'bad');
+}
+function dispAbrir(){
+  showTab('ajustes');
+  setTimeout(()=>{const l=$('#aj-disp-list'),c=l&&l.closest('.card');if(c)c.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});},60);
+}
+function dispItem(x){
+  const [cls,txt]=DISP_ESTADO[x.estado]||['',x.estado];
+  const quien=esc(x.nombre)+' · '+esc(ROLE_NAME[x.role]||x.role||'')+' · <span class="mono">'+esc(x.usuario)+'</span>';
+  const donde=[x.ip&&'IP <span class="mono">'+esc(x.ip)+'</span>',x.geo&&esc(x.geo)].filter(Boolean).join(' · ');
+  const uso=x.estado==='pend'?'Pidió entrar: '+dispFecha(x.creado):'Primer uso: '+dispFecha(x.creado)+' · Último uso: '+dispFecha(x.visto);
+  const b=(act,l,c)=>`<button class="btn small${c?' '+c:''}" type="button" data-disp="${esc(x.id)}" data-disp-act="${act}">${l}</button>`;
+  const botones=x.estado==='pend'?b('aprobar','Aprobar','primary')+b('bloquear','Bloquear','danger')
+    :x.estado==='bloq'?b('aprobar','Permitir de nuevo')+b('quitar','Quitar de la lista')
+    :(x.actual?'':b('bloquear','Bloquear','danger')+b('quitar','Cerrar sesión y quitar'));
+  return `<div class="item" style="cursor:default"><div><div class="t">${esc(x.label||'Equipo sin datos')}${x.actual?' <span class="muted small">(este equipo)</span>':''}</div>
+    <div class="s">${quien}<br>${donde||'<span class="muted">Sin datos de ubicación</span>'}<br>${uso}${x.cod?' · Código <span class="mono">'+esc(x.cod)+'</span>':''}</div></div>
+    <div class="side"><span class="chip ${cls}">${txt}</span>${x.estado==='ok'&&x.sesion?'<span class="chip info">Con sesión abierta</span>':''}</div>
+    ${botones?`<div class="tags">${botones}</div>`:''}</div>`;
+}
+function dispRender(){
+  const l=$('#aj-disp-list');if(!l)return;
+  const req=$('#aj-disp-req');if(req)req.checked=!!DISP.requiere;
+  if(!DISP.loaded){l.innerHTML='<div class="hint">Cargando…</div>';return;}
+  l.innerHTML=DISP.lista.map(dispItem).join('')||'<div class="empty"><b>Todavía no hay equipos registrados</b><p>Aparecen cuando alguien entra con su usuario.</p></div>';
+}
+/* tarjeta de Ajustes */
+function dispCard(){
+  return `<div class="card"><div class="head-row"><h2>Dispositivos</h2><button class="btn small" type="button" id="aj-disp-ref">Actualizar</button></div>
+    <p class="muted small">Cada teléfono o navegador desde el que alguien entra con su usuario queda registrado: modelo, si es la app o el navegador, IP, lugar aproximado y cuándo lo usó. Un empleado que entra desde un equipo nuevo <b>no ve nada hasta que lo aprobás</b>, y vos podés bloquear cualquier equipo y se le cierra la sesión en el momento.</p>
+    <label class="per"><input type="checkbox" id="aj-disp-req"><span class="grow">Pedir mi aprobación cuando un empleado entra desde un equipo nuevo<br><span class="small muted">Recomendado. Si lo apagás, los equipos nuevos entran solos pero igual quedan en esta lista. Vos (administrador) nunca necesitás aprobación.</span></span></label>
+    <div class="list" id="aj-disp-list" style="margin-top:10px"></div>
+    <p class="small muted" style="margin:10px 0 0">La ubicación sale de la IP: en datos móviles muestra la ciudad del operador y puede no coincidir con donde está la persona. La app es también un link web, así que no se puede impedir que alguien la abra: lo que se controla es quién <b>entra</b> con una cuenta.</p></div>`;
+}
+function dispMount(el){
+  dispRender();dispRefresh();
+  $('#aj-disp-ref',el).addEventListener('click',()=>dispRefresh());
+  $('#aj-disp-req',el).addEventListener('change',async e=>{
+    const v=e.target.checked;
+    try{const j=await NET.api('PATCH','/api/dispositivos',{requiere:v});Object.assign(DISP,{lista:j.lista,requiere:j.requiere,pend:j.pend});dispBar();dispRender();toast(v?'Se pide tu aprobación para los equipos nuevos':'Apagado: los equipos nuevos entran solos');}
+    catch(err){e.target.checked=!v;toast(err.network?'No se pudo conectar':err.message,'bad');}
+  });
+  $('#aj-disp-list',el).addEventListener('click',async e=>{
+    const b=e.target.closest('[data-disp-act]');if(!b)return;
+    const id=b.dataset.disp,act=b.dataset.dispAct,x=DISP.lista.find(d=>d.id===id);if(!x)return;
+    if(act==='bloquear'&&!await askConfirm('¿Bloquear este equipo? Se le cierra la sesión en el momento y no puede volver a entrar con nadie.\n\n'+(x.label||'Equipo')+' · '+x.nombre,'Bloquear'))return;
+    if(act==='quitar'&&!await askConfirm('¿Quitar este equipo de la lista? Se cierra su sesión. Si vuelve a entrar, vas a tener que aprobarlo de nuevo.','Quitar'))return;
+    b.disabled=true;
+    try{
+      const j=await NET.api('POST','/api/dispositivos/'+encodeURIComponent(id),{accion:act});
+      Object.assign(DISP,{lista:j.lista,requiere:j.requiere,pend:j.pend});dispBar();dispRender();
+      toast(act==='aprobar'?'Equipo aprobado: ya puede entrar':act==='bloquear'?'Equipo bloqueado':'Equipo quitado');
+    }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar':err.message,'bad');dispRefresh();}
+  });
+}
 
 /* ===== importar y exportar CSV ===== */
 function parseCsv(text){
@@ -4819,7 +4916,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='cca2fd9868';
+const BUILD='2b4641d948';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -5040,7 +5137,18 @@ function showLogin(flash){
     if(!u||!p)return toast('Escribí tu usuario y tu clave','bad');
     const b=$('button[type=submit]',el);b.disabled=true;b.textContent='Entrando…';
     try{await NET.login(u,p);lsSet('lastUser',u.toLowerCase());location.reload();}
-    catch(err){b.disabled=false;b.textContent='Entrar';toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');$('#lg-pass',el).value='';}
+    catch(err){
+      b.disabled=false;b.textContent='Entrar';$('#lg-pass',el).value='';
+      if(err.code==='device_pending'||err.code==='device_blocked'){
+        /* el equipo no está autorizado: se explica en pantalla (no en un aviso que se va) y se da el código para que el administrador lo reconozca */
+        const cod=String(NET.did||'').slice(0,6).toUpperCase(),pend=err.code==='device_pending';
+        let n=$('#lg-dev',el);if(!n){n=document.createElement('div');n.id='lg-dev';n.className='notice '+(pend?'warn':'bad');$('#lg-form',el).before(n);}
+        n.innerHTML=pend?`<b>Este equipo todavía no está autorizado.</b><br>Avisale al administrador que estás intentando entrar desde este equipo (código <span class="mono">${esc(cod)}</span>). Cuando lo apruebe, volvé a tocar «Entrar».`
+          :`<b>Este equipo fue bloqueado.</b><br>Consultá con el administrador (código <span class="mono">${esc(cod)}</span>).`;
+        return;
+      }
+      toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');
+    }
   });
 }
 function showSetup(){
@@ -5087,6 +5195,8 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   NET.on('kick',()=>location.reload());
   NET.on('me',onMeChanged);
   NET.on('status',updateNetBar);
+  NET.on('disp',dispAviso);
+  const devBar=$('#devBar');if(devBar)devBar.addEventListener('click',dispAbrir);
   let st;
   try{st=await NET.init();}catch(e){console.error(e);st={state:'noserver',error:e};}
   if(st.state!=='ready'){showAuth(st.state,st);return;}
@@ -5102,6 +5212,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
   S.ready=true;refreshAll();updateNetBar();
+  dispRefresh();
   ubicInit().then(jornadaInit,jornadaInit);
 })();
 
