@@ -247,7 +247,11 @@ function guard(u, p, coll, existing, patch, ctx) {
 
 /* ----- red: cajas NAP y botellas de empalme (se guardan juntas en red/puntos, un registro por punto) ----- */
 const RED_TIPOS = ['nap', 'empalme'];
-const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod'];
+const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
+/* solo de las botellas de empalme: qué fibra es, cuántos pelos tiene y de a cuántos por tubo, qué PON están vivos, qué hay que hacer y qué lleva cada pelo */
+const EMP_KEYS = ['fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
+const PELO_ESTADOS = ['libre', 'empalmado', 'reservado', 'danado'];
+const PELO_KEYS = ['e', 'p', 'a', 'n'];   // estado, PON que lleva, caja o botella a la que lleva, nota
 const isNum = v => typeof v === 'number' && isFinite(v);
 function guardRed(u, p, old, items) {
   for (const id of Object.keys(items)) {
@@ -270,6 +274,34 @@ function guardRed(u, p, old, items) {
     if ('puertos' in nw && nw.puertos !== null && !(Number.isInteger(nw.puertos) && nw.puertos >= 1 && nw.puertos <= 288)) return 'Los puertos tienen que ser un número entre 1 y 288.';
     if ('padre' in nw && nw.padre !== null && (typeof nw.padre !== 'string' || !ID_RE.test(nw.padre) || nw.padre === id)) return 'El punto del que sale no es válido.';
     for (const k of ['ref', 'notas']) if (k in nw && nw[k] !== null && (typeof nw[k] !== 'string' || nw[k].length > 500)) return 'El texto es demasiado largo.';
+    if (EMP_KEYS.some(k => k in nw)) {
+      if (tipo !== 'empalme') return 'Los datos de pelos y PON son solo de las botellas de empalme.';
+      const e = guardEmpalme(id, nw);
+      if (e) return e;
+    }
+  }
+  return null;
+}
+function guardEmpalme(id, nw) {
+  if ('fibra' in nw && nw.fibra !== null && (typeof nw.fibra !== 'string' || nw.fibra.length > 120)) return 'La descripción de la fibra es demasiado larga (hasta 120 letras).';
+  if ('hacer' in nw && nw.hacer !== null && (typeof nw.hacer !== 'string' || nw.hacer.length > 500)) return 'El texto de «qué hay que hacer» es demasiado largo.';
+  if ('hilos' in nw && nw.hilos !== null && !(Number.isInteger(nw.hilos) && nw.hilos >= 1 && nw.hilos <= 288)) return 'Los pelos de la fibra tienen que ser un número entre 1 y 288.';
+  if ('xtubo' in nw && nw.xtubo !== null && !(Number.isInteger(nw.xtubo) && nw.xtubo >= 0 && nw.xtubo <= 48)) return 'Los pelos por tubo no son válidos.';
+  if ('pons' in nw && nw.pons !== null) {
+    if (!Array.isArray(nw.pons) || nw.pons.length > 32 || nw.pons.some(n => !(Number.isInteger(n) && n >= 1 && n <= 32)) || new Set(nw.pons).size !== nw.pons.length) return 'Los PON vivos no son válidos.';
+  }
+  if ('pelos' in nw && nw.pelos !== null) {
+    if (!isPlain(nw.pelos)) return 'Los pelos no son válidos.';
+    for (const k of Object.keys(nw.pelos)) {
+      if (!/^[1-9]\d{0,2}$/.test(k) || Number(k) > 288) return 'Número de pelo inválido: ' + k + '.';
+      const x = nw.pelos[k];
+      if (x === null) continue;
+      if (!isPlain(x) || Object.keys(x).some(q => !PELO_KEYS.includes(q))) return 'Los datos del pelo ' + k + ' no son válidos.';
+      if ('e' in x && !PELO_ESTADOS.includes(x.e)) return 'El estado del pelo ' + k + ' no es válido.';
+      if ('p' in x && x.p !== null && !(Number.isInteger(x.p) && x.p >= 1 && x.p <= 32)) return 'El PON del pelo ' + k + ' no es válido.';
+      if ('a' in x && x.a !== null && (typeof x.a !== 'string' || !ID_RE.test(x.a) || x.a === id)) return 'A dónde lleva el pelo ' + k + ' no es válido.';
+      if ('n' in x && x.n !== null && (typeof x.n !== 'string' || x.n.length > 120)) return 'La nota del pelo ' + k + ' es demasiado larga (hasta 120 letras).';
+    }
   }
   return null;
 }
