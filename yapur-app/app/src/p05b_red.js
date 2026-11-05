@@ -1,6 +1,22 @@
 /* ===== red: cajas NAP y botellas de empalme ===== */
 const RED={q:'',tipo:'todos',sort:'nombre',me:null,limit:60};
 const RED_TIPO={nap:'Caja NAP',empalme:'Botella de empalme'};
+/* botellas de empalme: los PON (PON 1 = VLAN 41 … PON 8 = VLAN 48), los estados de un pelo y los colores de la fibra (código de 12 colores) */
+const PON_LISTA=[1,2,3,4,5,6,7,8];
+const ponTxt=n=>'PON '+n+' (VLAN '+(40+n)+')';
+const PELO_EST={libre:'Libre',empalmado:'Empalmado',reservado:'Reservado',danado:'Dañado'};
+const FIBRA_COL=[['Azul','#2f6fdc'],['Naranja','#f08a24'],['Verde','#2e9e4f'],['Marrón','#8a5a2b'],['Gris','#8c96a3'],['Blanco','#f2f4f7'],['Rojo','#d64545'],['Negro','#1f2328'],['Amarillo','#e8c825'],['Violeta','#8a4fd0'],['Rosa','#ee7fb0'],['Celeste','#3cc0d8']];
+const peloEntry=(p,n)=>{const x=p&&p.pelos&&p.pelos[n];return x&&typeof x==='object'?x:null;};
+const peloEst=(p,n)=>{const x=peloEntry(p,n);return x&&PELO_EST[x.e]?x.e:'libre';};
+const pelosUsados=p=>Object.keys(p.pelos||{}).filter(n=>peloEst(p,n)!=='libre'&&n<=(p.hilos||288)).length;
+/* color del pelo y del tubo: xt = pelos por tubo (0 = no mostrar colores) */
+function peloInfo(n,xt){
+  if(!(xt>0))return {n,color:null,tubo:0,tuboCol:null};
+  const tubo=Math.floor((n-1)/xt)+1;
+  return {n,color:FIBRA_COL[((n-1)%xt)%12],tubo,tuboCol:FIBRA_COL[(tubo-1)%12]};
+}
+const xtuboDe=p=>p.xtubo==null?12:p.xtubo;
+const fdot=c=>c?`<i class="fdot" style="background:${c[1]}" title="${esc(c[0])}"></i>`:'';
 const redName=id=>{const p=id&&S.red.get(id);return p?p.nombre:'';};
 const redCmp=(a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true});
 /* distancia en metros entre dos puntos con lat/lng (fórmula del haversine) */
@@ -79,7 +95,7 @@ function bindNapField(root,selfId){
 /* ----- lista ----- */
 function redRow(p,d){
   const nap=p.tipo==='nap',u=nap?napUsed(p.id):0,kids=redKids(p.id).length,par=p.padre?redName(p.padre):'';
-  const use=nap?(p.puertos?`<span class="chip ${u>=p.puertos?'bad':'ok'}">${u}/${p.puertos} puertos</span>`:`<span class="chip">${u} ${u===1?'cliente':'clientes'}</span>`):(kids?`<span class="chip info">Alimenta ${kids}</span>`:'');
+  const use=nap?(p.puertos?`<span class="chip ${u>=p.puertos?'bad':'ok'}">${u}/${p.puertos} puertos</span>`:`<span class="chip">${u} ${u===1?'cliente':'clientes'}</span>`):[kids?`<span class="chip info">Alimenta ${kids}</span>`:'',...(p.pons||[]).map(n=>`<span class="chip ok">PON ${n}</span>`)].join(' ');
   return `<button class="item" type="button" data-open-red="${esc(p.id)}">
     <div><div class="t">${esc(p.nombre)} <span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span></div>
     <div class="s">${esc([p.ref,par?'Sale de '+par:''].filter(Boolean).join(' · ')||'Sin referencia')}</div></div>
@@ -93,7 +109,7 @@ function redRows(){
     if(RED.tipo==='empalme'&&p.tipo!=='empalme')return false;
     if(RED.tipo==='nogeo'&&hasGeo(p))return false;
     if(RED.tipo==='llenas'&&!(p.tipo==='nap'&&p.puertos&&napUsed(p.id)>=p.puertos))return false;
-    if(parts.length){const h=norm([p.nombre,p.ref,p.notas,RED_TIPO[p.tipo],redName(p.padre)].join(' '));if(!parts.every(x=>h.includes(x)))return false;}
+    if(parts.length){const h=norm([p.nombre,p.ref,p.notas,p.fibra,p.hacer,RED_TIPO[p.tipo],redName(p.padre)].join(' '));if(!parts.every(x=>h.includes(x)))return false;}
     return true;
   }).map(p=>({p,d:RED.sort==='cerca'&&RED.me&&hasGeo(p)?distM(RED.me,p):null}));
   if(RED.sort==='cerca'&&RED.me)l.sort((a,b)=>(a.d!=null&&b.d!=null)?a.d-b.d:(a.d!=null?-1:(b.d!=null?1:redCmp(a.p,b.p))));
@@ -102,9 +118,9 @@ function redRows(){
 }
 let redRun=null;
 function exportRed(){
-  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','sale de','referencia','notas']];
+  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
   [...S.red.values()].sort((a,b)=>(a.tipo===b.tipo?0:a.tipo==='nap'?-1:1)||redCmp(a,b)).forEach(p=>{
-    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',redName(p.padre),p.ref||'',p.notas||'']);
+    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
   });
   saveFile('red-'+todayStr()+'.csv',toCsv(rows));
 }
@@ -205,17 +221,19 @@ const canMoverNap=()=>can('red')&&(can('editarClientes')||can('ubicacion')||can(
 function openRed(id){
   const p=S.red.get(id);if(!p){toast('No se encontró ese punto de la red','bad');return;}
   const nap=p.tipo==='nap',grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],kids=redKids(p.id),par=p.padre?S.red.get(p.padre):null;
+  const conecta=nap?kids.map(k=>({r:k,pelos:[]})):empalmeConecta(p),llega=nap?napLlegaPor(p):[];
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
   const m=grid?napMap(p):null;
   const libres=grid&&m.libres.length?m.libres.slice(0,24).join(', ')+(m.libres.length>24?'…':''):'';
   const vis=cl.filter(clientVisible).sort((a,b)=>((parseInt(a.napPuerto,10)||999)-(parseInt(b.napPuerto,10)||999))||norm(a.nombre).localeCompare(norm(b.nombre)));
   const html=`
-    <div class="head-row"><div><span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`:''}</div>
+    <div class="head-row"><div><span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`:(p.hilos?` <span class="chip">${pelosUsados(p)}/${p.hilos} pelos en uso</span>`:'')}</div>
       <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(p.nombre)}</h2>
-    <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
+    <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Fibra',esc(p.fibra))}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Llega por',llega.map(x=>`<button class="btn small ghost" type="button" data-red="${esc(x.e.id)}">${esc(x.e.nombre)} · pelo ${x.n}${x.pon?' · PON '+x.pon:''}</button>`).join(' '))}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
+    ${nap?'':empalmeFichaHTML(p)}
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(p)}${can('red')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(p)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    ${kids.length?`<div><h3>De acá salen</h3><div class="list" style="margin-top:8px">${kids.sort(redCmp).map(k=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div></div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
+    ${conecta.length?`<div><h3>${nap?'De acá salen':'Cajas que conecta'}</h3><div class="list" style="margin-top:8px">${conecta.map(({r:k,pelos})=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div>${pelos.length?`<div class="s">${pelos.length>1?'Pelos ':'Pelo '}${pelos.map(x=>x.n).join(', ')}${[...new Set(pelos.map(x=>x.pon).filter(Boolean))].map(n=>' · PON '+n).join('')}</div>`:''}</div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
     ${grid?portsSectionHTML(p,m):''}
     ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${estChip(c)}</div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
       ${cl.length>vis.length&&vis.length?`<div class="hint">Y ${cl.length-vis.length} más que tu perfil no puede ver.</div>`:''}</div>`:''}`;
@@ -223,12 +241,99 @@ function openRed(id){
     el.addEventListener('click',e=>{
       const o=e.target.closest('[data-open-client]');if(o){openClient(o.dataset.openClient);return;}
       const g=e.target.closest('[data-cl]');if(g){openNapClient(p.id,g.dataset.cl);return;}
+      const pl=e.target.closest('[data-pelo]');if(pl){openPelo(p.id,parseInt(pl.dataset.pelo,10));return;}
       const fr=e.target.closest('[data-free]');if(fr){openAsignarPuerto(p.id,parseInt(fr.dataset.free,10));return;}
       const r=e.target.closest('[data-red]');if(r){openRed(r.dataset.red);return;}
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openRedForm(p.id);
       else if(a.dataset.act==='ubicacion')openRedGeo(p.id);
     });
+  }});
+}
+/* ----- botella de empalme: PON vivos, qué hay que hacer y los pelos de la fibra ----- */
+/* las cajas y botellas a las que llega esta botella: las que salen de ella y las que algún pelo dice que lleva */
+function empalmeConecta(p){
+  const m=new Map();
+  redKids(p.id).forEach(k=>m.set(k.id,{r:k,pelos:[]}));
+  Object.keys(p.pelos||{}).forEach(n=>{
+    const x=peloEntry(p,n);if(!x||!x.a||!S.red.has(x.a)||peloEst(p,n)==='libre')return;
+    if(!m.has(x.a))m.set(x.a,{r:S.red.get(x.a),pelos:[]});
+    m.get(x.a).pelos.push({n:Number(n),pon:x.p||null});
+  });
+  m.forEach(v=>v.pelos.sort((a,b)=>a.n-b.n));
+  return [...m.values()].sort((a,b)=>redCmp(a.r,b.r));
+}
+/* de qué botellas llega una caja (según el pelo que dice llevarle) */
+function napLlegaPor(p){
+  const out=[];
+  S.red.forEach(e=>{if(e.tipo!=='empalme'||!e.pelos)return;
+    Object.keys(e.pelos).forEach(n=>{const x=peloEntry(e,n);if(x&&x.a===p.id&&peloEst(e,n)!=='libre')out.push({e,n:Number(n),pon:x.p||null});});});
+  return out.sort((a,b)=>redCmp(a.e,b.e)||a.n-b.n);
+}
+function empalmeFichaHTML(p){
+  const hil=p.hilos||0,xt=xtuboDe(p),puede=can('red');
+  const pons=(p.pons||[]).slice().sort((a,b)=>a-b);
+  const ponsH=`<div><h3>PON vivos</h3>${pons.length?`<div class="actions start" style="gap:6px;margin-top:6px">${pons.map(n=>`<span class="chip ok">${esc(ponTxt(n))}</span>`).join('')}</div>`:`<div class="hint">Todavía no se marcó qué PON está vivo en esta fibra.${puede?' Se marca en «Editar».':''}</div>`}</div>`;
+  const hacerH=p.hacer?`<div class="todo"><b>Qué hay que hacer</b><div style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:2px">${esc(p.hacer)}</div></div>`:'';
+  if(!hil)return `${hacerH}${ponsH}<div><h3>Pelos de la fibra</h3><div class="hint">${puede?'Cargá en «Editar» cuántos pelos tiene la fibra para poder anotar qué lleva cada uno.':'Todavía no se cargaron los pelos de esta fibra.'}</div></div>`;
+  const cell=n=>{
+    const x=peloEntry(p,n),e=peloEst(p,n),info=peloInfo(n,xt);
+    const lbl=e==='libre'?'Libre':e==='empalmado'?(x.p?'PON '+x.p:'Empalmado'):PELO_EST[e];
+    const aria='Pelo '+n+(info.color?' ('+info.color[0].toLowerCase()+')':'')+': '+PELO_EST[e]+(x&&x.p?' · '+ponTxt(x.p):'')+(x&&x.a&&S.red.has(x.a)?' · lleva a '+S.red.get(x.a).nombre:'');
+    const body=`<span class="pn">${fdot(info.color)}${n}</span><span class="pl">${esc(lbl)}</span>`;
+    return puede?`<button class="pelo est-${e}" type="button" data-pelo="${n}" aria-label="${esc(aria)}" title="${esc(aria)}">${body}</button>`:`<div class="pelo est-${e}" aria-label="${esc(aria)}">${body}</div>`;
+  };
+  const tubos=xt>0&&hil>xt?Math.ceil(hil/xt):1,partes=[];
+  for(let t=0;t<tubos;t++){
+    const a=tubos===1?1:t*xt+1,b=tubos===1?hil:Math.min(hil,(t+1)*xt),cells=[];
+    for(let n=a;n<=b;n++)cells.push(cell(n));
+    const tc=tubos>1?FIBRA_COL[t%12]:null;
+    partes.push(`<div class="nap-tubo">${tubos>1?`<div class="head-row"><b>${fdot(tc)} Tubo ${t+1}${tc?' · '+esc(tc[0].toLowerCase()):''}</b><span class="small muted">pelos ${a} a ${b}</span></div>`:''}<div class="pelos">${cells.join('')}</div></div>`);
+  }
+  const usados=Object.keys(p.pelos||{}).map(Number).filter(n=>n>=1&&n<=hil&&peloEst(p,n)!=='libre').sort((a,b)=>a-b);
+  const lista=usados.map(n=>{
+    const x=peloEntry(p,n),info=peloInfo(n,xt),dest=x.a&&S.red.get(x.a);
+    const linea=[x.p?ponTxt(x.p):'',dest?'lleva a '+dest.nombre:'',x.n||''].filter(Boolean).join(' · ');
+    return `<${puede?'button':'div'} class="item" type="button" ${puede?`data-pelo="${n}"`:''}><div><div class="t">${fdot(info.color)} Pelo ${n}${info.color?' · '+esc(info.color[0].toLowerCase()):''}${info.tubo&&hil>xt?' · tubo '+info.tubo:''}</div><div class="s">${esc(linea||PELO_EST[peloEst(p,n)])}</div></div><div class="side"><span class="chip ${peloEst(p,n)==='empalmado'?'accent':peloEst(p,n)==='danado'?'bad':'warn'}">${esc(PELO_EST[peloEst(p,n)])}</span></div></${puede?'button':'div'}>`;
+  }).join('');
+  return `${hacerH}${ponsH}<div><h3>Pelos de la fibra</h3><div class="hint">${usados.length} de ${hil} en uso.${puede?' Tocá un pelo para anotar cuál está empalmado y qué lleva.':''}</div>${partes.join('')}${lista?`<h3 style="margin-top:14px">Qué lleva cada pelo</h3><div class="list" style="margin-top:8px">${lista}</div>`:''}</div>`;
+}
+/* anotar un pelo: si está empalmado, qué PON lleva y a qué caja o botella va */
+async function esperarRed(id,ok){for(let i=0;i<40&&!ok(S.red.get(id)||{});i++)await new Promise(r=>setTimeout(r,50));}
+function openPelo(id,n){
+  const p=S.red.get(id);if(!p||p.tipo!=='empalme')return;
+  if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
+  const x=peloEntry(p,n),info=peloInfo(n,xtuboDe(p));
+  const e0=x&&PELO_EST[x.e]?x.e:'empalmado';
+  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort((a,b)=>(a.tipo===b.tipo?0:a.tipo==='nap'?-1:1)||redCmp(a,b));
+  const pons=[...new Set([...PON_LISTA,...(p.pons||[]),...(x&&x.p?[x.p]:[])])].sort((a,b)=>a-b);
+  const html=`<div class="head-row"><div>${info.color?`<span class="chip">${fdot(info.color)} ${esc(info.color[0])}</span> `:''}${info.tubo&&p.hilos>xtuboDe(p)?`<span class="chip">Tubo ${info.tubo}${info.tuboCol?' · '+esc(info.tuboCol[0].toLowerCase()):''}</span>`:''}</div></div>
+    <form class="form" id="pl-form" novalidate>
+    ${F('Estado del pelo','pl-e',`<select id="pl-e">${Object.entries(PELO_EST).map(([k,v])=>opt(k,v,k===e0)).join('')}</select>`)}
+    <div id="pl-det">
+    ${F('PON que lleva','pl-pon',`<select id="pl-pon"><option value="">No indicar</option>${pons.map(k=>opt(k,ponTxt(k)+((p.pons||[]).includes(k)?' · vivo':''),x&&x.p===k)).join('')}</select>`)}
+    ${F('Lleva a (caja o botella)','pl-a',`<select id="pl-a"><option value="">No indicar</option>${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si la caja o la botella todavía no está cargada, cargala primero en Red.')}
+    </div>
+    ${F('Nota','pl-n',`<input id="pl-n" maxlength="120" autocomplete="off" value="${esc(x&&x.n||'')}" placeholder="Ej.: empalmado con el pelo 3 de la botella siguiente">`)}
+    <div class="actions"><button class="btn ghost" type="button" id="pl-cancel">Cancelar</button>${x?'<button class="btn danger" type="button" id="pl-libre">Dejar libre</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`;
+  openModal({title:'Pelo '+n+' · '+p.nombre,html,onMount(el){
+    const sync=()=>{$('#pl-det',el).hidden=$('#pl-e',el).value==='libre';};
+    $('#pl-e',el).addEventListener('change',sync);sync();
+    $('#pl-cancel',el).addEventListener('click',()=>openRed(id));
+    const guardar=async patch=>{
+      try{
+        await putItem('red','puntos',id,{pelos:{[n]:patch},mod:Date.now()});
+        await esperarRed(id,q=>{const y=peloEntry(q,n);return patch?!!y&&y.e===patch.e&&(y.p||null)===patch.p&&(y.a||null)===patch.a&&(y.n||'')===patch.n:!y;});
+        toast(patch?'Pelo '+n+' guardado':'Pelo '+n+' libre');openRed(id);
+      }catch(err){dbError(err);}
+    };
+    $('#pl-form',el).addEventListener('submit',e=>{
+      e.preventDefault();
+      const est=$('#pl-e',el).value,pon=parseInt($('#pl-pon',el).value,10)||null,a=$('#pl-a',el).value||null,nota=$('#pl-n',el).value.trim();
+      if(est==='libre'&&!nota)return guardar(null);
+      guardar({e:est,p:est==='libre'?null:pon,a:est==='libre'?null:a,n:nota});
+    });
+    const lib=$('#pl-libre',el);if(lib)lib.addEventListener('click',()=>guardar(null));
   }});
 }
 /* un cliente dentro de una caja: quién es, dónde está y las acciones (ver su ficha, mover) */
@@ -376,6 +481,13 @@ function openRedForm(id,tipoNuevo){
     ${F('Nombre o número *','rf-nombre',`<input id="rf-nombre" value="${esc(p.nombre||'')}" autocomplete="off" placeholder="NAP-12">`)}</div>
     <div class="grid2" id="rf-fila"><div id="rf-puertos-w">${F('Cantidad de puertos','rf-puertos',`<input id="rf-puertos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.puertos?esc(p.puertos):''}">`,'Salidas de la caja (8, 16…).')}</div>
     ${F('Sale de la botella de empalme','rf-padre',`<select id="rf-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre,x.id===p.padre)).join('')}</select>`)}</div>
+    <div id="rf-emp-w">
+    ${F('Qué fibra es','rf-fibra',`<input id="rf-fibra" maxlength="120" autocomplete="off" value="${esc(p.fibra||'')}" placeholder="Fibra de 24 pelos, tendido desde ADMIN02">`)}
+    <div class="grid2">${F('Cantidad de pelos','rf-hilos',`<input id="rf-hilos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.hilos?esc(p.hilos):(old?'':24)}">`,'Los que tiene el cable (12, 24, 48…).')}
+    ${F('Pelos por tubo','rf-xtubo',`<select id="rf-xtubo">${[[12,'12 por tubo'],[6,'6 por tubo'],[4,'4 por tubo'],[8,'8 por tubo'],[2,'2 por tubo'],[0,'No mostrar colores']].map(([k,l])=>opt(k,l,k===xtuboDe(p))).join('')}</select>`,'Sirve para mostrar el color de cada pelo y de cada tubo.')}</div>
+    <div class="field"><label>PON vivos</label><div class="seg" id="rf-pons">${PON_LISTA.map(n=>`<button type="button" data-pon="${n}" aria-pressed="${(p.pons||[]).includes(n)}">PON ${n}</button>`).join('')}</div><div class="hint">Marcá los PON que tienen luz en esta fibra: pueden ser varios (PON 1 = VLAN 41, PON 2 = VLAN 42…).</div></div>
+    ${F('Qué hay que hacer','rf-hacer',`<textarea id="rf-hacer" maxlength="500" placeholder="Ej.: empalmar el pelo 5 con la caja 3">${esc(p.hacer||'')}</textarea>`,'Pendientes o instrucciones para quien vaya a la botella.')}
+    </div>
     ${F('Referencia para encontrarla','rf-ref',`<input id="rf-ref" value="${esc(p.ref||'')}" placeholder="Poste frente a la plaza, esquina Belgrano y Mitre">`)}
     ${geoFieldHTML(p,'Si estás al lado de la caja o de la botella, tocá el botón y se completa solo.')}
     ${F('Notas','rf-notas',`<textarea id="rf-notas">${esc(p.notas||'')}</textarea>`)}
@@ -383,7 +495,8 @@ function openRedForm(id,tipoNuevo){
   openModal({title:old?'Editar '+(RED_TIPO[p.tipo]||'punto').toLowerCase():(p.tipo==='nap'?'Nueva caja NAP':'Nueva botella de empalme'),html,onMount(el){
     const read=bindGeoField(el),v=i=>$('#'+i,el).value.trim();
     const kind=()=>$('#rf-tipo',el).value;
-    const sync=()=>{$('#rf-puertos-w',el).hidden=kind()!=='nap';};
+    const sync=()=>{$('#rf-puertos-w',el).hidden=kind()!=='nap';$('#rf-emp-w',el).hidden=kind()!=='empalme';};
+    $('#rf-pons',el).addEventListener('click',e=>{const b=e.target.closest('[data-pon]');if(b)b.setAttribute('aria-pressed',String(b.getAttribute('aria-pressed')!=='true'));});
     $('#rf-tipo',el).addEventListener('change',sync);sync();
     $('#rform',el).addEventListener('submit',async e=>{
       e.preventDefault();
@@ -395,13 +508,21 @@ function openRedForm(id,tipoNuevo){
       if(tipo==='nap'&&v('rf-puertos')!==''){puertos=parseInt(v('rf-puertos'),10);if(!(puertos>=1&&puertos<=288))return toast('Los puertos tienen que ser un número entre 1 y 288','bad');}
       if(old&&puertos&&puertos<napUsed(old.id))return toast('La caja ya tiene '+napUsed(old.id)+' clientes conectados: no puede tener menos puertos','bad');
       const obj={tipo,nombre,lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,puertos,padre:v('rf-padre')||null,ref:v('rf-ref'),notas:v('rf-notas'),mod:Date.now()};
+      if(tipo==='empalme'){
+        const hilos=v('rf-hilos')===''?null:parseInt(v('rf-hilos'),10);
+        if(hilos!==null&&!(hilos>=1&&hilos<=288))return toast('Los pelos tienen que ser un número entre 1 y 288','bad');
+        const sobran=old&&hilos?Object.keys(old.pelos||{}).filter(n=>Number(n)>hilos&&peloEst(old,n)!=='libre'):[];
+        if(sobran.length)return toast('El pelo '+Math.max(...sobran.map(Number))+' tiene datos cargados: no puede tener menos pelos. Dejalo libre primero.','bad');
+        if(old&&!hilos&&pelosUsados(old))return toast('La fibra ya tiene pelos anotados: no se puede quitar la cantidad de pelos.','bad');
+        Object.assign(obj,{fibra:v('rf-fibra')||null,hilos,xtubo:parseInt($('#rf-xtubo',el).value,10)||0,pons:[...el.querySelectorAll('#rf-pons [aria-pressed="true"]')].map(b=>parseInt(b.dataset.pon,10)),hacer:v('rf-hacer')||null});
+      }
       try{
         let nid=null;
         if(old)await putItem('red','puntos',old.id,obj);
         else{nid=newId();await putItem('red','puntos',nid,Object.assign({creado:Date.now()},obj));}
         toast(old?'Cambios guardados':(tipo==='nap'?'Caja NAP guardada':'Botella de empalme guardada'));closeModal();
         /* una caja recién creada se abre sola, ya dibujada, para ir cargando qué cliente va en cada puerto */
-        if(nid&&tipo==='nap'&&puertos){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
+        if(nid&&((tipo==='nap'&&puertos)||(tipo==='empalme'&&obj.hilos))){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
       }catch(err){dbError(err);}
     });
     const del=$('#rf-del',el);
