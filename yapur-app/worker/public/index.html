@@ -1064,6 +1064,8 @@ function visibleSet(){
   return s;
 }
 const clientVisible=c=>can('clientesTodos')||visibleSet().has(c.id);
+/* un abonado nuevo (pendiente, o con una instalación abierta) lo puede completar el técnico: nombre, teléfono, domicilio y DNI. Los datos de facturación siguen siendo de la oficina. */
+const puedeCompletar=c=>!!c&&!can('editarClientes')&&can('ubicacion')&&(c.estado==='pendiente'||[...S.ordenes.values()].some(o=>o.clientId===c.id&&o.tipo==='instalacion'&&ORD_OPEN(o)&&(!o.tecnico||o.tecnico===S.tecId||can('ordenesTodas'))));
 function searchClients(q,filter,limit){
   const parts=norm(q).trim().split(/\s+/).filter(Boolean);
   const out=[];const vis=can('clientesTodos')?null:visibleSet();
@@ -1235,7 +1237,7 @@ function openClient(id){
   const ords=[...S.ordenes.values()].filter(o=>o.clientId===c.id).sort((a,b2)=>(b2.creado||'').localeCompare(a.creado||'')).slice(0,4);
   const html=`
     <div class="head-row"><div>${estChip(c)} ${billChip(c)}</div>
-      <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
+      <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':puedeCompletar(c)?'Cargar datos del abonado':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     ${bajaBlock(c)}
@@ -1510,6 +1512,7 @@ function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
   if(!full&&!can('ubicacion'))return toast('Tu perfil no puede editar clientes','bad');
+  const comp=!full&&puedeCompletar(old);   /* técnico completando a un abonado nuevo */
   if(!old&&!full)return toast('Tu perfil no puede dar de alta clientes','bad');
   const c=old||{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()};
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
@@ -1518,12 +1521,16 @@ function openClientForm(id){
     ${!old&&full?`<details class="qsec" id="cf-rep"><summary>Completar con el reporte del técnico</summary><div class="form" style="margin-top:10px">
       ${F('Pegá el texto que mandó el técnico','cf-rep-txt','<textarea id="cf-rep-txt" rows="5" autocomplete="off" placeholder="NOMBRE: Ana Ester Paz&#10;DNI: 28354900&#10;IP: 10.20.43.9&#10;PAGO: (Efectivo) 65mil pesos"></textarea>')}
       <div class="actions start"><button class="btn small" type="button" id="cf-rep-go">Completar los datos</button></div><div class="hint" id="cf-rep-out"></div></div></details>`:''}
+    ${comp?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del abonado</legend>
+      ${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}
+      ${can('telefono')?`<div class="grid2">${F('Teléfono','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}">`)}${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</div>`:''}
+      ${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="">`,'<span id="cf-dni-h">Se guarda en el sistema, pero este perfil no lo vuelve a ver: si ya lo cargaste, dejalo vacío. Un CUIT o CUIL se escribe con guiones.</span>')}</fieldset>`:''}
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
       <div class="grid2">${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="${esc(c.dni||'')}">`,'<span id="cf-dni-h">Un CUIT o CUIL se escribe con guiones: 27-23373806-4.</span>')}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
       ${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</fieldset>`:''}
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Domicilio</legend>
-      ${full?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
+      ${full||comp?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
       ${F('Referencia para llegar','cf-ref',`<input id="cf-ref" value="${esc(c.ref||'')}" placeholder="Portón verde, frente a la plaza…">`)}
       ${geoFieldHTML(c)}</fieldset>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Servicio</legend>
@@ -1584,6 +1591,12 @@ function openClientForm(id){
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
       const patch={ref:v('cf-ref'),lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,tec:v('cf-tec')||null,usuario:v('cf-usuario'),ip:v('cf-ip'),nodo:v('cf-nodo'),equipo:v('cf-equipo')};
       const nf=readNap();if(nf){if(nf.bad)return toast(nf.bad,'bad');patch.nap=nf.nap;patch.napPuerto=nf.puerto;}
+      if(comp){
+        if(!v('cf-nombre'))return toast('Falta el nombre','bad');
+        Object.assign(patch,{nombre:v('cf-nombre'),dir:v('cf-dir'),loc:v('cf-loc')});
+        if($('#cf-tel',el))Object.assign(patch,{tel:v('cf-tel'),tel2:v('cf-tel2')});   /* sin el permiso de teléfono el campo no está: guardar no puede borrarlo */
+        if(v('cf-dni'))patch.dni=fmtDoc(v('cf-dni'));
+      }
       if(full){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
         if(!v('cf-dir'))return toast('Falta el domicilio','bad');
@@ -4137,7 +4150,8 @@ function orderCard(o){
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
     ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
-      ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar</button>':''}
+      ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
+      ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
       ${can('ordenesTodas')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(t?t.tel:'',orderText(o,c))}">Enviar por WhatsApp</a><button class="btn small danger" type="button" data-oact="cancel">Cancelar</button>`:''}</div>`:''}
   </article>`;
 }
@@ -4153,6 +4167,7 @@ function openOrderForm({id,clientId}){
     <div class="grid2">${F('Fecha','of-fecha',`<input id="of-fecha" type="date" value="${esc(o.fecha||'')}">`)}
     ${F('Prioridad','of-prio',`<select id="of-prio">${opt('normal','Normal',o.prioridad!=='urgente')}${opt('urgente','Urgente',o.prioridad==='urgente')}</select>`)}</div>
     ${F('Qué hay que hacer','of-notas',`<textarea id="of-notas" placeholder="Sin internet desde ayer, revisar ONU y conector…">${esc(o.notas||'')}</textarea>`)}
+    ${old&&ORD_OPEN(old)&&can('operarOrdenes')?'<div class="actions start"><button class="btn" type="button" id="of-fin">Ir a terminar la orden (qué se hizo, caja, cobro)</button></div>':''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">${old?'Guardar cambios':'Crear orden'}</button></div></form>`;
   openModal({title:old?'Editar orden':'Nueva orden de trabajo',html,onMount(el){
     const box=$('#of-client',el);
@@ -4168,6 +4183,7 @@ function openOrderForm({id,clientId}){
       }
     };
     drawClient();
+    const fin=$('#of-fin',el);if(fin)fin.addEventListener('click',()=>openFinishOrder(old));
     $('#oform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       if(!cid)return toast('Elegí el cliente','bad');
@@ -4206,7 +4222,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):''}
+    ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):(!can('cobrar')&&!can('cobrarCampo')&&['instalacion','falla','visita'].includes(o.tipo)?'<div class="notice info">Tu perfil no registra cobros: si cobraste este trabajo, avisale a la oficina cuánto para que lo cargue.</div>':'')}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
@@ -4258,6 +4274,7 @@ async function orderAction(o,act){
       else openFinishOrder(o);
     }else if(act==='take'){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null});toast('Orden asignada a vos');}
     else if(act==='edit')openOrderForm({id:o.id});
+    else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
     else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo?','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime()});toast('Orden cancelada');}}
   }catch(err){dbError(err);}
@@ -5838,7 +5855,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='dc0ed55306';
+const BUILD='0c4e15c77a';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

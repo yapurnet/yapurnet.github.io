@@ -120,6 +120,13 @@ El sistema **no se conecta a tus routers ni guarda usuario o clave de ninguno**.
 - «Ver como…» un técnico muestra lo mismo que ve él.
 - **Tampoco ve cuántos clientes tiene la empresa:** en la lista de clientes el técnico no ve el total (ni «Ver más (593)»); solo cuenta resultados cuando una búsqueda trae 20 o menos. Oficina y administrador ven el total como siempre. (La app le baja la lista completa para poder buscar sin conexión; si no querés que un técnico tenga la lista entera, sacale «Ver todos los clientes» en Ajustes y verá solo los de sus órdenes.)
 
+## El técnico completa a un abonado nuevo (nombre, teléfono, domicilio, DNI, caja y puerto)
+
+- **Dónde:** en la tarjeta de la orden hay un botón **«Cargar datos del abonado»** (en una instalación o un abonado por instalar; en otros casos dice «Datos del abonado»). Está aparte de **«Editar orden»**, que cambia la orden (tipo, fecha, qué hay que hacer) y no al abonado. En la ficha del cliente el botón de edición también dice «Cargar datos del abonado».
+- **Qué puede cargar el técnico en un abonado nuevo:** nombre, teléfonos (si su perfil ve teléfonos), calle, localidad, **DNI**, referencia, ubicación, y los datos técnicos: tecnología, usuario, IP, nodo, equipo y la **caja NAP con su puerto**. El DNI se guarda pero ese perfil no lo vuelve a ver (si ya está cargado, se deja vacío y no se borra).
+- **Cuándo:** solo con un abonado **por instalar** o con una **orden de instalación abierta** (la de él o una sin asignar). En clientes ya instalados, el técnico sigue editando únicamente los datos técnicos. El plan, el precio, el estado, el ciclo y la deuda siguen siendo solo de la oficina.
+- **Terminar la orden:** el botón **Terminar** carga qué se hizo, la caja y el puerto (vienen puestos si ya se cargaron) y, **si el perfil tiene «Cobrar instalaciones y reclamos en la calle»**, el cobro de la instalación con el precio fijo. Si el perfil **no** tiene ese permiso no aparece el cobro y la pantalla le dice que avise a la oficina cuánto cobró. Para dárselo: **Ajustes → Usuarios y accesos →** el técnico **→ «Qué puede hacer» → «Cobrar instalaciones y reclamos en la calle»**. Desde **«Editar orden»** también hay un acceso a **«Ir a terminar la orden»**.
+
 ## Equipos en comodato y contrato firmado en el celular
 
 - **Cargar los equipos (técnico, oficina, administrador):** ficha del cliente → **Equipos en comodato** → *Cargar equipos*. Por cada uno: tipo (ONU, router, antena…), marca y modelo, **N° de serie o MAC**, cantidad, estado (nuevo/usado) y observaciones. Ese detalle es lo que se escribe en el contrato.
