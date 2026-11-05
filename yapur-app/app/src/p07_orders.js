@@ -30,7 +30,8 @@ function orderCard(o){
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
     ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
-      ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar</button>':''}
+      ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
+      ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
       ${can('ordenesTodas')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(t?t.tel:'',orderText(o,c))}">Enviar por WhatsApp</a><button class="btn small danger" type="button" data-oact="cancel">Cancelar</button>`:''}</div>`:''}
   </article>`;
 }
@@ -46,6 +47,7 @@ function openOrderForm({id,clientId}){
     <div class="grid2">${F('Fecha','of-fecha',`<input id="of-fecha" type="date" value="${esc(o.fecha||'')}">`)}
     ${F('Prioridad','of-prio',`<select id="of-prio">${opt('normal','Normal',o.prioridad!=='urgente')}${opt('urgente','Urgente',o.prioridad==='urgente')}</select>`)}</div>
     ${F('Qué hay que hacer','of-notas',`<textarea id="of-notas" placeholder="Sin internet desde ayer, revisar ONU y conector…">${esc(o.notas||'')}</textarea>`)}
+    ${old&&ORD_OPEN(old)&&can('operarOrdenes')?'<div class="actions start"><button class="btn" type="button" id="of-fin">Ir a terminar la orden (qué se hizo, caja, cobro)</button></div>':''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">${old?'Guardar cambios':'Crear orden'}</button></div></form>`;
   openModal({title:old?'Editar orden':'Nueva orden de trabajo',html,onMount(el){
     const box=$('#of-client',el);
@@ -61,6 +63,7 @@ function openOrderForm({id,clientId}){
       }
     };
     drawClient();
+    const fin=$('#of-fin',el);if(fin)fin.addEventListener('click',()=>openFinishOrder(old));
     $('#oform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       if(!cid)return toast('Elegí el cliente','bad');
@@ -99,7 +102,7 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
-    ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):''}
+    ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):(!can('cobrar')&&!can('cobrarCampo')&&['instalacion','falla','visita'].includes(o.tipo)?'<div class="notice info">Tu perfil no registra cobros: si cobraste este trabajo, avisale a la oficina cuánto para que lo cargue.</div>':'')}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
@@ -151,6 +154,7 @@ async function orderAction(o,act){
       else openFinishOrder(o);
     }else if(act==='take'){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null});toast('Orden asignada a vos');}
     else if(act==='edit')openOrderForm({id:o.id});
+    else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
     else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo?','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime()});toast('Orden cancelada');}}
   }catch(err){dbError(err);}

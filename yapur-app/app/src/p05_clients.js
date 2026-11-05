@@ -17,6 +17,8 @@ function visibleSet(){
   return s;
 }
 const clientVisible=c=>can('clientesTodos')||visibleSet().has(c.id);
+/* un abonado nuevo (pendiente, o con una instalación abierta) lo puede completar el técnico: nombre, teléfono, domicilio y DNI. Los datos de facturación siguen siendo de la oficina. */
+const puedeCompletar=c=>!!c&&!can('editarClientes')&&can('ubicacion')&&(c.estado==='pendiente'||[...S.ordenes.values()].some(o=>o.clientId===c.id&&o.tipo==='instalacion'&&ORD_OPEN(o)&&(!o.tecnico||o.tecnico===S.tecId||can('ordenesTodas'))));
 function searchClients(q,filter,limit){
   const parts=norm(q).trim().split(/\s+/).filter(Boolean);
   const out=[];const vis=can('clientesTodos')?null:visibleSet();
@@ -188,7 +190,7 @@ function openClient(id){
   const ords=[...S.ordenes.values()].filter(o=>o.clientId===c.id).sort((a,b2)=>(b2.creado||'').localeCompare(a.creado||'')).slice(0,4);
   const html=`
     <div class="head-row"><div>${estChip(c)} ${billChip(c)}</div>
-      <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':'Editar datos técnicos'}</button>`:''}</div></div>
+      <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':puedeCompletar(c)?'Cargar datos del abonado':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     ${bajaBlock(c)}
@@ -463,6 +465,7 @@ function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
   if(!full&&!can('ubicacion'))return toast('Tu perfil no puede editar clientes','bad');
+  const comp=!full&&puedeCompletar(old);   /* técnico completando a un abonado nuevo */
   if(!old&&!full)return toast('Tu perfil no puede dar de alta clientes','bad');
   const c=old||{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()};
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
@@ -471,12 +474,16 @@ function openClientForm(id){
     ${!old&&full?`<details class="qsec" id="cf-rep"><summary>Completar con el reporte del técnico</summary><div class="form" style="margin-top:10px">
       ${F('Pegá el texto que mandó el técnico','cf-rep-txt','<textarea id="cf-rep-txt" rows="5" autocomplete="off" placeholder="NOMBRE: Ana Ester Paz&#10;DNI: 28354900&#10;IP: 10.20.43.9&#10;PAGO: (Efectivo) 65mil pesos"></textarea>')}
       <div class="actions start"><button class="btn small" type="button" id="cf-rep-go">Completar los datos</button></div><div class="hint" id="cf-rep-out"></div></div></details>`:''}
+    ${comp?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del abonado</legend>
+      ${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}
+      ${can('telefono')?`<div class="grid2">${F('Teléfono','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}">`)}${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</div>`:''}
+      ${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="">`,'<span id="cf-dni-h">Se guarda en el sistema, pero este perfil no lo vuelve a ver: si ya lo cargaste, dejalo vacío. Un CUIT o CUIL se escribe con guiones.</span>')}</fieldset>`:''}
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos del cliente</legend>
       <div class="grid2">${F('Nombre y apellido *','cf-nombre',`<input id="cf-nombre" value="${esc(c.nombre||'')}" autocomplete="off">`)}${F('N° de cliente','cf-codigo',`<input id="cf-codigo" class="mono" value="${esc(c.codigo||'')}">`)}</div>
       <div class="grid2">${F('DNI / CUIT / CUIL','cf-dni',`<input id="cf-dni" class="mono" autocomplete="off" placeholder="28354900 o 27-23373806-4" value="${esc(c.dni||'')}">`,'<span id="cf-dni-h">Un CUIT o CUIL se escribe con guiones: 27-23373806-4.</span>')}${F('Teléfono *','cf-tel',`<input id="cf-tel" inputmode="tel" value="${esc(c.tel||'')}" placeholder="3844 56-2605">`,'Con código de área, sin 0 ni 15. Se usa para WhatsApp.')}</div>
       ${F('Otro teléfono','cf-tel2',`<input id="cf-tel2" inputmode="tel" value="${esc(c.tel2||'')}">`)}</fieldset>`:''}
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Domicilio</legend>
-      ${full?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
+      ${full||comp?`<div class="grid2">${F('Calle y número *','cf-dir',`<input id="cf-dir" value="${esc(c.dir||'')}">`)}${F('Barrio o localidad','cf-loc',`<input id="cf-loc" value="${esc(c.loc||'')}">`)}</div>`:''}
       ${F('Referencia para llegar','cf-ref',`<input id="cf-ref" value="${esc(c.ref||'')}" placeholder="Portón verde, frente a la plaza…">`)}
       ${geoFieldHTML(c)}</fieldset>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Servicio</legend>
@@ -537,6 +544,12 @@ function openClientForm(id){
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
       const patch={ref:v('cf-ref'),lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,tec:v('cf-tec')||null,usuario:v('cf-usuario'),ip:v('cf-ip'),nodo:v('cf-nodo'),equipo:v('cf-equipo')};
       const nf=readNap();if(nf){if(nf.bad)return toast(nf.bad,'bad');patch.nap=nf.nap;patch.napPuerto=nf.puerto;}
+      if(comp){
+        if(!v('cf-nombre'))return toast('Falta el nombre','bad');
+        Object.assign(patch,{nombre:v('cf-nombre'),dir:v('cf-dir'),loc:v('cf-loc')});
+        if($('#cf-tel',el))Object.assign(patch,{tel:v('cf-tel'),tel2:v('cf-tel2')});   /* sin el permiso de teléfono el campo no está: guardar no puede borrarlo */
+        if(v('cf-dni'))patch.dni=fmtDoc(v('cf-dni'));
+      }
       if(full){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
         if(!v('cf-dir'))return toast('Falta el domicilio','bad');
