@@ -83,7 +83,7 @@ const puedeCobrarOrden=(c,o)=>!!c&&!!o&&(o.tipo==='reconexion'?can('cobrar')&&co
 function cobroOrdenHTML(o,c){
   const lista=conceptosCobro(c,soloCampo());
   let con0=CONC_ORD[o.tipo]||'otro';
-  if(con0==='instalacion'&&instalado(c))con0='reinstalacion';   /* una instalación sobre un cliente ya instalado es una mudanza */
+  if(con0==='instalacion'&&instCobrada(c))con0='reinstalacion';   /* una nueva instalación a quien ya la pagó es una mudanza */
   if(!lista.includes(con0))con0=lista.includes('otro')?'otro':lista[0];
   return `<div class="fgroup"><div class="legend">Cobro del trabajo</div>
     <label class="per"><input id="ff-cobro" type="checkbox"><span class="grow">Cobré este trabajo<br><span class="small muted">Queda a tu nombre y suma a la caja del día.</span></span></label>

@@ -212,7 +212,7 @@ async function openStream(token) {
     const T2 = r.j.token;
     r = await call('GET', '/api/doc/clientes/c01', undefined, T2);
     t('deuda anterior: a quien solo cobra en la calle no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
-    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cp1: { nombre: 'Pablo Pendiente', estado: 'pendiente' }, cinst: { nombre: 'Ines Instalada', estado: 'activo' } } } }, O);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cp1: { nombre: 'Pablo Pendiente', estado: 'pendiente' }, cinst: { nombre: 'Ines Instalada', estado: 'activo' }, cp2: { nombre: 'Paula Nueva', estado: 'activo' }, cp3: { nombre: 'Pedro Nuevo', estado: 'activo' } } } }, O);
     t('cobros: se cargan un cliente por instalar y uno ya instalado', r.s === 200, r);
     const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cp1', concepto: 'instalacion', monto: 65000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
     const PATCH_PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: o } } }, tok);
@@ -241,17 +241,25 @@ async function openStream(token) {
     r = await call('GET', '/api/doc/pagos/' + PG, undefined, T2);
     t('cobros: no puede leer la caja', r.s === 200 && r.j.exists === false, r);
 
-    /* instalación solo una vez y solo a quien no está instalado; a uno ya instalado (mudanza) se le cobra reinstalación */
+    /* instalación: una sola vez por cliente (lo que decide es lo cobrado, no el estado: la oficina carga al abonado nuevo como «activo»); si ya la pagó y vuelve a pedir una, es una mudanza y se cobra reinstalación */
     r = await PAGO(T2, 'pi1', { c: 'cinst' });
-    t('instalación: no se le cobra a un cliente que ya está instalado', r.s === 403 && /ya está instalado/.test(r.j.error) && /Reinstalación/.test(r.j.error), r);
+    t('instalación: a un abonado nuevo que la oficina dejó como «activo» se le cobra la instalación', r.s === 200, r);
+    r = await PAGO(T2, 'pi1b', { c: 'cinst', recibo: 'RTpi1b' });
+    t('instalación: a quien ya la pagó no se le cobra otra vez: dice cuándo y que cobre la reinstalación', r.s === 403 && /ya se le cobró la instalación el \d\d\/\d\d\/\d{4}/.test(r.j.error) && /Reinstalación/.test(r.j.error), r);
     r = await PAGO(T2, 'pi2', { c: 'cinst', concepto: 'reinstalacion', monto: 35000 });
     t('instalación: a un cliente ya instalado se le cobra la reinstalación (mudanza)', r.s === 200, r);
     r = await PAGO(T2, 'pi3', { c: 'cp1', concepto: 'reinstalacion', monto: 35000 });
     t('instalación: la reinstalación no se cobra a quien todavía no está instalado', r.s === 403 && /todavía no está instalado/.test(r.j.error), r);
     r = await PATCH_PAGO(O, 'po1', { c: 'cinst', concepto: 'instalacion', monto: 5000, fecha: HOY, hora: '11:00', recibo: 'ROpo1', metodo: 'efectivo' });
     t('instalación: a la oficina (que cobra todo) no se le restringe el concepto', r.s === 200, r);
-    r = await PAGO(T2, 'pi6', { c: 'cp1', recibo: 'RTpi6' });
-    t('instalación: no se mira lo ya cobrado a un cliente por instalar (el técnico no ve los pagos)', r.s === 200, r);
+    r = await PAGO(T2, 'pi6', { c: 'cp2', recibo: 'RTpi6' });
+    t('instalación: se cobra a otro abonado nuevo', r.s === 200, r);
+    r = await PAGO(T2, 'pi7', { c: 'cp2', recibo: 'RTpi7' });
+    t('instalación: y una segunda vez, no', r.s === 403 && /ya se le cobró la instalación/.test(r.j.error), r);
+    r = await PATCH_PAGO(A, 'pi6', { anulado: true, anuladoMotivo: 'cobrada por error' });
+    t('instalación: el administrador anula ese recibo', r.s === 200, r);
+    r = await PAGO(T2, 'pi8', { c: 'cp2', recibo: 'RTpi8' });
+    t('instalación: con el recibo anulado se puede volver a cobrar la instalación', r.s === 200, r);
 
     /* precios fijos: la instalación y la reinstalación se cobran a lo que carga el administrador; la reconexión no se cobra */
     r = await PAGO(T2, 'pf1', { monto: 30000 });
@@ -280,7 +288,7 @@ async function openStream(token) {
     t('precio fijo: al técnico le llegan los precios para mostrarlos', r.s === 200 && r.j.data.precioInstalacion === 70000 && r.j.data.precioReinstalacion === 38000, r.j);
     r = await PAGO(T2, 'pf7');
     t('precio fijo: con el precio nuevo, el monto viejo ya no sirve', r.s === 403 && /70\.000/.test(r.j.error), r);
-    r = await PAGO(T2, 'pf8', { monto: 70000 });
+    r = await PAGO(T2, 'pf8', { c: 'cp3', monto: 70000 });
     t('precio fijo: y el nuevo sí', r.s === 200, r);
     r = await PAGO(T2, 'pf9', { c: 'cinst', concepto: 'reinstalacion', monto: 38000 });
     t('precio fijo: lo mismo con la reinstalación', r.s === 200, r);
@@ -368,7 +376,7 @@ async function openStream(token) {
     r = await call('GET', '/api/sync', undefined, T2);
     t('cobros: la sincronización del técnico no trae pagos', r.s === 200 && !('pagos' in r.j.cols));
     r = await call('GET', '/api/mis-cobros', undefined, T2);
-    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pf5,pf8,pf9,pi2,pi6,pt1,pt2' && r.j.hoy === HOY, r);
+    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pf5,pf8,pf9,pi1,pi2,pi6,pi8,pt1,pt2' && r.j.hoy === HOY, r);
     r = await call('GET', '/api/mis-cobros', undefined, T);
     t('cobros: otro técnico no ve los de Marcos', r.s === 200 && r.j.docs.length === 0, r);
     r = await call('GET', '/api/mis-cobros', undefined);
