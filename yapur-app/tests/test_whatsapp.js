@@ -23,9 +23,12 @@ async function usuarios() {
   return { A, T: await tok('pedro', 'pedro123'), O: await tok('laura', 'laura123') };
 }
 let n = 0;
+const conInstalacion = new Set();   /* la instalación se cobra una sola vez por cliente: las siguientes de estas pruebas van como «otro» al mismo monto */
 const cobro = async (tok, cid, o) => {
   const id = 'w' + (++n), recibo = 'RW' + n + 'X';
-  const r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: cid, concepto: 'instalacion', monto: 65000, fecha: HOY, hora: '10:00', recibo, metodo: 'efectivo' }, o || {}) } } }, tok);
+  const concepto = (o && o.concepto) || (conInstalacion.has(cid) ? 'otro' : 'instalacion');
+  if (concepto === 'instalacion') conInstalacion.add(cid);
+  const r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: cid, concepto, monto: 65000, fecha: HOY, hora: '10:00', recibo, metodo: 'efectivo' }, o || {}) } } }, tok);
   return { id, recibo, r };
 };
 const waDe = async (A, id, pred) => {
@@ -101,7 +104,7 @@ async function configurado() {
     t('va a la dirección del número de WhatsApp de la empresa, con la clave en el encabezado', q.method === 'POST' && q.url === '/v23.0/' + PHONE_ID + '/messages' && q.auth === 'Bearer ' + TOKEN, q);
     t('manda una plantilla (type=template) al número de Argentina con 549', b.messaging_product === 'whatsapp' && b.type === 'template' && b.to === '5493844562605', b);
     t('la plantilla es «recibo_cobro» en es_AR', b.template && b.template.name === 'recibo_cobro' && b.template.language.code === 'es_AR', b.template);
-    t('los 5 datos: nombre (3 palabras), monto, concepto, número de recibo y fecha', ps.length === 5 && ps.every(p => p.type === 'text') && ps.map(p => p.text).join('|') === ['Ana Ester Paz', '$ 65.000', 'Instalación', c.recibo, DMY].join('|'), ps);
+    t('los 5 datos: nombre (3 palabras), monto, concepto, número de recibo y fecha', ps.length === 5 && ps.every(p => p.type === 'text') && ps.map(p => p.text).join('|') === ['Ana Ester Paz', '$ 65.000', 'Otro', c.recibo, DMY].join('|'), ps);
     r = await call('GET', '/api/mis-cobros', undefined, T);
     t('el técnico, en «Mis cobros», ve que el recibo salió', r.s === 200 && r.j.docs.some(d => d.data.items[c.id] && d.data.items[c.id].wa && d.data.items[c.id].wa.e === 'enviado'), r.j);
     r = await call('GET', '/api/doc/pagos/' + PG, undefined, T);
