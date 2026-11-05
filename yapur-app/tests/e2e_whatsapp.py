@@ -55,7 +55,8 @@ async def main():
     api('POST', '/api/users', {'usuario': 'laura', 'nombre': 'Laura', 'role': 'oficina', 'clave': 'laura123'}, TA)
     for cid, c in {'a': {'nombre': 'Ana Paz', 'tel': '3844 56-2605', 'estado': 'pendiente', 'dir': 'Calle 1'},
                    'b': {'nombre': 'Beto Sin Teléfono', 'estado': 'pendiente', 'dir': 'Calle 2'},
-                   'c': {'nombre': 'Carla Cuarta', 'tel': '3844 11-2233', 'estado': 'pendiente', 'dir': 'Calle 3'}}.items():
+                   'c': {'nombre': 'Carla Cuarta', 'tel': '3844 11-2233', 'estado': 'pendiente', 'dir': 'Calle 3'},
+                   'd': {'nombre': 'Dora Quinta', 'tel': '3844 77-8899', 'estado': 'pendiente', 'dir': 'Calle 4'}}.items():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: c}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
@@ -157,7 +158,7 @@ async def main():
         await toast(A, 'ya no se manda solo')
         await P.wait_for_function('S.ajustes.waActivo === false', timeout=10000)
         n0 = len(wa('/__log'))
-        modal = await cobrar(P, 'a')
+        modal = await cobrar(P, 'd')   # otro abonado: a 'a' ya se le cobró la instalación y no se cobra dos veces
         check('apagado: el recibo del técnico vuelve a traer «Enviar por WhatsApp» y no dice que sale solo', await P.query_selector('#rc-wa') is not None and 'llega solo' not in modal)
         await asyncio.sleep(0.8)
         check('apagado: no se mandó nada solo', len(wa('/__log')) == n0, wa('/__log'))

@@ -283,11 +283,15 @@ function openAnular(recibo){
       try{for(const d of Object.keys(by))await putMany('pagos',d,by[d]);toast('Recibo anulado');closeModal();}catch(err){dbError(err);}
     });}});
 }
-/* «Instalación» se cobra una sola vez, al cliente que todavía no está instalado; a uno ya instalado (una mudanza) se le cobra «Reinstalación».
-   Se aplica a quien cobra en la calle; el servidor lo controla igual. */
-const instalado=c=>!!c&&c.estado!=='pendiente';   /* al técnico solo le llega «por instalar» o «baja»: sin estado, ya está instalado */
+/* «Instalación» se cobra una sola vez por cliente; si ya se le cobró y vuelve a pedir una instalación, es una mudanza y se cobra «Reinstalación».
+   La señal es lo cobrado, no el estado del cliente: la oficina carga al abonado nuevo como «activo» y el técnico ni siquiera ve ese estado.
+   El técnico solo ve sus propios cobros, así que acá es una ayuda; el servidor es el que controla de verdad. */
+const instCobrada=c=>!!c&&[...S.pagos.values()].some(p=>p.c===c.id&&p.concepto==='instalacion'&&!p.anulado);
+const instalacionAbierta=c=>!!c&&[...S.ordenes.values()].some(o=>o.clientId===c.id&&o.tipo==='instalacion'&&ORD_OPEN(o));
+/* ¿hay una instalación por hacer? (cliente «Por instalar», o con una orden de instalación abierta y sin instalación cobrada) */
+const porInstalar=c=>!!c&&!instCobrada(c)&&(c.estado==='pendiente'||instalacionAbierta(c));
 function conceptosCobro(c,campo){
-  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(k==='reconexion'?!campo&&conDeuda(c):(!campo||(instalado(c)?k!=='instalacion':k!=='reinstalacion'))));
+  return Object.keys(CONCEPTOS).filter(k=>k!=='mensualidad'&&k!=='deuda_anterior'&&(k==='reconexion'?!campo&&conDeuda(c):(!campo||(k==='instalacion'?porInstalar(c):k==='reinstalacion'?!(c&&c.estado==='pendiente'):true))));
 }
 function openCobro(clientId,con1,pre){
   const c=S.clientes.get(clientId);if(!c)return toast('No se encontró el cliente','bad');
@@ -299,13 +303,13 @@ function openCobro(clientId,con1,pre){
   const bm=(gm?grp:[c]).map(m=>({m,b:m===c?b:billing(m,true)})).map(x=>Object.assign(x,{open:x.b.periods.filter(p=>p.rest>0)}));
   const open=[].concat(...bm.map(x=>x.open)),priceTot=bm.reduce((s,x)=>s+(x.b.aplica?x.b.price:0),0);
   const mens=(gm?bm.some(x=>x.b.aplica):b.aplica)&&!campo,daRest=campo?0:deudaAntRest(c),da=c.deudaAnt&&c.deudaAnt.det?String(c.deudaAnt.det):'';
-  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&instalado(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
+  const con0=con1==='deuda_anterior'&&daRest>0?'deuda_anterior':mens?'mensualidad':(campo&&!porInstalar(c)?'reclamo':'instalacion'),permitidos=conceptosCobro(c,campo);
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
     <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
     ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar todo o la deuda (escribir el monto, varios medios)</button></div>':''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
-    ${campo?`<div class="hint">${instalado(c)?'Este cliente ya está instalado: si se mudó, cobrá «Reinstalación (mudanza)». ':'Todavía no está instalado: se cobra «Instalación». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
+    ${campo?`<div class="hint">${porInstalar(c)?'Es una instalación nueva: se cobra «Instalación». ':'«Instalación» es para un abonado nuevo; si un cliente ya instalado se mudó, cobrá «Reinstalación (mudanza)». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
     <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${gm?`<div class="hint">Este cobro se registra en el servicio ${esc(c.nombre)}.</div>`:''}${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>

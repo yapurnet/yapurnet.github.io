@@ -219,10 +219,12 @@ function guard(u, p, coll, existing, patch, ctx) {
             if (usadas.has(nw.comp) || !ctx || !ctx.comprobanteLibre(nw.comp, u.id)) return 'La foto del comprobante no sirve o ya se usó en otro cobro. Sacá una nueva.';
             usadas.add(nw.comp);
           } else delete nw.comp;
-          /* «Instalación» solo a quien todavía no está instalado; a un cliente ya instalado (una mudanza) se le cobra «Reinstalación». No se mira lo cobrado: el técnico no ve los pagos */
+          /* «Instalación» se cobra una sola vez por cliente: si ya se le cobró (y no se anuló), una nueva instalación es una mudanza y se cobra «Reinstalación».
+             No se mira el estado del cliente: la oficina carga al abonado nuevo como «activo» y el técnico no ve los pagos, así que lo controla el servidor */
           const cl = ctx ? ctx.clienteDe(nw.c) : null;
           if (nw.concepto === 'instalacion') {
-            if (cl && cl.estado && cl.estado !== 'pendiente') return 'Ese cliente ya está instalado. Si se mudó, cobrá «Reinstalación (mudanza)».';
+            const f = ctx && ctx.instalacionCobrada ? ctx.instalacionCobrada(nw.c) : '';
+            if (f) return 'A este cliente ya se le cobró la instalación' + (/^\d{4}-\d\d-\d\d$/.test(f) ? ' el ' + f.slice(8) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '') + '. Si se mudó, cobrá «Reinstalación (mudanza)».';
           } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
         if (u.role === 'admin' || p.cobrar) delete nw.comp;   /* el comprobante lo adjunta quien cobra en la calle */
@@ -888,6 +890,16 @@ export class YapurDB extends DurableObject {
       if (isPlain(it)) return it;
     }
     return null;
+  }
+  /* la fecha en que se le cobró la instalación a este cliente (sin contar los recibos anulados), o '' si todavía no se le cobró */
+  instalacionCobrada(cid) {
+    const key = JSON.stringify(cid);
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'pagos')) {
+      if (!r.data.includes(key) || !r.data.includes('"instalacion"')) continue;
+      const its = JSON.parse(r.data).items || {};
+      for (const k of Object.keys(its)) { const it = its[k]; if (isPlain(it) && it.c === cid && it.concepto === 'instalacion' && !it.anulado) return typeof it.fecha === 'string' && it.fecha ? it.fecha : 'si'; }
+    }
+    return '';
   }
   /* los cobros que registró esta persona en los últimos días (quien cobra en la calle no lee la caja entera) */
   /* ----- foto del comprobante de una transferencia (la sube quien cobra en la calle) ----- */
