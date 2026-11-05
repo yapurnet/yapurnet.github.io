@@ -164,24 +164,28 @@ function napMap(p){
   const libres=[];for(let i=1;i<=p.puertos;i++)if(!by.has(i))libres.push(i);
   return {by,sin,libres,dup:[...by.entries()].filter(([,l])=>l.length>1)};
 }
-/* o.pick: se está eligiendo un puerto libre para mover un cliente · o.self: el cliente que se está moviendo · o.sel: el puerto elegido */
+/* la caja dibujada como es: la tapa de adelante y la de atrás, con los puertos (conectores) en filas de a 4 · o.pick: se está eligiendo un puerto libre para mover un cliente · o.self: el cliente que se está moviendo · o.sel: el puerto elegido */
 function portGridHTML(p,m,o){
   o=o||{};
+  const tocable=!o.pick&&canMoverNap();   /* en la ficha de la caja, tocar un puerto libre sirve para elegir qué cliente está ahí */
+  const jack=(i,cls,nm,aria,attrs,tag)=>`<${tag} class="jack ${cls}" ${attrs} aria-label="${esc(aria)}" title="${esc(aria)}"><span class="ring"><b>${i}</b></span><span class="nm">${esc(nm)}</span></${tag}>`;
   const cell=i=>{
-    const l=m.by.get(i)||[],lbl=`<span class="n">Puerto ${i}</span>`;
-    if(!l.length)return o.pick
-      ?`<button class="port free${o.sel===i?' sel':''}" type="button" data-pick="${i}" aria-pressed="${o.sel===i}">${lbl}<span class="w">Libre</span></button>`
-      :`<div class="port free">${lbl}<span class="w">Libre</span></div>`;
+    const l=m.by.get(i)||[];
+    if(!l.length){
+      if(o.pick)return jack(i,'free'+(o.sel===i?' sel':''),'Libre','Puerto '+i+': libre','data-pick="'+i+'" aria-pressed="'+(o.sel===i)+'" type="button"','button');
+      return tocable?jack(i,'free','Libre','Puerto '+i+': libre. Tocá para elegir el cliente','data-free="'+i+'" type="button"','button'):jack(i,'free','Libre','Puerto '+i+': libre','','div');
+    }
     const c=l[0],mine=!!o.self&&l.some(x=>x.id===o.self),est=c.estado!=='activo'&&estLabel(c)?' · '+estLabel(c):'';
-    const body=l.length>1?'<span class="w">Repetido</span><span class="s">'+l.length+' clientes en este puerto</span>'
-      :`<span class="w">${esc(c.nombre)}</span><span class="s">${esc(callePuerto(c)||'Sin domicilio')}${esc(est)}</span>`;
-    if(o.pick)return `<div class="port ${mine?'self':l.length>1?'dup':'used'}">${lbl}${mine?'<span class="w">Acá está hoy</span>':body}</div>`;
-    return l.length>1?`<div class="port dup">${lbl}${body}</div>`:`<button class="port used" type="button" data-cl="${esc(c.id)}">${lbl}${body}</button>`;
+    if(o.pick&&mine)return jack(i,'self','Acá está hoy','Puerto '+i+': acá está hoy '+c.nombre,'','div');
+    if(l.length>1)return jack(i,'dup','Repetido','Puerto '+i+': '+l.length+' clientes en este puerto','','div');
+    const aria='Puerto '+i+': '+c.nombre+' · '+(callePuerto(c)||'Sin domicilio')+est;
+    if(o.pick)return jack(i,'used',c.nombre,aria,'','div');
+    return jack(i,'used',c.nombre,aria,'data-cl="'+esc(c.id)+'" type="button"','button');
   };
   return portLados(p.puertos).map(([lab,a,b])=>{
     const nums=[];for(let i=a;i<=b;i++)nums.push(i);
     const lib=nums.filter(i=>!m.by.has(i)).length;
-    return `<div class="port-side"><div class="head-row"><b>${lab}</b><span class="small muted">puertos ${a} a ${b} · ${lib} ${lib===1?'libre':'libres'}</span></div><div class="ports">${nums.map(cell).join('')}</div></div>`;
+    return `<div class="nap-face"><div class="head-row"><b>${lab}</b><span class="small muted">puertos ${a} a ${b} · ${lib} ${lib===1?'libre':'libres'}</span></div><div class="ports">${nums.map(cell).join('')}</div></div>`;
   }).join('');
 }
 function portsSectionHTML(p,m){
@@ -189,7 +193,7 @@ function portsSectionHTML(p,m){
   const resumen=n?`Quedan <b>${n}</b> ${n===1?'puerto libre':'puertos libres'}.`:'<b>Caja llena</b>: no queda ningún puerto libre.';
   const aviso=m.sin.length?` Hay ${m.sin.length} ${m.sin.length===1?'cliente':'clientes'} sin puerto válido cargado: alguno de los lugares libres puede estar usado.`:'';
   const rev=[...m.sin.map(c=>[c,c.napPuerto?'El puerto '+c.napPuerto+' no existe en esta caja':'Sin puerto cargado']),...m.dup.flatMap(([k,l])=>l.map(c=>[c,'Puerto '+k+' repetido']))];
-  return `<div><h3>Puertos</h3><div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${resumen}${aviso}</div>${portGridHTML(p,m)}
+  return `<div><h3>Puertos</h3><div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${resumen}${aviso}</div>${canMoverNap()?'<div class="hint">Tocá un puerto <b>libre</b> para elegir qué cliente está conectado ahí, o uno <b>ocupado</b> para ver de quién es, cambiarlo de puerto o sacarlo.</div>':''}${portGridHTML(p,m)}
     ${rev.length?`<h3 style="margin-top:14px">Para revisar</h3><div class="list" style="margin-top:8px">${rev.map(([c,why])=>`<button class="item" type="button" data-cl="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(why)}${callePuerto(c)?' · '+esc(callePuerto(c)):''}</div></div></button>`).join('')}</div>`:''}</div>`;
 }
 /* mover un cliente de caja o de puerto: el puerto de origen queda libre y el de destino ocupado en una sola escritura (el puerto vive en el propio cliente) */
@@ -219,6 +223,7 @@ function openRed(id){
     el.addEventListener('click',e=>{
       const o=e.target.closest('[data-open-client]');if(o){openClient(o.dataset.openClient);return;}
       const g=e.target.closest('[data-cl]');if(g){openNapClient(p.id,g.dataset.cl);return;}
+      const fr=e.target.closest('[data-free]');if(fr){openAsignarPuerto(p.id,parseInt(fr.dataset.free,10));return;}
       const r=e.target.closest('[data-red]');if(r){openRed(r.dataset.red);return;}
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openRedForm(p.id);
@@ -234,14 +239,73 @@ function openNapClient(napId,cid){
   const html=`<div class="head-row">${estChip(c)}</div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}</h2>
     <dl class="kv">${kv('Caja',esc(p.nombre))}${kv('Puerto',c.napPuerto?esc(c.napPuerto):'Sin puerto cargado')}${kv('Domicilio',esc(callePuerto(c)))}${vis&&can('telefono')&&c.tel?kv('Teléfono',esc(c.tel)):''}</dl>
-    <div class="actions">${vis?'<button class="btn" type="button" data-act="ficha">Ver ficha del cliente</button>':''}${canMoverNap()?'<button class="btn primary" type="button" data-act="mover">Mover a otra caja o puerto</button>':''}<button class="btn ghost" type="button" data-act="volver">Volver a la caja</button></div>`;
+    <div class="actions">${vis?'<button class="btn" type="button" data-act="ficha">Ver ficha del cliente</button>':''}${canMoverNap()?'<button class="btn primary" type="button" data-act="mover">Mover a otra caja o puerto</button>':''}${canMoverNap()&&c.nap===napId?'<button class="btn danger" type="button" data-act="sacar">Sacar de esta caja</button>':''}<button class="btn ghost" type="button" data-act="volver">Volver a la caja</button></div>`;
   openModal({title:'Cliente en '+p.nombre,html,onMount(el){
     el.addEventListener('click',e=>{
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='ficha')openClient(c.id);
       else if(a.dataset.act==='mover')openMoverNap(c.id,napId);
+      else if(a.dataset.act==='sacar')sacarDeCaja(c.id,napId);
       else if(a.dataset.act==='volver')openRed(napId);
     });
+  }});
+}
+/* sacar a un cliente de la caja: queda libre su puerto (el cliente no se borra ni se da de baja) */
+async function sacarDeCaja(cid,napId){
+  const p=S.red.get(napId),c=S.clientes.get(cid);if(!p||!c)return openRed(napId);
+  if(!canMoverNap())return toast('Tu perfil no puede cambiar de caja a un cliente','bad');
+  if(!await askConfirm('¿Sacar a '+c.nombre+' de '+p.nombre+'?'+(c.napPuerto?' El puerto '+c.napPuerto+' queda libre.':'')+' El cliente sigue en el sistema.','Sacar de la caja',true))return openNapClient(napId,cid);
+  try{
+    await putItem('clientes',clientShard(c.id),c.id,{nap:null,napPuerto:null,mod:Date.now()});
+    await esperarCliente(c.id,x=>!x.nap);
+    toast('Listo: el puerto'+(c.napPuerto?' '+c.napPuerto:'')+' quedó libre');openRed(napId);
+  }catch(err){dbError(err);}
+}
+/* un puerto libre: se busca por nombre o calle al cliente que está conectado ahí y se lo carga en ese puerto (un técnico busca con 3 letras como mínimo y ve pocos resultados: no es una lista de todos los clientes) */
+function openAsignarPuerto(napId,port,q0){
+  const p=S.red.get(napId);if(!p)return;
+  if(!canMoverNap())return toast('Tu perfil no puede cargar clientes en una caja','bad');
+  const todos=can('clientesTodos'),min=todos?2:3,lim=todos?30:8;
+  const html=`<p>¿Qué cliente está conectado en el <b>puerto ${port}</b> de <b>${esc(p.nombre)}</b>?</p>
+    <input class="search" id="as-q" type="search" placeholder="Nombre o calle del cliente" autocomplete="off" aria-label="Buscar cliente por nombre o calle" value="${esc(q0||'')}">
+    <div class="hint" id="as-hint"></div><div class="list" id="as-list"></div>
+    <div class="actions"><button class="btn ghost" type="button" id="as-back">Volver a la caja</button></div>`;
+  openModal({title:'Puerto '+port+' · '+p.nombre,html,onMount(el){
+    const q=$('#as-q',el),hint=$('#as-hint',el),list=$('#as-list',el);
+    const buscar=()=>{
+      const parts=norm(q.value).trim().split(/\s+/).filter(Boolean),txt=parts.join('');
+      if(txt.length<min){list.innerHTML='';hint.className='hint';hint.textContent='Escribí al menos '+min+' letras del nombre o de la calle.';return;}
+      const out=[];
+      for(const c of S.clientes.values()){
+        if(c.estado==='baja')continue;
+        const h=norm([c.nombre,c.dir,c.loc,c.codigo].join(' '));
+        if(parts.every(x=>h.includes(x)))out.push(c);
+      }
+      out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true}));
+      hint.className='hint';hint.textContent=out.length?(out.length>lim?'Hay más: escribí más letras para acotar.':''):'No hay ningún cliente con ese nombre. Si es nuevo, cargalo primero en Clientes.';
+      list.innerHTML=out.slice(0,lim).map(c=>{
+        const nm=c.nap&&redName(c.nap);
+        return `<button class="item" type="button" data-as="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(callePuerto(c)||'Sin domicilio')}</div></div><div class="side">${nm?`<span class="chip">${esc(nm)}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:'<span class="chip quiet">Sin caja</span>'}</div></button>`;
+      }).join('');
+    };
+    q.addEventListener('input',buscar);buscar();
+    $('#as-back',el).addEventListener('click',()=>openRed(napId));
+    list.addEventListener('click',async e=>{
+      const b=e.target.closest('[data-as]');if(!b)return;
+      const c=S.clientes.get(b.dataset.as);if(!c)return;
+      const otro=napClients(napId).find(x=>x.id!==c.id&&parseInt(x.napPuerto,10)===port);
+      if(otro)return toast('El puerto '+port+' acaba de ser ocupado por '+otro.nombre+'. Elegí otro.','bad');
+      const hoy=c.nap&&redName(c.nap);
+      if(hoy&&!(c.nap===napId&&parseInt(c.napPuerto,10)===port)){
+        if(!await askConfirm(c.nombre+' figura hoy en '+hoy+(c.napPuerto?' · puerto '+c.napPuerto:'')+'. ¿Pasarlo al puerto '+port+' de '+p.nombre+'? El lugar que deja queda libre.','Pasarlo acá'))return openAsignarPuerto(napId,port,q.value);
+      }
+      try{
+        await putItem('clientes',clientShard(c.id),c.id,{nap:napId,napPuerto:port,mod:Date.now()});
+        await esperarCliente(c.id,x=>x.nap===napId&&parseInt(x.napPuerto,10)===port);
+        toast(c.nombre+' · puerto '+port);openRed(napId);
+      }catch(err){dbError(err);}
+    });
+    q.focus();
   }});
 }
 function openMoverNap(cid,volverA){
@@ -332,9 +396,12 @@ function openRedForm(id,tipoNuevo){
       if(old&&puertos&&puertos<napUsed(old.id))return toast('La caja ya tiene '+napUsed(old.id)+' clientes conectados: no puede tener menos puertos','bad');
       const obj={tipo,nombre,lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,puertos,padre:v('rf-padre')||null,ref:v('rf-ref'),notas:v('rf-notas'),mod:Date.now()};
       try{
+        let nid=null;
         if(old)await putItem('red','puntos',old.id,obj);
-        else{const nid=newId();await putItem('red','puntos',nid,Object.assign({creado:Date.now()},obj));}
+        else{nid=newId();await putItem('red','puntos',nid,Object.assign({creado:Date.now()},obj));}
         toast(old?'Cambios guardados':(tipo==='nap'?'Caja NAP guardada':'Botella de empalme guardada'));closeModal();
+        /* una caja recién creada se abre sola, ya dibujada, para ir cargando qué cliente va en cada puerto */
+        if(nid&&tipo==='nap'&&puertos){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
       }catch(err){dbError(err);}
     });
     const del=$('#rf-del',el);

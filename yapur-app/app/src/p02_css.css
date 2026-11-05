@@ -196,21 +196,25 @@ button.chip[hidden],.netbar[hidden],.devbar[hidden]{display:none}
 .kpi.tap{cursor:pointer}
 .kpi.tap:hover{border-color:var(--accent-line)}
 /* puertos de una caja NAP */
-.port-side{margin-top:10px}
-.ports{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:6px}
-.port{display:flex;flex-direction:column;gap:2px;min-width:0;min-height:60px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);text-align:left;font:inherit;color:var(--ink)}
-button.port{cursor:pointer}
-button.port:hover{border-color:var(--accent-line)}
-.port .n{font-size:12px;font-weight:700;color:var(--muted)}
-.port .w{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.port .s{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.port.free{background:var(--ok-soft);border-color:transparent}
-.port.free .w{color:var(--ok)}
-.port.dup{background:var(--warn-soft);border-color:transparent}
-.port.dup .w{color:var(--warn)}
-.port.self{border-style:dashed;background:var(--surface-2)}
-.port.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
-.port.used:not(button){opacity:.75}
+.nap-face{position:relative;margin-top:16px;padding:12px 10px 8px;border:2px solid var(--line);border-radius:16px;background:var(--surface-2)}
+.nap-face::before{content:"";position:absolute;left:0;right:0;top:-8px;height:8px;background:linear-gradient(var(--line),var(--line)) 22px 0/30px 8px no-repeat,linear-gradient(var(--line),var(--line)) right 22px top 0/30px 8px no-repeat;border-radius:4px 4px 0 0}
+.nap-face::after{content:"";position:absolute;left:50%;bottom:-7px;width:44px;height:7px;margin-left:-22px;background:var(--line);border-radius:0 0 6px 6px}
+.nap-face .head-row{padding:0 2px 6px}
+.ports{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 4px;margin-top:2px}
+.jack{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;padding:6px 2px;border:0;border-radius:var(--r-sm);background:none;font:inherit;color:var(--ink);text-align:center}
+button.jack{cursor:pointer}
+button.jack:hover{background:var(--surface)}
+.jack .ring{display:grid;place-items:center;width:46px;height:46px;border-radius:50%;border:3px solid var(--line);background:var(--surface);font-size:15px}
+.jack .ring b{font-weight:800}
+.jack .nm{width:100%;min-height:2.4em;font-size:11.5px;font-weight:600;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.jack.free .ring{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
+.jack.free .nm{color:var(--ok)}
+.jack.used .ring{border-color:var(--accent);background:var(--accent);color:var(--accent-ink)}
+.jack.dup .ring{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+.jack.dup .nm{color:var(--warn)}
+.jack.self .ring{border-style:dashed;border-color:var(--accent);background:var(--surface);color:var(--accent)}
+.jack.sel .ring{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+div.jack.used{opacity:.8}
 .comp-thumb{display:block;align-self:flex-start;justify-self:start;width:auto;height:auto;max-width:100%;max-height:220px;object-fit:contain;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--line)}
 .comp-full{display:block;width:100%;height:auto;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--line)}
 
