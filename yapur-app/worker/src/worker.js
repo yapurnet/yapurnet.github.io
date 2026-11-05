@@ -406,7 +406,14 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       /* un único objeto con nombre fijo = una única base de datos para toda la empresa; se crea cerca de Sudamérica */
       const stub = env.YAPUR.get(env.YAPUR.idFromName('principal'), { locationHint: 'sam' });
-      return stub.fetch(request);
+      /* si la base de datos tira una excepción (límite del plan, reinicio, falla de Cloudflare) Cloudflare mostraba su página «Error 1101» sin decir nada:
+         ahora se contesta con el motivo, así se ve qué pasó y la app lo trata como «sin conexión» (no como un dato inválido) */
+      try { return await stub.fetch(request); }
+      catch (e) {
+        const motivo = String((e && e.message) || e).replace(/\s+/g, ' ').slice(0, 200);
+        console.error('YapurDB:', motivo);
+        return send(503, { error: 'La base de datos del servidor no responde: ' + motivo, code: 'unavailable' });
+      }
     }
     return env.ASSETS.fetch(request);
   }
