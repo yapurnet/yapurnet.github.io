@@ -10,7 +10,19 @@ async function call(method, p, body, token) {
   let j = null; try { j = await r.json(); } catch (e) {}
   return { s: r.status, j };
 }
-async function openStream(token) {
+/* conexión en vivo como la usa la app: WebSocket (el servidor se duerme mientras nadie hace nada). Devuelve los mensajes ya separados en {ev,data}. */
+async function openStream(token, ticket) {
+  const tk = ticket || (await call('POST', '/api/ticket', {}, token)).j.t;
+  const events = [];
+  const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/api/stream?t=' + tk);
+  let status = 0;
+  ws.addEventListener('message', m => { if (m.data === 'pong') { events.pong = (events.pong || 0) + 1; return; } try { const j = JSON.parse(m.data); events.push({ ev: j.e, data: j.d }); } catch (e) {} });
+  ws.addEventListener('close', () => { events.closed = true; });
+  await new Promise(res => { ws.addEventListener('open', () => { status = 200; res(); }); ws.addEventListener('error', () => res()); ws.addEventListener('close', () => res()); });
+  return { events, status, ws, close: () => { try { ws.close(); } catch (e) {} } };
+}
+/* la conexión por SSE que usan las versiones viejas de la app (siguen funcionando) */
+async function openSSE(token) {
   const tk = (await call('POST', '/api/ticket', {}, token)).j.t;
   const r = await fetch(BASE + '/api/stream?t=' + tk);
   const events = [];
@@ -637,6 +649,13 @@ async function openStream(token) {
     const sO = await openStream(O), sT = await openStream(T);
     await sleep(200);
     t('stream abre y saluda', sO.status === 200 && sO.events.some(e => e.ev === 'hello'));
+    t('el WebSocket saluda con el número de cambio actual', sO.events.find(e => e.ev === 'hello') && typeof sO.events.find(e => e.ev === 'hello').data.seq === 'number');
+    sO.ws.send('ping'); await sleep(200);
+    t('el «ping» se contesta «pong» sin pasar por el servidor', sO.events.pong === 1, sO.events.pong);
+    const mal = await openStream(O, 'ticket-falso'); await sleep(300);
+    t('con un ticket inválido el WebSocket no se abre', mal.status === 0 && mal.ws.readyState !== 1 && !mal.events.length, [mal.status, mal.ws.readyState]);
+    const viejo = await openSSE(O); await sleep(200);
+    t('las versiones viejas de la app siguen conectando por SSE', viejo.status === 200 && viejo.events.some(e => e.ev === 'hello'));
     r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cli2: { nombre: 'Beto', planId: 'p1', precio: 15000, nodo: 'Torre 9' } } } }, O);
     await sleep(200);
     const dO = sO.events.filter(e => e.ev === 'doc' && e.data.coll === 'clientes'), dT = sT.events.filter(e => e.ev === 'doc' && e.data.coll === 'clientes');
@@ -668,7 +687,7 @@ async function openStream(token) {
     t('el desactivado no puede entrar', r.s === 401 && /desactivado/.test(r.j.error), r);
     r = await call('PATCH', '/api/users/' + (await call('GET', '/api/users', undefined, A)).j.users.find(u => u.usuario === 'mauro').id, { activo: false }, A);
     t('no se puede desactivar al único administrador', r.s === 400, r);
-    sO.close(); sT.close();
+    sO.close(); sT.close(); viejo.close();
 
     /* ---- claves ---- */
     r = await call('POST', '/api/me/clave', { actual: 'incorrecta', nueva: 'nueva123' }, O);
