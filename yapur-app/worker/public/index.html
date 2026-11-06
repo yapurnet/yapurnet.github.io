@@ -4149,6 +4149,9 @@ const OR={scope:'mias',estado:'abiertas',tec:''};
 const ORD_OPEN=o=>o.estado!=='hecha'&&o.estado!=='cancelada';
 const tecById=id=>S.ajustes.tecnicos.find(t=>t.id===id);
 const tecLabel=o=>{const t=tecById(o.tecnico);return t?t.nombre:(o.tecNombre||'');};
+/* una instalación se puede cerrar sin cobrar, pero hay que dejar dicho por qué; la oficina la ve «sin cobrar» hasta que se registre el pago */
+const SIN_COBRO={oficina:'El cliente va a pagar en la oficina',otro_dia:'El cliente va a pagar otro día',otro:'Otro motivo'};
+const ordSinCobrar=o=>!!o&&o.tipo==='instalacion'&&o.estado==='hecha'&&!!o.sinCobro&&!instCobrada(S.clientes.get(o.clientId));
 const ESTADO_ORD_CLS={pendiente:'warn',en_camino:'info',en_curso:'info',hecha:'ok',cancelada:''};
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
@@ -4166,15 +4169,16 @@ function orderCard(o){
   const tec=tecLabel(o),t=tecById(o.tecnico);
   const next={pendiente:['en_camino','Salgo para allá'],en_camino:['en_curso','Llegué, empiezo'],en_curso:['hecha','Terminar']}[o.estado];
   return `<article class="card ord${o.prioridad==='urgente'&&open?' urgent':''}" data-oid="${esc(o.id)}">
-    <div class="head-row"><div class="stripe"><span class="chip accent">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</span><span class="chip ${ESTADO_ORD_CLS[o.estado]||''}">${esc(EST_ORD[o.estado]||o.estado)}</span>${o.prioridad==='urgente'?'<span class="chip bad">Urgente</span>':''}</div>
+    <div class="head-row"><div class="stripe"><span class="chip accent">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</span><span class="chip ${ESTADO_ORD_CLS[o.estado]||''}">${esc(EST_ORD[o.estado]||o.estado)}</span>${o.prioridad==='urgente'?'<span class="chip bad">Urgente</span>':''}${ordSinCobrar(o)?'<span class="chip warn">Sin cobrar</span>':''}</div>
       <span class="small muted">${o.fecha?esc(dateLabel(o.fecha)):''}</span></div>
     <div><div class="t" style="font-weight:700;overflow-wrap:anywhere">${esc(c?c.nombre:'Cliente no encontrado')}</div>
       <div class="s muted" style="overflow-wrap:anywhere">${esc(c?(c.dir||'')+(c.loc?', '+c.loc:''):'')}${c&&c.ref?' · '+esc(c.ref):''}</div></div>
     ${o.notas?`<div>${esc(o.notas)}</div>`:''}${o.resultado?`<div class="notice info"><b>Resultado:</b> ${esc(o.resultado)}</div>`:''}
+    ${o.tipo==='instalacion'&&o.sinCobro&&o.estado==='hecha'?(ordSinCobrar(o)?`<div class="notice"><b>Instalación sin cobrar:</b> ${esc(SIN_COBRO[o.sinCobro]||o.sinCobro)}${o.sinCobroNota?' · '+esc(o.sinCobroNota):''}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar la instalación</button></div>':''}`:'<div class="small muted">La instalación se cobró después de cerrar la orden.</div>'):''}
     <div class="small muted">${tec?'Asignada a <b>'+esc(tec)+'</b>':'Sin técnico asignado'}${o.cierre?' · cerrada '+esc(o.cierre):''}</div>
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
-    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}
+    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
@@ -4226,6 +4230,8 @@ function openOrderForm({id,clientId}){
 /* cobro que se hace en el mismo momento en que se termina el trabajo (instalación, reclamo). Una reconexión solo se cobra si el cliente tiene deuda y la cobra la oficina: el técnico nunca */
 const CONC_ORD={instalacion:'instalacion',falla:'reclamo',visita:'reclamo',reconexion:'reconexion'};
 const puedeCobrarOrden=(c,o)=>!!c&&!!o&&(o.tipo==='reconexion'?can('cobrar')&&conDeuda(c):(can('cobrar')||can('cobrarCampo')));
+/* a quien todavía no pagó la instalación no se le puede cerrar la orden de instalación sin cobrar y sin decir por qué */
+const exigeMotivo=(o,c)=>o.tipo==='instalacion'&&!instCobrada(c);
 function cobroOrdenHTML(o,c){
   const lista=conceptosCobro(c,soloCampo());
   let con0=CONC_ORD[o.tipo]||'otro';
@@ -4239,7 +4245,10 @@ function cobroOrdenHTML(o,c){
       ${F('Monto cobrado','ff-monto',`<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off"${precioFijo(con0)?` value="${precioFijo(con0)}"${soloCampo()?' readonly':''}`:''}>`,'')}
       <div class="hint" id="ff-fijo">${precioFijo(con0)&&soloCampo()?'Precio fijo: '+fmtMoney(precioFijo(con0))+'. Lo define el administrador.':''}</div>
       ${soloCampo()?compHTML('ff'):''}
-    </div></div>`;
+    </div>
+    ${exigeMotivo(o,c)?`<div id="ff-nocobro"><div class="notice">Si no cobraste la instalación, dejá anotado por qué: la oficina la ve como «sin cobrar» hasta que se registre el pago.</div>
+      ${F('¿Por qué no cobraste?','ff-motivo',`<select id="ff-motivo"><option value="">Elegí el motivo…</option>${Object.entries(SIN_COBRO).map(([k,v])=>opt(k,v,false)).join('')}</select>`)}
+      <div id="ff-motivo-nota-box" hidden>${F('Contá qué pasó','ff-motivo-nota','<textarea id="ff-motivo-nota" maxlength="200" placeholder="Por ejemplo: no estaba el dueño, va a pagar con el cheque…"></textarea>')}</div></div>`:''}</div>`;
 }
 function openFinishOrder(o){
   const c=S.clientes.get(o.clientId);
@@ -4257,7 +4266,9 @@ function openFinishOrder(o){
     const ckc=$('#ff-cobro',el);
     const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>$('#ff-met',el).value):null;
     if(comp){$('#ff-met',el).addEventListener('change',comp.sync);comp.sync();}
-    if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
+    const noc=$('#ff-nocobro',el),mot=$('#ff-motivo',el);
+    if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(noc)noc.hidden=ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
+    if(mot)mot.addEventListener('change',()=>{$('#ff-motivo-nota-box',el).hidden=mot.value!=='otro';if(mot.value==='otro')$('#ff-motivo-nota',el).focus();});
     /* al cambiar el concepto: instalación y reinstalación llevan su precio fijo (el técnico no lo puede cambiar) */
     const selCon=$('#ff-con',el);
     if(selCon)selCon.addEventListener('change',()=>{
@@ -4272,8 +4283,12 @@ function openFinishOrder(o){
       const cobra=ckc&&ckc.checked,fijoC=cobra&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(fijoC||num($('#ff-monto',el).value)):0;
       if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
       const sinFoto=cobra&&comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');   /* antes de cerrar la orden: si falta la foto no se cierra nada */
+      /* una instalación que se cierra sin cobrar lleva el motivo (y, si es «otro», qué pasó) */
+      const motivo=!cobra&&mot?mot.value:'',notaMot=motivo?$('#ff-motivo-nota',el).value.trim().slice(0,200):'';
+      if(!cobra&&mot){if(!motivo)return toast('Si no cobraste la instalación, elegí el motivo','bad');if(motivo==='otro'&&!notaMot)return toast('Contá qué pasó para no cobrar la instalación','bad');}
       try{
-        await saveOrder(o,{estado:'hecha',resultado:$('#ff-res',el).value.trim(),cierre:todayStr()+' '+nowTime()});
+        const quien=!o.tecnico&&S.tecId?{tecnico:S.tecId,tecNombre:(tecById(S.tecId)||{}).nombre||null}:{};   /* si se cierra sin haber «salido para allá», queda a nombre de quien la cierra */
+        await saveOrder(o,Object.assign({estado:'hecha',resultado:$('#ff-res',el).value.trim(),cierre:todayStr()+' '+nowTime()},quien,motivo?{sinCobro:motivo,sinCobroNota:notaMot}:{}));
         const cp={};
         if(!g.empty&&c)Object.assign(cp,{lat:g.lat,lng:g.lng});
         if(nf&&c&&(nf.nap!==(c.nap||null)||nf.puerto!==(c.napPuerto||null)))Object.assign(cp,{nap:nf.nap,napPuerto:nf.puerto});
@@ -4286,7 +4301,7 @@ function openFinishOrder(o){
           try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:$('#ff-met',el).value,nota:TIPOS_ORD[o.tipo]||'',comp:comp?comp.id():null});}
           catch(err2){toast('La orden se cerró, pero el cobro NO se registró. Cargalo con «Cobrar».','bad');}
         }
-        toast(rec?'Orden cerrada y cobro registrado':'Orden cerrada');closeModal();
+        toast(rec?'Orden cerrada y cobro registrado':motivo?'Orden cerrada: la instalación queda «sin cobrar» para la oficina':'Orden cerrada');closeModal();
         if(rec)openReceipt(rec);
       }catch(err){dbError(err);}
     });
@@ -4298,7 +4313,9 @@ async function orderAction(o,act){
       if(o.estado==='pendiente')await saveOrder(o,{estado:'en_camino',tecnico:o.tecnico||S.tecId||null,tecNombre:o.tecNombre||(tecById(S.tecId)||{}).nombre||null});
       else if(o.estado==='en_camino')await saveOrder(o,{estado:'en_curso'});
       else openFinishOrder(o);
-    }else if(act==='take'){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null});toast('Orden asignada a vos');}
+    }else if(act==='fin')openFinishOrder(o);
+    else if(act==='cobrar')openCobro(o.clientId,'instalacion');
+    else if(act==='take'){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null});toast('Orden asignada a vos');}
     else if(act==='edit')openOrderForm({id:o.id});
     else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
@@ -4309,7 +4326,7 @@ VIEWS.ordenes={
   mount(el){
     const tech=!can('ordenesTodas');
     el.innerHTML=`<div class="head-row"><h2>Órdenes de trabajo</h2>${can('crearOrdenes')?'<button class="btn primary" type="button" id="or-new">Nueva orden</button>':''}</div>
-      <div id="or-who"></div><div class="toolbar"><div class="seg" id="or-seg"></div>
+      <div id="or-who"></div><div id="or-pend"></div><div class="toolbar"><div class="seg" id="or-seg"></div>
       ${tech?'':`<div class="line"><select id="or-tec" class="search" aria-label="Filtrar por técnico"></select></div>`}</div>
       <div class="list" id="or-list"></div>`;
     const nb=$('#or-new',el);if(nb)nb.addEventListener('click',()=>openOrderForm({}));
@@ -4329,6 +4346,9 @@ VIEWS.ordenes={
     const iam=tech&&!!S.tecId&&!!S.perfil;
     const who=$('#or-who');
     who.innerHTML=iam?`<div class="hint">Trabajás como <b>${esc(S.perfil.nombre)}</b>.</div>`:'';
+    /* a quien cobra en la oficina: las instalaciones que se cerraron sin cobrar y siguen sin cobrarse */
+    const pend=$('#or-pend'),sinC=can('cobrar')?[...S.ordenes.values()].filter(ordSinCobrar):[];
+    if(pend)pend.innerHTML=sinC.length?`<div class="notice" role="status" style="margin-bottom:12px"><b>${sinC.length===1?'1 instalación sin cobrar':sinC.length+' instalaciones sin cobrar'}:</b> ${sinC.map(o=>{const c=S.clientes.get(o.clientId);return esc(c?c.nombre:'Cliente')+' ('+esc((SIN_COBRO[o.sinCobro]||o.sinCobro).replace(/^El cliente va a /,'va a '))+')';}).join(', ')}. Se cobran desde su orden cerrada o desde la ficha del cliente.</div>`:'';
     const fs=[['abiertas','Abiertas'],['hechas','Cerradas'],['todas_est','Todas']];
     seg.innerHTML=(iam?[['mias','Mías'],['libres','Sin asignar']].map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${OR.scope===k}">${l}</button>`).join('')+'<span style="width:8px"></span>':'')
       +fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${OR.estado===k}">${l}</button>`).join('');
@@ -5932,7 +5952,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='f0897c2f27';
+const BUILD='3efe8d6ea6';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
