@@ -87,6 +87,17 @@ El cuarto punto de la pestaña Red es la **OLT**: el equipo de donde sale la fib
 - **Buscarla y exportarla:** en la lista de Red hay un filtro **OLT** (junto a Cajas NAP, Botellas y Splitters), que muestra la cantidad de puertos y cuántos están en uso. El CSV de Red suma las columnas correspondientes.
 - **Permisos:** usa el mismo permiso **«Cargar y editar la red»**; no hay uno nuevo. Quien no lo tiene ve la ficha de la OLT pero no puede tocar nada. No hace falta un APK nuevo.
 
+## Red: el plano de la red (el dibujo de las conexiones)
+
+Con la OLT, las botellas, los splitters y las cajas ya cargados, la pestaña Red tiene un botón **«Ver plano de la red»** que arma solo, con lo que ya está cargado, un dibujo de todo el recorrido de la fibra: de la OLT hacia abajo, cada botella, cada splitter y cada caja en su lugar, conectados con el mismo color de 12 colores que ya se usa en las salidas y los pelos.
+
+- **Para qué sirve:** es una forma rápida de revisar que el diseño está bien armado, sin tener que entrar punto por punto. Una línea **punteada** (sin color) avisa que una caja, botella o splitter está declarado como «Sale de» pero todavía no se anotó por cuál pelo, salida o puerto sale exactamente: falta cargar ese dato en el punto de origen.
+- **Se arma solo:** no hay nada que dibujar a mano. Cada vez que se abre el plano, se arma de nuevo con los datos más recientes; para verlo actualizado después de cargar algo nuevo (por ejemplo, un splitter con sus dos niveles y una botella secundaria saliendo de la segunda salida), basta con volver a abrirlo o tocar **«Actualizar»**.
+- **Varios orígenes:** si hay más de una OLT, o quedó alguna botella vieja sin OLT cargada (de antes de que existiera este punto), cada una se dibuja como su propio árbol, uno al lado del otro.
+- **Tocar una caja** del plano abre su ficha, igual que en la lista. **Acercar / Alejar / Tamaño real** cambian el zoom para ver mejor un sector o toda la red junta.
+- **Imprimir:** el botón **«Imprimir»** arma una hoja aparte (A4 apaisada, para que entre un árbol más ancho que alto) solo con el dibujo, lista para guardar en papel o como PDF. Desde la aplicación del celular abre la impresión de Android; desde la computadora, abre el diálogo de impresión del navegador.
+- **Permisos:** es un permiso aparte, **«Ver el plano de la red»**, para que cada administrador elija a qué técnicos se lo muestra (además del permiso de red, que es el que da acceso a la pestaña). Viene **apagado** por defecto en los técnicos (se activa por perfil en Ajustes → Usuarios, igual que los demás permisos) y **encendido** en la oficina. Desde el plano no se puede editar nada: solo mirar y, si se toca una caja, ver su ficha con los mismos permisos de siempre.
+
 ## Instalaciones por día, semana y mes
 
 Pestaña **Instalaciones** (la ven el administrador y la oficina; el técnico no, porque no ve las órdenes de todos). Arriba se elige **Día**, **Semana** (de lunes a domingo) o **Mes**; con `‹` y `›` se va al período anterior o siguiente, «Volver a hoy» regresa, y el gráfico de barras (14 días, 8 semanas o 12 meses) se toca para saltar a cualquier período. Abajo muestra:
