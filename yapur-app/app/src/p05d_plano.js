@@ -48,9 +48,10 @@ function planoLayout(bosque){
 }
 /* una caja del plano: nombre, tipo y cuánto está en uso; tocarla abre su ficha (igual que en el resto de la app) */
 function planoCajaSVG(nodo){
-  const p=nodo.p,x=nodo.x-PLANO_W/2,y=nodo.y,cls=PLANO_TIPO_CLS[p.tipo]||'';
+  const p=nodo.p,x=nodo.x-PLANO_W/2,y=nodo.y,cls=(PLANO_TIPO_CLS[p.tipo]||'')+(p.tipo==='nap'&&!p.iluminada?' apagada':'');
   const nombre=p.nombre.length>22?p.nombre.slice(0,21)+'…':p.nombre;
-  return `<g class="pnode ${cls}" tabindex="0" role="button" data-red="${esc(p.id)}" aria-label="${esc(p.nombre+' · '+(RED_TIPO[p.tipo]||p.tipo)+' · '+planoResumen(p))}">
+  const estNap=p.tipo==='nap'?(' · '+(p.iluminada?'Iluminada':'Sin empalmar')):'';
+  return `<g class="pnode ${cls}" tabindex="0" role="button" data-red="${esc(p.id)}" aria-label="${esc(p.nombre+' · '+(RED_TIPO[p.tipo]||p.tipo)+estNap+' · '+planoResumen(p))}">
     <title>${esc(p.nombre)}</title>
     <rect x="${x}" y="${y}" width="${PLANO_W}" height="${PLANO_H}" rx="10"></rect>
     <text x="${nodo.x}" y="${y+23}" text-anchor="middle" class="pnode-t">${esc(nombre)}</text>
@@ -128,7 +129,7 @@ function openRedPlano(){
 }
 /* ----- imprimir: igual que el recibo (APK: se lo pasa a Android; navegador: una hoja aparte con window.print()) ----- */
 const PLANO_PRINT_CSS='@page{size:A4 landscape;margin:10mm}html,body{margin:0;background:#fff}h1{font:700 14pt "Public Sans",system-ui,sans-serif;margin:0 0 6mm}svg{width:100%;height:auto;display:block}'
-  +'.pnode rect{fill:#F4F8F9;stroke:#587080;stroke-width:1.5}.pnode.olt rect{fill:#D6EFEC;stroke:#0A7C77}.pnode.nap rect{fill:#DDF3E4;stroke:#1E8449}.pnode.empalme rect{fill:#DCE8F7;stroke:#245FA8}'
+  +'.pnode rect{fill:#F4F8F9;stroke:#587080;stroke-width:1.5}.pnode.olt rect{fill:#D6EFEC;stroke:#0A7C77}.pnode.nap rect{fill:#DDF3E4;stroke:#1E8449}.pnode.nap.apagada rect{fill:#F4F8F9;stroke:#587080}.pnode.empalme rect{fill:#DCE8F7;stroke:#245FA8}'
   +'.pnode-t{font:700 11px "Public Sans",system-ui,sans-serif;fill:#0E2230}.pnode-s{font:500 9.5px "Public Sans",system-ui,sans-serif;fill:#587080}'
   +'.pedge{fill:none;stroke:#8c96a3;stroke-width:2}.pedge.sinconectar{stroke-dasharray:5 4}.pedge-lab circle{fill:#fff;stroke:#8c96a3}.pedge-lab text{font:700 9px "Public Sans",system-ui,sans-serif;fill:#0E2230}';
 function printPlano(){

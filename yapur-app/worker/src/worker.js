@@ -276,7 +276,7 @@ function guard(u, p, coll, existing, patch, ctx) {
 
 /* ----- red: cajas NAP, botellas de empalme, splitters y OLT (se guardan juntas en red/puntos, un registro por punto) ----- */
 const RED_TIPOS = ['nap', 'empalme', 'splitter', 'olt'];
-const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos', 'rel', 'salidas'];
+const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos', 'rel', 'salidas', 'iluminada'];
 /* solo de las botellas de empalme: qué fibra es, cuántos pelos tiene y de a cuántos por tubo, qué PON están vivos, qué hay que hacer y qué lleva cada pelo */
 const EMP_KEYS = ['fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
 const PELO_ESTADOS = ['libre', 'empalmado', 'reservado', 'danado'];
@@ -323,6 +323,10 @@ function guardRed(u, p, old, items) {
       if (!SALIDA_TIPOS.includes(tipo)) return 'Las salidas son solo de los splitters y la OLT.';
       const e = guardSalidas(id, nw.salidas, tipo === 'splitter' ? 64 : 288);
       if (e) return e;
+    }
+    if ('iluminada' in nw) {
+      if (tipo !== 'nap') return 'El estado iluminada/sin empalmar es solo de las cajas NAP.';
+      if (typeof nw.iluminada !== 'boolean') return 'El estado iluminada no es válido.';
     }
   }
   return null;

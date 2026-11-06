@@ -115,7 +115,7 @@ function redRow(p,d){
     <div><div class="t">${esc(p.nombre)} <span class="chip ${nap?'accent':(split||olt)?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span></div>
     <div class="s">${esc([p.ref,par?'Sale de '+par:''].filter(Boolean).join(' · ')||'Sin referencia')}</div></div>
     <div class="side">${use}</div>
-    <div class="tags">${hasGeo(p)?'':'<span class="chip warn">Sin ubicación</span>'}${d!=null?`<span class="chip info">a ${esc(fmtDist(d))}</span>`:''}</div></button>`;
+    <div class="tags">${nap&&!p.iluminada?'<span class="chip quiet">Sin empalmar</span>':''}${hasGeo(p)?'':'<span class="chip warn">Sin ubicación</span>'}${d!=null?`<span class="chip info">a ${esc(fmtDist(d))}</span>`:''}</div></button>`;
 }
 function redRows(){
   const parts=norm(RED.q).trim().split(/\s+/).filter(Boolean);
@@ -126,6 +126,7 @@ function redRows(){
     if(RED.tipo==='olt'&&p.tipo!=='olt')return false;
     if(RED.tipo==='nogeo'&&hasGeo(p))return false;
     if(RED.tipo==='llenas'&&!(p.tipo==='nap'&&p.puertos&&napUsed(p.id)>=p.puertos))return false;
+    if(RED.tipo==='sinempalmar'&&!(p.tipo==='nap'&&!p.iluminada))return false;
     if(parts.length){const h=norm([p.nombre,p.ref,p.notas,p.fibra,p.hacer,RED_TIPO[p.tipo],redName(p.padre)].join(' '));if(!parts.every(x=>h.includes(x)))return false;}
     return true;
   }).map(p=>({p,d:RED.sort==='cerca'&&RED.me&&hasGeo(p)?distM(RED.me,p):null}));
@@ -135,9 +136,9 @@ function redRows(){
 }
 let redRun=null;
 function exportRed(){
-  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','relación splitter','salidas usadas','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
+  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','iluminada','relación splitter','salidas usadas','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
   [...S.red.values()].sort(redTipoCmp).forEach(p=>{
-    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',p.tipo==='splitter'&&p.rel?'1x'+p.rel:'',(p.tipo==='splitter'||p.tipo==='olt')&&redCantidad(p)?salidasUsadas(p):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
+    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',p.tipo==='nap'?(p.iluminada?'Sí':'No'):'',p.tipo==='splitter'&&p.rel?'1x'+p.rel:'',(p.tipo==='splitter'||p.tipo==='olt')&&redCantidad(p)?salidasUsadas(p):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
   });
   saveFile('red-'+todayStr()+'.csv',toCsv(rows));
 }
@@ -176,7 +177,7 @@ VIEWS.red={
   },
   update(){
     const seg=$('#rd-seg');if(!seg)return;
-    const fs=[['todos','Todos'],['olt','OLT'],['nap','Cajas NAP'],['splitter','Splitters'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas']];
+    const fs=[['todos','Todos'],['olt','OLT'],['nap','Cajas NAP'],['splitter','Splitters'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas'],['sinempalmar','Sin empalmar']];
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${RED.tipo===k}">${l}</button>`).join('');
     const nm=$('#rd-name');if(nm)nm.hidden=RED.sort!=='cerca';
     const rows=redRows();
@@ -250,9 +251,10 @@ function openRed(id){
   const usoChip=nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`
     :p.tipo==='empalme'?(p.hilos?` <span class="chip">${pelosUsados(p)}/${p.hilos} pelos en uso</span>`:'')
     :(hasSalidas&&cant?` <span class="chip">${salidasUsadas(p)}/${cant} ${olt?'puertos':'salidas'} en uso</span>`:'');
+  const iluminadaChip=nap?` <span class="chip ${p.iluminada?'ok':'quiet'}">${p.iluminada?'Iluminada':'Sin empalmar'}</span>`:'';
   const html=`
-    <div class="head-row"><div><span class="chip ${nap?'accent':hasSalidas?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${usoChip}</div>
-      <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}${can('red')&&p.tipo!=='olt'?'<button class="btn small ghost" type="button" data-act="clonar">Clonar con todo lo que cuelga</button>':''}</div></div>
+    <div class="head-row"><div><span class="chip ${nap?'accent':hasSalidas?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${usoChip}${iluminadaChip}</div>
+      <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}${can('red')&&nap?`<button class="btn small ghost" type="button" data-act="iluminada">${p.iluminada?'Marcar sin empalmar':'Marcar iluminada'}</button>`:''}${can('red')&&p.tipo!=='olt'?'<button class="btn small ghost" type="button" data-act="clonar">Clonar con todo lo que cuelga</button>':''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(p.nombre)}</h2>
     <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Fibra',esc(p.fibra))}${split&&cant?kv('Relación','1x'+cant):''}${olt&&cant?kv('Puertos',String(cant)):''}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Llega por',llega.map(x=>`<button class="btn small ghost" type="button" data-red="${esc(x.e.id)}">${esc(x.e.nombre)} · ${x.e.tipo==='splitter'||x.e.tipo==='olt'?'salida':'pelo'} ${x.n}${x.pon?' · PON '+x.pon:''}</button>`).join(' '))}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
     ${p.tipo==='empalme'?empalmeFichaHTML(p):hasSalidas?salidasFichaHTML(p):''}
@@ -276,6 +278,7 @@ function openRed(id){
       if(a.dataset.act==='editar')openRedForm(p.id);
       else if(a.dataset.act==='ubicacion')openRedGeo(p.id);
       else if(a.dataset.act==='clonar')openRedClonar(p.id);
+      else if(a.dataset.act==='iluminada')toggleIluminada(p.id);
     });
   }});
 }
@@ -607,6 +610,15 @@ function openMoverNap(cid,volverA){
     });
     draw();
   }});
+}
+/* ----- caja NAP «iluminada» (ya empalmada y lista) o «sin empalmar» (todavía gris en el plano) -----
+   Es un dato de ese punto físico en particular (no se copia al clonar una rama, ver prepararClon):
+   una caja nueva arranca sin empalmar hasta que alguien la marca. */
+async function toggleIluminada(id){
+  const p=S.red.get(id);if(!p||p.tipo!=='nap')return;
+  if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
+  const nuevo=!p.iluminada;
+  try{await putItem('red','puntos',p.id,{iluminada:nuevo,mod:Date.now()});await esperarRed(p.id,x=>!!x.iluminada===nuevo);toast(nuevo?'Caja marcada como iluminada':'Caja marcada como sin empalmar');openRed(p.id);}catch(e){dbError(e);}
 }
 function openRedGeo(id){
   const p=S.red.get(id);if(!p)return;
