@@ -366,6 +366,7 @@ async function sacarDeCaja(cid,napId){
     toast('Listo: el puerto'+(c.napPuerto?' '+c.napPuerto:'')+' quedó libre');openRed(napId);
   }catch(err){dbError(err);}
 }
+/* el total de clientes ya instalados no se muestra a nadie (ni en la solapa ni en el aviso): solo se ofrecen los más cercanos y se pide escribir el nombre para buscar a otro */
 /* un puerto libre: se elige al cliente que está conectado ahí. Sin escribir nada se ofrecen dos listas, «Por instalar» (los abonados nuevos) y «Ya instalados» (los que todavía no tienen caja), con los más cercanos a la caja primero;
    escribiendo se busca entre todos por nombre o calle (un técnico busca con 3 letras como mínimo y ve pocos resultados: no es una lista de todos los clientes) */
 function openAsignarPuerto(napId,port,q0,tab0){
@@ -390,7 +391,7 @@ function openAsignarPuerto(napId,port,q0,tab0){
   const ya=[...S.clientes.values()].filter(c=>c.estado!=='pendiente'&&c.estado!=='baja'&&!puesto(c)&&(!enCaja(c)||sinPto.has(c.id))).sort(cerca);
   let tab=tab0||(nuevos.length?'nuevo':'ya');
   const html=`<p>¿Qué cliente está conectado en el <b>puerto ${port}</b> de <b>${esc(p.nombre)}</b>?</p>
-    <div class="seg" id="as-seg" role="group" aria-label="Qué clientes mostrar"><button type="button" data-t="nuevo">Por instalar (${nuevos.length})</button><button type="button" data-t="ya">Ya instalados${todos?' ('+ya.length+')':''}</button></div>
+    <div class="seg" id="as-seg" role="group" aria-label="Qué clientes mostrar"><button type="button" data-t="nuevo">Por instalar (${nuevos.length})</button><button type="button" data-t="ya">Ya instalados</button></div>
     <input class="search" id="as-q" type="search" placeholder="Buscar por nombre o calle (entre todos)" autocomplete="off" aria-label="Buscar cliente por nombre o calle" value="${esc(q0||'')}" style="flex:none">
     <div class="hint" id="as-hint"></div><div class="list" id="as-list"></div>
     <div class="actions"><button class="btn ghost" type="button" id="as-back">Volver a la caja</button></div>`;
@@ -407,7 +408,7 @@ function openAsignarPuerto(napId,port,q0,tab0){
         const l=tab==='nuevo'?nuevos:ya,mas=tab==='ya'&&l.length>limYa;
         hint.className='hint';
         hint.textContent=!l.length?(tab==='nuevo'?(todos?'No hay abonados por instalar.':'No tenés instalaciones pendientes.')+' Para elegir a otro, escribí su nombre.':'No hay clientes sin caja. Para uno que figura en otra caja, escribí su nombre.')
-          :(tab==='nuevo'?'Tocá al cliente que va en este puerto.':'Clientes que todavía no tienen caja'+(geo?', de la más cercana a esta caja en adelante.':'.'))+(mas?' Se muestran '+limYa+' de '+l.length+': si no está, escribí su nombre.':'');
+          :(tab==='nuevo'?'Tocá al cliente que va en este puerto.':'Clientes que todavía no tienen caja'+(geo?', de la más cercana a esta caja en adelante.':'.'))+(mas?(geo?' Se muestran solo los '+limYa+' más cercanos.':' Se muestran solo '+limYa+'.')+' Si no está, escribí su nombre.':'');
         list.innerHTML=(tab==='nuevo'?l.slice(0,lim):l.slice(0,limYa)).map(c=>fila(c,false)).join('');
         return;
       }

@@ -1,6 +1,6 @@
 # Puerto libre de una caja NAP: al tocarlo se elige directo al cliente «por instalar» o «ya instalado» (sin tener que escribir), los más cercanos primero.
 # Chromium real contra el servidor de verdad (workerd). El técnico ve solo sus instalaciones y pocos «ya instalados».
-import asyncio, json, os, sys, time, urllib.request, urllib.error
+import asyncio, json, os, re, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
@@ -80,7 +80,7 @@ async def main():
         check('la caja avisa que se puede elegir un cliente por instalar o ya instalado', 'por instalar' in hint and 'ya instalado' in hint, hint[:500])
         await pg.click('.sheet [data-free="1"]'); await pg.wait_for_selector('#as-seg')
         check('el título dice «Puerto 1 · Caja 1»', 'Puerto 1' in await pg.inner_text('.sheet h2') and 'Caja 1' in await pg.inner_text('.sheet h2'))
-        check('hay dos solapas: «Por instalar (3)» y «Ya instalados (10)»', (await pg.inner_text('#as-seg [data-t=nuevo]')).strip() == 'Por instalar (3)' and (await pg.inner_text('#as-seg [data-t=ya]')).strip() == 'Ya instalados (10)', await pg.inner_text('#as-seg'))
+        check('hay dos solapas: «Por instalar (3)» y «Ya instalados» (sin el total de clientes)', (await pg.inner_text('#as-seg [data-t=nuevo]')).strip() == 'Por instalar (3)' and (await pg.inner_text('#as-seg [data-t=ya]')).strip() == 'Ya instalados', await pg.inner_text('#as-seg'))
         check('abre en «Por instalar» y sin escribir nada ya hay una lista para tocar', await prs(pg, 'nuevo') == 'true' and await prs(pg, 'ya') == 'false' and await pg.input_value('#as-q') == '')
         lista = await ids(pg)
         check('«Por instalar»: primero el que tiene una instalación abierta, después el más cercano y al final el más lejos', lista == ['pn', 'pc', 'pa'], lista)
@@ -117,7 +117,9 @@ async def main():
         check('y no ve cuántos clientes ya instalados hay', (await pt.inner_text('#as-seg [data-t=ya]')).strip() == 'Ya instalados')
         await pt.click('#as-seg [data-t=ya]'); await pt.wait_for_selector('#as-list [data-as="is"]')
         lt = await ids(pt)
-        check('en «Ya instalados» ve 8 como máximo y le avisa que escriba el nombre', len(lt) == 8 and lt[:2] == ['is', 'ia'] and 'Se muestran 8 de 10' in await pt.inner_text('#as-hint'), [lt, await pt.inner_text('#as-hint')])
+        hint_t = await pt.inner_text('#as-hint')
+        check('en «Ya instalados» ve 8 como máximo y le avisa que escriba el nombre, sin decir cuántos hay', len(lt) == 8 and lt[:2] == ['is', 'ia'] and 'solo' in hint_t and 'escribí su nombre' in hint_t and re.findall(r'\d+', hint_t) == ['8'], [lt, hint_t])
+        check('en ningún lugar de la pantalla del técnico figura el total de clientes ya instalados', '10' not in await pt.inner_text('.sheet') and '(10)' not in await pt.inner_text('#as-seg'), await pt.inner_text('.sheet'))
         txt = await pt.inner_text('#as-list')
         check('sin teléfono ni datos de facturación', '3844000000' not in txt and '$' not in txt and '20000' not in txt, txt)
         await pt.click('#as-seg [data-t=nuevo]'); await pt.wait_for_selector('#as-list [data-as="pn"]')
