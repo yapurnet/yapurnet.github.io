@@ -252,7 +252,7 @@ function openRed(id){
     :(hasSalidas&&cant?` <span class="chip">${salidasUsadas(p)}/${cant} ${olt?'puertos':'salidas'} en uso</span>`:'');
   const html=`
     <div class="head-row"><div><span class="chip ${nap?'accent':hasSalidas?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${usoChip}</div>
-      <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}</div></div>
+      <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}${can('red')&&p.tipo!=='olt'?'<button class="btn small ghost" type="button" data-act="clonar">Clonar con todo lo que cuelga</button>':''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(p.nombre)}</h2>
     <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Fibra',esc(p.fibra))}${split&&cant?kv('Relación','1x'+cant):''}${olt&&cant?kv('Puertos',String(cant)):''}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Llega por',llega.map(x=>`<button class="btn small ghost" type="button" data-red="${esc(x.e.id)}">${esc(x.e.nombre)} · ${x.e.tipo==='splitter'||x.e.tipo==='olt'?'salida':'pelo'} ${x.n}${x.pon?' · PON '+x.pon:''}</button>`).join(' '))}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
     ${p.tipo==='empalme'?empalmeFichaHTML(p):hasSalidas?salidasFichaHTML(p):''}
@@ -275,6 +275,7 @@ function openRed(id){
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openRedForm(p.id);
       else if(a.dataset.act==='ubicacion')openRedGeo(p.id);
+      else if(a.dataset.act==='clonar')openRedClonar(p.id);
     });
   }});
 }
@@ -318,6 +319,18 @@ function redConecta(p){
   if(p.tipo==='empalme')return empalmeConecta(p);
   if(p.tipo==='splitter'||p.tipo==='olt')return splitterConecta(p);
   return redKids(p.id).map(k=>({r:k,pelos:[]}));
+}
+/* el árbol que cuelga de un punto, armado con redConecta (la misma función que arma «De acá salen» en la ficha): cada
+   nodo trae sus hijos y, por cada hijo, los pelos o salidas del padre que lo señalan. Lo usan el plano (para dibujar)
+   y «Clonar con todo lo que cuelga» (para copiar la rama entera), así las dos cosas nunca se pueden contradecir */
+function redArbol(p,visitado){
+  const nodo={p,hijos:[]};
+  redConecta(p).forEach(({r,pelos})=>{
+    if(visitado.has(r.id))return;
+    visitado.add(r.id);
+    nodo.hijos.push({pelos,nodo:redArbol(r,visitado)});
+  });
+  return nodo;
 }
 /* ficha de un splitter o de una OLT: su cantidad de salidas (relación 1x2, 1x4… o cantidad de puertos) y cada una, igual que los pelos de una botella pero sin tubos ni PON */
 function salidasFichaHTML(p){
@@ -605,6 +618,73 @@ function openRedGeo(id){
       const g=read();
       if(g.invalid)return toast('Las coordenadas no son válidas','bad');
       try{await putItem('red','puntos',p.id,{lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,mod:Date.now()});toast('Ubicación guardada');openRed(p.id);}catch(e){dbError(e);}
+    });
+  }});
+}
+/* ----- clonar una rama completa (splitter, botella o caja, con todo lo que cuelga de ella) -----
+   Sirve para repetir rápido un esquema ya armado (por ejemplo, la rama de un puerto PON) en otro punto de la red: arma
+   una copia de cada punto de la rama (mismo tipo, puertos, relación del splitter, pelos del empalme) con un nombre
+   nuevo (el prefijo elegido + el nombre original), colgada de un padre nuevo. La copia no trae ubicación, referencia,
+   notas, fibra, PON vivos ni «qué hay que hacer»: son datos de ese punto físico en particular, no de la estructura. */
+function prepararClon(raizId,nuevoPadreId,prefijo){
+  const raiz=S.red.get(raizId);if(!raiz)return {ok:false,msg:'No se encontró ese punto de la red'};
+  const visitado=new Set([raiz.id]);
+  const arbol=redArbol(raiz,visitado);
+  const idMap=new Map();
+  (function asignar(nodo){idMap.set(nodo.p.id,newId());nodo.hijos.forEach(h=>asignar(h.nodo));})(arbol);
+  const items={},usados=new Map();
+  [...S.red.values()].forEach(x=>{if(!usados.has(x.tipo))usados.set(x.tipo,new Set());usados.get(x.tipo).add(norm(x.nombre));});
+  const CAMPOS=['tipo','puertos','rel','hilos','xtubo'];   /* solo lo estructural: ni ubicación, ni texto libre de este punto físico */
+  let dup=null;
+  (function construir(nodo,padreNuevo){
+    if(dup)return;
+    const old=nodo.p,nid=idMap.get(old.id),obj={};
+    CAMPOS.forEach(k=>{if(old[k]!==undefined)obj[k]=old[k];});
+    obj.nombre=prefijo+' '+old.nombre;
+    const set=usados.get(obj.tipo)||new Set();usados.set(obj.tipo,set);
+    if(set.has(norm(obj.nombre))){dup=obj.nombre;return;}
+    set.add(norm(obj.nombre));
+    obj.padre=padreNuevo;obj.creado=Date.now();obj.mod=Date.now();
+    if(old.tipo==='empalme'){
+      const pelos={};
+      nodo.hijos.forEach(h=>h.pelos.forEach(({n})=>{const e=peloEntry(old,n);if(e)pelos[n]={e:e.e,p:null,a:idMap.get(h.nodo.p.id),n:''};}));
+      if(Object.keys(pelos).length)obj.pelos=pelos;
+    }else if(old.tipo==='splitter'||old.tipo==='olt'){
+      const salidas={};
+      nodo.hijos.forEach(h=>h.pelos.forEach(({n})=>{const e=salidaEntry(old,n);if(e)salidas[n]={e:e.e,a:idMap.get(h.nodo.p.id),n:''};}));
+      if(Object.keys(salidas).length)obj.salidas=salidas;
+    }
+    items[nid]=obj;
+    nodo.hijos.forEach(h=>construir(h.nodo,nid));
+  })(arbol,nuevoPadreId);
+  if(dup)return {ok:false,msg:'Ya hay un punto llamado «'+dup+'»: probá con otro prefijo.'};
+  return {ok:true,items,count:Object.keys(items).length,nuevaRaiz:idMap.get(raiz.id)};
+}
+function openRedClonar(id){
+  const p=S.red.get(id);if(!p||p.tipo==='olt')return;
+  if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
+  const bloqueados=redDescendants(p.id);
+  const padres=[...S.red.values()].filter(x=>(x.tipo==='empalme'||x.tipo==='splitter'||x.tipo==='olt')&&x.id!==p.id&&!bloqueados.has(x.id)).sort(redTipoCmp);
+  const html=`<p>Crea una copia de <b>${esc(p.nombre)}</b> y de todo lo que cuelga de ella (splitters, botellas y cajas), con la misma estructura. La copia no trae ubicación, referencia, notas, fibra, PON vivos ni «qué hay que hacer»: eso es de cada punto físico y hay que cargarlo de nuevo.</p>
+    <form class="form" id="cl-form" novalidate>
+    ${F('De dónde sale la copia','cl-padre',`<select id="cl-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo))).join('')}</select>`,'La OLT, la botella o el splitter del que va a salir esta copia.')}
+    ${F('Prefijo para los nombres de la copia *','cl-prefijo',`<input id="cl-prefijo" maxlength="30" autocomplete="off" placeholder="Ej.: PON 2">`,'Se agrega adelante del nombre de cada punto copiado, para no repetir nombres.')}
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Clonar</button></div></form>`;
+  openModal({title:'Clonar con todo lo que cuelga',html,onMount(el){
+    $('#cl-form',el).addEventListener('submit',async e=>{
+      e.preventDefault();
+      const prefijo=$('#cl-prefijo',el).value.trim();
+      if(!prefijo)return toast('Poné un prefijo para los nombres de la copia','bad');
+      const nuevoPadre=$('#cl-padre',el).value||null;
+      const r=prepararClon(p.id,nuevoPadre,prefijo);
+      if(!r.ok)return toast(r.msg,'bad');
+      if(!await askConfirm('Se van a crear '+r.count+' puntos nuevos, copia de «'+p.nombre+'» y de todo lo que cuelga de ella. ¿Confirmás?','Clonar '+r.count+' puntos'))return;
+      try{
+        await putMany('red','puntos',r.items);
+        await esperarRed(r.nuevaRaiz,x=>!!x.nombre);
+        toast(r.count+' puntos creados');
+        if(S.red.has(r.nuevaRaiz))openRed(r.nuevaRaiz);else closeModal();
+      }catch(err){dbError(err);}
     });
   }});
 }
