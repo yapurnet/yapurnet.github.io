@@ -4372,8 +4372,8 @@ const ubSiempreOk=()=>{try{return localStorage.getItem('yapur_ub_siempre')==='1'
 const ubSiempreMarcar=()=>{UB.sOk=true;try{localStorage.setItem('yapur_ub_siempre','1');}catch(e){}};
 /* lo que ve el técnico del aviso: lo común, y qué cambia en el APK con el servicio siempre activo */
 const ubAvisoLista=(st,nat)=>`<ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li>${nat
-  ?'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app» y, cuando te lo pida de nuevo, <b>«Permitir todo el tiempo»</b>: es lo que deja que se anote tu jornada con la app cerrada.</li><li>Vas a ver una notificación fija «ubicación activa» mientras se comparte, y una discreta («en espera») fuera de horario.</li><li>El celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta.</li><li>Si cerrás sesión, se corta todo.</li>'
-  :'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada vas a ver una notificación fija «ubicación activa» mientras se comparte.</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li>'}</ul>`;
+  ?'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app» y, cuando te lo pida de nuevo, <b>«Permitir todo el tiempo»</b>: es lo que deja que se anote tu jornada con la app cerrada.</li><li>Android obliga a dejar una notificación mientras se comparte la ubicación: es la más discreta que existe (sin sonido, sin ícono arriba y abajo de todo en el panel).</li><li>El celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta.</li><li>Si cerrás sesión, se corta todo.</li>'
+  :'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada Android obliga a dejar una notificación mientras se comparte: es la más discreta que existe (sin sonido, sin ícono arriba y abajo de todo en el panel).</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li>'}</ul>`;
 /* para quien ya había aceptado el aviso de antes («con la app abierta»): ahora se comparte también con la app cerrada, y eso se avisa aparte */
 function ubicSiempreAviso(st){
   return new Promise(res=>{
@@ -5885,7 +5885,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='581666b5be';
+const BUILD='94ed0eab7f';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
