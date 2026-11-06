@@ -379,9 +379,11 @@ II. CLIENTE.
 
 III. VIGENCIA Y BAJA.
 1. El SERVICIO será prestado por tiempo indeterminado a partir de la aceptación de las presentes condiciones al momento de la suscripción.
-2. Cualquiera de las partes podrá dejar sin efecto y rescindir este acuerdo sin invocación de causa, preavisando esa circunstancia a la otra parte con una anticipación mínima de un mes calendario; la rescisión en estas condiciones no generará cargos indemnizatorios de ninguna especie. Lo mismo vale cuando el CLIENTE pide la rescisión expresamente por rechazar alguno de los cambios que YAPUR.NET le comunique en el precio del SERVICIO o en la forma de pago. Solo podrá solicitar la rescisión el titular del SERVICIO, haciéndose PRESENTE (considerado el único medio válido).
-3. Si el CLIENTE hace uso del derecho del punto 2, deberá comunicar su voluntad a YAPUR.NET, atendiendo las formalidades de estos Términos y Condiciones, dentro de los primeros 10 días del mes en que pide que se haga efectiva la baja del SERVICIO. La solicitud recibida a partir del día 11 de cada mes será procesada y concedida, en caso de corresponder, en el período mensual siguiente.
-4. En caso de mudanza de domicilio del CLIENTE, YAPUR.NET continuará prestando el SERVICIO en forma ininterrumpida hasta que el CLIENTE comunique esa circunstancia. El CLIENTE podrá consultar la posibilidad de trasladar el SERVICIO a su nuevo domicilio (punto 6 de la cláusula V). La mudanza no es causal de rescisión: la baja por mudanza se trata como rescisión sin causa (punto 2).
+2. EL CLIENTE puede dar de baja el SERVICIO en cualquier momento y sin invocar causa, sin preaviso y sin cargos indemnizatorios de ninguna especie; por la baja no se le cobra un mes adelantado ni ningún otro concepto. YAPUR.NET puede rescindir este acuerdo sin invocación de causa, avisando al CLIENTE por escrito con una anticipación mínima de un mes calendario; esa rescisión tampoco genera cargos indemnizatorios.
+3. La baja la pide el titular del SERVICIO, o quien él autorice por escrito presentando su DNI y el del titular. Puede pedirse en persona en la oficina de YAPUR.NET, por teléfono, por WhatsApp o por cualquier otro medio que YAPUR.NET habilite, sea el mismo con el que se contrató o cualquier otro. YAPUR.NET verifica la identidad del titular y le entrega sin cargo una constancia con un número de referencia: en el acto si el pedido es en persona o, si es a distancia, dentro de las 72 horas y por el mismo medio.
+4. La baja se hace efectiva el día del pedido o el día posterior que el CLIENTE indique (por ejemplo, el último día del período que ya tiene abonado). Se abonan los días de servicio prestados hasta esa fecha, en proporción al abono mensual; si el CLIENTE ya había pagado días posteriores, se le devuelve la diferencia. Los equipos se devuelven según la cláusula VII.4.
+5. YAPUR.NET no condiciona la baja al pago previo de deudas; las deudas que existan se siguen debiendo (cláusula IV.6).
+6. En caso de mudanza de domicilio del CLIENTE, YAPUR.NET continuará prestando el SERVICIO en forma ininterrumpida hasta que el CLIENTE comunique esa circunstancia. El CLIENTE podrá consultar la posibilidad de trasladar el SERVICIO a su nuevo domicilio (punto 6 de la cláusula V). La mudanza no es causal de rescisión: si el CLIENTE no sigue con el servicio en el nuevo domicilio, se trata como una baja común (punto 2).
 
 IV. PRECIO Y CONDICIONES DE PAGO.
 1. YAPUR.NET facturará al CLIENTE el servicio de conectividad a Internet propiamente dicho.
@@ -390,7 +392,7 @@ IV. PRECIO Y CONDICIONES DE PAGO.
 4. La falta de pago en término facultará a YAPUR.NET a:
 4.1) Suspender el servicio hasta su efectivo pago.
 4.2) Dejar sin efecto las bonificaciones por promociones a las que el CLIENTE se encuentre adherido; a partir del incumplimiento el CLIENTE abonará por el servicio el precio del abono vigente.
-5. YAPUR.NET se reserva el derecho de rescindir el Contrato si los pagos se retrasan más de treinta (30) días corridos desde la fecha de vencimiento, sin necesidad de comunicación previa.
+5. YAPUR.NET se reserva el derecho de rescindir el Contrato si los pagos se retrasan más de treinta (30) días corridos desde la fecha de vencimiento, previa notificación al CLIENTE por alguno de los medios del punto 3 de esta cláusula.
 6. La suspensión o la baja del SERVICIO no libera al CLIENTE de pagar los abonos adeudados hasta la fecha de la baja ni los demás cargos pendientes.
 
 V. DERECHOS Y OBLIGACIONES.
