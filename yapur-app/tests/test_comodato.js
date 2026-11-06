@@ -77,20 +77,21 @@ const DNI_TXT = '20.111.222';
 
     /* ---- plantilla ---- */
     r = await call('GET', '/api/contrato/plantilla', undefined, T1);
-    t('el texto de arranque es un borrador, no definitivo', r.s === 200 && r.j.final === false && /BORRADOR/.test(r.j.texto) && r.j.ver === 1 && r.j.vars.includes('equipos'), r.j);
+    t('el texto de arranque ya es el definitivo: sin «BORRADOR», versión 1, listo para que los técnicos hagan firmar', r.s === 200 && r.j.final === true && !/BORRADOR/.test(r.j.texto) && r.j.ver === 1 && r.j.vars.includes('equipos'), r.j);
     const TXT = r.j.texto;
     const vars0 = r.j.vars, emp0 = r.j.empresa, sugT1 = r.j.sugerido;
-    t('el texto de arranque es el contrato completo: sin partes por completar y con la modalidad del cliente', !/\[COMPLETAR/.test(TXT) && /\{\{tecnologia\}\}/.test(TXT) && vars0.includes('tecnologia'), vars0);
+    t('es el contrato completo: sin partes por completar y con la modalidad del cliente', !/\[COMPLETAR/.test(TXT) && /\{\{tecnologia\}\}/.test(TXT) && vars0.includes('tecnologia'), vars0);
     t('trae el ingreso al domicilio para instalar, desinstalar, inspeccionar, mantener y retirar los equipos', /INGRESO AL DOMICILIO, INSTALACIÓN Y RETIRO/.test(TXT) && /AUTORIZA y se obliga a permitir el ingreso/.test(TXT) && /conectar e instalar/.test(TXT) && /inspeccionar, mantener, reparar/.test(TXT) && /desinstalar y retirar los equipos/.test(TXT) && /propietario del inmueble o contar con la autorización/.test(TXT), TXT.slice(0, 200));
     t('y la devolución de los equipos al terminar el servicio', /diez \(10\) días corridos/.test(TXT) && /valor de reposición/.test(TXT));
     t('sin «período mínimo» (el contrato es por tiempo indeterminado y sin cargos por rescindir)', !/período mínimo/i.test(TXT) && /sin invocación de causa/.test(TXT));
     t('la baja la puede pedir el cliente sin preaviso ni mes adelantado, en persona, por teléfono o por WhatsApp, y recibe una constancia', /dar de baja el SERVICIO en cualquier momento y sin invocar causa, sin preaviso/.test(TXT) && /no se le cobra un mes adelantado/.test(TXT) && /en persona en la oficina de YAPUR\.NET, por teléfono, por WhatsApp/.test(TXT) && /constancia con un número de referencia/.test(TXT) && /dentro de las 72 horas/.test(TXT), TXT.slice(TXT.indexOf('III.'), TXT.indexOf('III.') + 900));
     t('la baja se hace efectiva el día del pedido (se pagan los días usados) y no se condiciona al pago de deudas', /efectiva el día del pedido/.test(TXT) && /en proporción al abono mensual/.test(TXT) && /no condiciona la baja al pago previo de deudas/.test(TXT));
     t('ya no exige «hacerse presente» como único medio ni el corte del día 11, y la baja por falta de pago lleva notificación previa', !/haciéndose PRESENTE/i.test(TXT) && !/día 11/.test(TXT) && !/sin necesidad de comunicación previa/.test(TXT) && /previa notificación al CLIENTE/.test(TXT));
-    t('los datos de la empresa de los contratos en papel vienen cargados (el CUIT lo completa el administrador)', emp0.razon === 'YAPUR MAURO MIGUEL' && /Belgrano/.test(emp0.domicilio) && emp0.cuit === '' && emp0.rep, emp0);
+    t('los datos de la empresa de los contratos en papel vienen cargados (el papel no llevaba CUIT y el texto tampoco lo pide)', emp0.razon === 'YAPUR MAURO MIGUEL' && /Belgrano/.test(emp0.domicilio) && emp0.cuit === '' && emp0.rep, emp0);
     t('el técnico no recibe el texto sugerido', sugT1 === undefined, sugT1);
     r = await call('GET', '/api/contrato/plantilla', undefined, A);
     t('el administrador sí: lo usa para recargar el texto sugerido si ya había guardado otro', r.s === 200 && r.j.sugerido === TXT, r.s);
+    t('el texto no pide el CUIT de la empresa (el contrato en papel no lo llevaba)', !/empresa_cuit/.test(TXT), TXT.slice(0, 300));
     r = await call('PUT', '/api/contrato/plantilla', { texto: TXT, final: false }, O);
     t('solo el administrador cambia el texto del contrato', r.s === 403, r);
     r = await call('PUT', '/api/contrato/plantilla', { texto: 'corto' }, A);
@@ -99,8 +100,14 @@ const DNI_TXT = '20.111.222';
     t('un dato que no existe se rechaza y dice cuál', r.s === 400 && /inventado/.test(r.j.error), r);
     r = await call('PUT', '/api/contrato/plantilla', { texto: TXT.replace(/\{\{equipos\}\}/g, '') }, A);
     t('tiene que incluir los equipos', r.s === 400 && /equipos/.test(r.j.error), r);
-    r = await call('PUT', '/api/contrato/plantilla', { texto: TXT, final: true, empresa: { razon: 'YAPUR.NET', cuit: '20-1-1', domicilio: 'X', rep: 'Y' } }, A);
+    r = await call('PUT', '/api/contrato/plantilla', { texto: TXT + '\nCUIT: {{empresa_cuit}}', final: true, empresa: { razon: 'YAPUR.NET', cuit: '', domicilio: 'X', rep: 'Y' } }, A);
+    t('si el texto pide el CUIT de la empresa y falta, no se puede marcar como definitivo', r.s === 400 && /CUIT/.test(r.j.error), r);
+    /* el administrador lo deja como borrador a propósito (para probar o corregir): mientras tanto los técnicos no firman */
+    const BORR = 'BORRADOR PARA REVISAR: texto de prueba.\n\n' + TXT;
+    r = await call('PUT', '/api/contrato/plantilla', { texto: BORR, final: true, empresa: { razon: 'YAPUR.NET', cuit: '20-1-1', domicilio: 'X', rep: 'Y' } }, A);
     t('con «BORRADOR» o «[COMPLETAR…]» no se puede marcar como definitivo', r.s === 400 && /BORRADOR|COMPLETAR/.test(r.j.error), r);
+    r = await call('PUT', '/api/contrato/plantilla', { texto: BORR, final: false }, A);
+    t('el administrador puede dejar el texto como borrador (versión 2)', r.s === 200 && r.j.final === false && r.j.ver === 2 && /BORRADOR/.test(r.j.texto), r.j);
 
     /* ---- mientras sea borrador, los clientes no firman ---- */
     const vistaBody = (cid, motivo, tit) => ({ cid, motivo, titular: tit || TITULAR });
@@ -126,11 +133,11 @@ const DNI_TXT = '20.111.222';
     t('la oficina manda la prueba a la papelera', r.s === 200 && r.j.contrato.estado === 'borrado', r);
 
     /* ---- texto definitivo ---- */
-    const FINAL = TXT.replace(/^BORRADOR[^\n]*\n\n/, '').replace(/\[COMPLETAR[^\]]*\]/g, 'treinta (30) días');
+    const FINAL = BORR.replace(/^BORRADOR[^\n]*\n\n/, '');   /* vuelve al texto de arranque, sin la línea de borrador */
     r = await call('PUT', '/api/contrato/plantilla', { texto: FINAL, final: true, empresa: { razon: 'YAPUR.NET', cuit: '20-12345678-9', domicilio: 'Calle 1 de Añatuya', rep: 'Mauro Yapur', lugar: 'Añatuya, Santiago del Estero' } }, A);
-    t('el administrador carga el texto definitivo', r.s === 200 && r.j.final === true && r.j.ver === 2 && !/BORRADOR/.test(r.j.texto), r.j);
+    t('el administrador carga el texto definitivo', r.s === 200 && r.j.final === true && r.j.ver === 3 && !/BORRADOR/.test(r.j.texto), r.j);
     r = await call('PUT', '/api/contrato/plantilla', { texto: FINAL, final: true, empresa: { razon: 'YAPUR.NET', cuit: '20-12345678-9', domicilio: 'Calle 1 de Añatuya', rep: 'Mauro Yapur', lugar: 'Añatuya, Santiago del Estero' } }, A);
-    t('guardar lo mismo no cambia la versión', r.s === 200 && r.j.ver === 2, r.j);
+    t('guardar lo mismo no cambia la versión', r.s === 200 && r.j.ver === 3, r.j);
 
     /* ---- vista previa y firma ---- */
     r = await call('POST', '/api/contrato/vista', vistaBody('cNo', 'alta'), T1);
@@ -147,7 +154,7 @@ const DNI_TXT = '20.111.222';
     t('sin contrato vigente no hay cambio de titularidad', r.s === 409, r);
     r = await call('POST', '/api/contrato/vista', vistaBody('cA', 'alta'), T1);
     const v1 = r.j;
-    t('la vista previa arma el texto con el titular, los equipos y la empresa', r.s === 200 && v1.prueba === false && v1.texto.includes('Rosa Graciela Cejas') && v1.texto.includes(DNI_TXT) && v1.texto.includes('1. ONU Huawei HG8145V5') && v1.texto.includes('2. Router Wi-Fi TP-Link Archer C6') && v1.texto.includes('YAPUR.NET, CUIT 20-12345678-9') && v1.texto.includes('Cliente N° 77'.toLowerCase().replace('c', 'c')) === false && /cliente N° 77/.test(v1.texto) && !/\{\{/.test(v1.texto), v1.texto);
+    t('la vista previa arma el texto con el titular, los equipos y la empresa', r.s === 200 && v1.prueba === false && v1.texto.includes('Rosa Graciela Cejas') && v1.texto.includes(DNI_TXT) && v1.texto.includes('1. ONU Huawei HG8145V5') && v1.texto.includes('2. Router Wi-Fi TP-Link Archer C6') && v1.texto.includes('YAPUR.NET, con domicilio en Calle 1 de Añatuya') && v1.texto.includes('Cliente N° 77'.toLowerCase().replace('c', 'c')) === false && /cliente N° 77/.test(v1.texto) && !/\{\{/.test(v1.texto), v1.texto);
     t('el número se asigna recién al firmar', /N° \(se asigna al firmar\)/.test(v1.texto));
     const base = { cid: 'cA', motivo: 'alta', titular: TITULAR, firma: firmaPng(2), aclar: 'Rosa Cejas', acepto: true, tver: v1.tver, eq: v1.eq };
     r = await call('POST', '/api/contrato', Object.assign({}, base, { acepto: false }), T1);
@@ -297,7 +304,7 @@ const DNI_TXT = '20.111.222';
     r = await call('POST', '/api/contrato/' + malo.id + '/verificar', {}, A2);
     t('la verificación detecta un contrato cuyo contenido no coincide con su código', r.s === 200 && r.j.ok === false, r);
     r = await call('GET', '/api/contrato/plantilla', undefined, A2);
-    t('el texto del contrato se conserva', r.s === 200 && r.j.final === true && r.j.ver === 2, r.j);
+    t('el texto del contrato se conserva', r.s === 200 && r.j.final === true && r.j.ver === 3, r.j);
     sO.close(); sT.close();
     t('sin errores en el registro del servidor', !/Uncaught|\bERROR\b|✘/.test(srv.log()), srv.log().split('\n').filter(l => /Uncaught|ERROR|✘/.test(l)).slice(0, 5));
   } catch (e) {

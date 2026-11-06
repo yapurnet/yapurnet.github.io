@@ -66,6 +66,10 @@ async def main():
     api('POST', '/api/users', {'usuario': 'tec', 'nombre': 'Fernando Paz', 'role': 'tecnico', 'clave': 'fernando1', 'permisos': {'clientesTodos': True}}, TA)
     for cid, nom, cod in [('cUno', 'Cejas Rosa', '77'), ('cDos', 'Otro Cliente', '78')]:
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: {'nombre': nom, 'codigo': cod, 'estado': 'activo', 'dir': 'Calle 9 N° 123', 'loc': 'Añatuya', 'tel': '3844123456', 'dni': '20111222', 'alta': '2026-01-10', 'desde': time.strftime('%Y-%m')}}}}, TA)
+    # el texto que viene de arranque ya es el definitivo; el administrador lo deja como borrador a propósito para probar la pantalla de Ajustes
+    st, pl = api('GET', '/api/contrato/plantilla', None, TA)
+    check('el contrato viene de arranque como texto definitivo (sin «BORRADOR»)', pl['final'] is True and 'BORRADOR' not in pl['texto'] and pl['ver'] == 1, pl['texto'][:80])
+    api('PUT', '/api/contrato/plantilla', {'texto': 'BORRADOR PARA REVISAR: prueba.\n\n' + pl['texto'], 'final': False}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
 
@@ -99,7 +103,7 @@ async def main():
         check('un solo toque no pisa el texto: pide tocar otra vez', 'BORRADOR' not in await pa.input_value('#ctpl-txt') and 'otra vez' in await pa.inner_text('#ctpl-sug'))
         await pa.click('#ctpl-sug')
         nuevo_txt = await pa.input_value('#ctpl-txt')
-        check('con el segundo toque carga el texto sugerido (con «BORRADOR» y la cláusula de ingreso) y desmarca «definitivo»', nuevo_txt.startswith('BORRADOR') and 'INGRESO AL DOMICILIO' in nuevo_txt and '{{tecnologia}}' in nuevo_txt and not await pa.is_checked('#ctpl-fin'))
+        check('con el segundo toque carga el texto sugerido (la cláusula de ingreso, sin «BORRADOR») y deja marcado «definitivo»', nuevo_txt.startswith('CONTRATO DE COMODATO') and 'BORRADOR' not in nuevo_txt and 'INGRESO AL DOMICILIO' in nuevo_txt and '{{tecnologia}}' in nuevo_txt and await pa.is_checked('#ctpl-fin'))
         await pa.click('#ctpl [data-close]') if await pa.query_selector('#ctpl [data-close]') else await pa.keyboard.press('Escape')
         await pa.wait_for_selector('#ctpl', state='detached', timeout=5000)
         check('sin tocar «Guardar» el contrato definitivo sigue como estaba', 'definitivo' in await pa.inner_text('#ct-aj-st'))
@@ -144,7 +148,7 @@ async def main():
         await pt.fill('#ct-nom', 'Rosa Graciela Cejas'); await pt.fill('#ct-dni', '20111222')
         await pt.click('#ctf1 button[type=submit]'); await pt.wait_for_selector('#ct-doc')
         doc = await pt.inner_text('#ct-doc')
-        check('muestra el contrato armado con el titular, el DNI, los equipos y la empresa', 'Rosa Graciela Cejas' in doc and '20.111.222' in doc and '1. ONU Huawei HG8145V5' in doc and 'CUIT 20-12345678-9' in doc and '{{' not in doc, doc[:300])
+        check('muestra el contrato armado con el titular, el DNI, los equipos y la empresa', 'Rosa Graciela Cejas' in doc and '20.111.222' in doc and '1. ONU Huawei HG8145V5' in doc and 'con domicilio en Calle 1 de Añatuya' in doc and 'Fibra óptica «INTERNET CABLEADO»' in doc and '{{' not in doc, doc[:300])
         check('no se puede firmar sin firma ni tilde', await pt.is_disabled('#ct-go'))
         await pt.check('#ct-ok')
         check('con el tilde pero sin firma sigue sin poder firmar', await pt.is_disabled('#ct-go'))
