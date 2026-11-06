@@ -7,6 +7,8 @@ const tecLabel=o=>{const t=tecById(o.tecnico);return t?t.nombre:(o.tecNombre||''
 const SIN_COBRO={oficina:'El cliente va a pagar en la oficina',otro_dia:'El cliente va a pagar otro día',otro:'Otro motivo'};
 const ordSinCobrar=o=>!!o&&o.tipo==='instalacion'&&o.estado==='hecha'&&!!o.sinCobro&&!instCobrada(S.clientes.get(o.clientId));
 const ESTADO_ORD_CLS={pendiente:'warn',en_camino:'info',en_curso:'info',hecha:'ok',cancelada:''};
+/* «Cancelada el 06/11/2026 01:52 por Laura»: cuándo y quién (las canceladas antes de esta versión no tienen el nombre) */
+const cancelTxt=o=>{if(!o||o.estado!=='cancelada')return '';const c=String(o.cierre||'');return 'Cancelada'+(c?' el '+dmy(c.slice(0,10))+(c.length>10?' '+c.slice(11,16):''):'')+(o.cancelPor?' por '+o.cancelPor:'');};
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
@@ -29,14 +31,15 @@ function orderCard(o){
       <div class="s muted" style="overflow-wrap:anywhere">${esc(c?(c.dir||'')+(c.loc?', '+c.loc:''):'')}${c&&c.ref?' · '+esc(c.ref):''}</div></div>
     ${o.notas?`<div>${esc(o.notas)}</div>`:''}${o.resultado?`<div class="notice info"><b>Resultado:</b> ${esc(o.resultado)}</div>`:''}
     ${o.tipo==='instalacion'&&o.sinCobro&&o.estado==='hecha'?(ordSinCobrar(o)?`<div class="notice"><b>Instalación sin cobrar:</b> ${esc(SIN_COBRO[o.sinCobro]||o.sinCobro)}${o.sinCobroNota?' · '+esc(o.sinCobroNota):''}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar la instalación</button></div>':''}`:'<div class="small muted">La instalación se cobró después de cerrar la orden.</div>'):''}
-    <div class="small muted">${tec?'Asignada a <b>'+esc(tec)+'</b>':'Sin técnico asignado'}${o.cierre?' · cerrada '+esc(o.cierre):''}</div>
+    <div class="small muted">${tec?'Asignada a <b>'+esc(tec)+'</b>':'Sin técnico asignado'}${o.estado==='cancelada'?' · '+esc(cancelTxt(o)):o.cierre?' · cerrada '+esc(o.cierre):''}</div>
+    ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
     ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
-      ${can('ordenesTodas')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(t?t.tel:'',orderText(o,c))}">Enviar por WhatsApp</a><button class="btn small danger" type="button" data-oact="cancel">Cancelar</button>`:''}</div>`:''}
+      ${can('ordenesTodas')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(t?t.tel:'',orderText(o,c))}">Enviar por WhatsApp</a><button class="btn small danger" type="button" data-oact="cancel">Cancelar orden</button>`:''}</div>`:''}
   </article>`;
 }
 function openOrderForm({id,clientId}){
@@ -179,7 +182,8 @@ async function orderAction(o,act){
     else if(act==='edit')openOrderForm({id:o.id});
     else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
-    else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo?','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime()});toast('Orden cancelada');}}
+    else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo? Queda anotado quién la canceló y cuándo, y se puede reabrir.','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime(),cancelPor:(S.me&&S.me.nombre)||''});toast('Orden cancelada');}}
+    else if(act==='reabrir'){if(!can('ordenesTodas'))return;await saveOrder(o,{estado:'pendiente',cierre:null,cancelPor:null});toast('Orden reabierta: vuelve a figurar como pendiente');}
   }catch(err){dbError(err);}
 }
 VIEWS.ordenes={
