@@ -164,6 +164,17 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .bar i{display:block;width:100%;max-width:56px;background:var(--accent);border-radius:6px 6px 2px 2px;min-height:2px}
 .bar.now i{background:var(--accent)} .bar:not(.now) i{background:var(--accent-line)}
 .bar span{font-size:11px;color:var(--muted)} .bar b{font-size:11px;font-variant-numeric:tabular-nums}
+/* instalaciones: gráfico de barras que se toca para elegir el período, y renglón de cada día */
+.bars.tight{gap:4px}
+.bars.tight .bar{padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer;border-radius:6px}
+.bars.tight .bar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bars.tight .bar span{font-size:10px;line-height:1.15;text-align:center}
+.bars.tight .bar b{font-size:10px}
+.bars.tight .bar.now span{color:var(--ink);font-weight:700}
+.in-nav{display:flex;align-items:center;gap:8px}
+.in-nav .tt{flex:1;min-width:0;text-align:center;display:flex;flex-direction:column}
+.in-nav .tt b{font-family:var(--f-display);font-size:17px;overflow-wrap:anywhere}
+.in-day{margin:6px 2px 0;font-size:13px;font-weight:700;color:var(--muted)}
 tr.tap{cursor:pointer}tr.tap:hover td{background:rgba(127,127,127,.08)}tr.tap:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
 table{border-collapse:collapse;width:100%;font-size:14px}
@@ -4394,6 +4405,146 @@ VIEWS.ordenes={
   }
 };
 
+/* ===== instalaciones por día, semana y mes ===== */
+/* Una instalación cuenta el día en que se cerró su orden. Si un cliente pagó la instalación pero no tiene ninguna orden de instalación cerrada
+   (la cargó la oficina a mano), también cuenta, el día del primer cobro, y se marca «Sin orden». */
+const INST={k:'dia',ref:'',fin:{dia:'',sem:'',mes:''}};   /* k: escala · ref: un día cualquiera del período elegido · fin: último período que muestra el gráfico (uno por escala) */
+const INST_N={dia:14,sem:8,mes:12};
+const INST_DIAS=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const INST_MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const INST_ESC=[['dia','Día'],['sem','Semana'],['mes','Mes']];
+const INST_ANT={dia:'Día anterior',sem:'Semana anterior',mes:'Mes anterior'};
+const INST_QUE={dia:'el día anterior',sem:'la semana anterior',mes:'el mes anterior'};
+const INST_HOY={dia:'Hoy',sem:'Esta semana',mes:'Este mes'};
+const INST_AYER={dia:'Ayer',sem:'La semana pasada',mes:'El mes pasado'};
+
+/* ----- fechas (YYYY-MM-DD, la semana empieza el lunes) ----- */
+const inUTC=d=>{const [y,m,dd]=d.split('-').map(Number);return new Date(Date.UTC(y,m-1,dd));};
+const inStr=t=>t.getUTCFullYear()+'-'+pad(t.getUTCMonth()+1)+'-'+pad(t.getUTCDate());
+const inAddDays=(d,n)=>{const t=inUTC(d);t.setUTCDate(t.getUTCDate()+n);return inStr(t);};
+const inLunes=d=>inAddDays(d,-((inUTC(d).getUTCDay()+6)%7));
+const inInicio=(k,d)=>k==='mes'?d.slice(0,7)+'-01':k==='sem'?inLunes(d):d;
+const inFin=(k,d)=>k==='mes'?inAddDays(addMonths(d.slice(0,7),1)+'-01',-1):k==='sem'?inAddDays(inLunes(d),6):d;
+const inMover=(k,d,n)=>k==='mes'?addMonths(d.slice(0,7),n)+'-01':k==='sem'?inAddDays(inLunes(d),7*n):inAddDays(d,n);
+const inDiaTxt=(d,conAnio)=>Number(d.slice(8))+' de '+INST_MESES[Number(d.slice(5,7))-1]+(conAnio?' de '+d.slice(0,4):'');
+function instTitulo(k,d,hoy){
+  const a=inInicio(k,d),b=inFin(k,d),anio=a.slice(0,4)!==hoy.slice(0,4)||b.slice(0,4)!==hoy.slice(0,4);
+  if(k==='mes')return monthLabel(a.slice(0,7));
+  if(k==='dia'){const n=INST_DIAS[inUTC(a).getUTCDay()];return n.charAt(0).toUpperCase()+n.slice(1)+' '+inDiaTxt(a,anio);}
+  return 'Semana del '+(a.slice(5,7)===b.slice(5,7)?Number(a.slice(8)):inDiaTxt(a,false))+' al '+inDiaTxt(b,anio);
+}
+function instRel(k,d,hoy){const a=inInicio(k,d),cur=inInicio(k,hoy);return a===cur?INST_HOY[k]:a===inMover(k,cur,-1)?INST_AYER[k]:'';}
+function instEtiq(k,b){
+  if(k==='mes')return monthShort(b.slice(0,7));
+  if(k==='sem')return b.slice(8)+'/'+b.slice(5,7);
+  return ['D','L','M','M','J','V','S'][inUTC(b).getUTCDay()]+'<br>'+Number(b.slice(8));
+}
+
+/* ----- los datos ----- */
+function instEventos(){
+  const out=[],conOrden=new Set();
+  for(const o of S.ordenes.values()){
+    if(o.tipo!=='instalacion'||o.estado!=='hecha')continue;
+    const f=(o.cierre||'').slice(0,10)||o.fecha||o.creado||'';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(f))continue;
+    conOrden.add(o.clientId);
+    out.push({id:o.id,f,h:(o.cierre||'').slice(11,16),cid:o.clientId,tec:o.tecnico||'',tecN:tecLabel(o),sc:ordSinCobrar(o),sinOrden:false});
+  }
+  /* cobros de instalación de clientes que no tienen ninguna orden de instalación cerrada (uno por cliente: el primero) */
+  const pg=new Map();
+  for(const p of S.pagos.values()){
+    if(p.anulado||p.concepto!=='instalacion'||!p.fecha||conOrden.has(p.c))continue;
+    const a=pg.get(p.c);
+    if(!a||p.fecha<a.fecha||(p.fecha===a.fecha&&(p.hora||'')<(a.hora||'')))pg.set(p.c,p);
+  }
+  for(const [cid,p] of pg){const t=tecById(p.por);out.push({id:'p'+cid,f:p.fecha,h:p.hora||'',cid,tec:t?t.id:'',tecN:t?t.nombre:'',sc:false,sinOrden:true});}
+  return out;
+}
+function instCalc(k,ref,hoy){
+  const ev=instEventos(),cur=inInicio(k,hoy);
+  ref=inInicio(k,ref||hoy);if(ref>cur)ref=cur;
+  const d1=ref,d2=inFin(k,ref),cnt={};
+  for(const e of ev){const b=inInicio(k,e.f);cnt[b]=(cnt[b]||0)+1;}
+  const sel=ev.filter(e=>e.f>=d1&&e.f<=d2).sort((a,b)=>b.f.localeCompare(a.f)||(b.h||'').localeCompare(a.h||''));
+  let sinHacer=0;   /* órdenes de instalación programadas en el período que siguen abiertas */
+  for(const o of S.ordenes.values()){if(o.tipo!=='instalacion'||!ORD_OPEN(o))continue;const f=o.fecha||o.creado||'';if(f>=d1&&f<=d2)sinHacer++;}
+  return {k,ref,d1,d2,cur,cnt,sel,n:sel.length,prev:cnt[inMover(k,ref,-1)]||0,sinHacer,sinCobrar:sel.filter(e=>e.sc).length};
+}
+function instPorTec(sel){
+  const m=new Map();
+  for(const e of sel){const k=e.tec||'_',x=m.get(k)||{k,n:0,nombre:''};x.n++;if(!x.nombre)x.nombre=(e.tec&&(tecById(e.tec)||{}).nombre)||e.tecN||'';m.set(k,x);}
+  return [...m.values()].map(x=>Object.assign(x,{nombre:x.nombre||'Sin técnico'})).sort((a,b)=>b.n-a.n||a.nombre.localeCompare(b.nombre,'es'));
+}
+/* para el Resumen: las de hoy y las del mes */
+function instResumen(){const hoy=todayStr(),ev=instEventos();return {hoy:ev.filter(e=>e.f===hoy).length,mes:ev.filter(e=>e.f.slice(0,7)===hoy.slice(0,7)).length};}
+
+/* ----- la pantalla ----- */
+function instBarras(c,hoy){
+  const N=INST_N[c.k];
+  let fin=INST.fin[c.k]||c.cur;
+  if(c.ref>fin)fin=c.ref;
+  if(c.ref<inMover(c.k,fin,-(N-1))){fin=inMover(c.k,c.ref,N-1);if(fin>c.cur)fin=c.cur;}
+  INST.fin[c.k]=fin;
+  const bs=[];for(let i=N-1;i>=0;i--)bs.push(inMover(c.k,fin,-i));
+  const max=Math.max(1,...bs.map(b=>c.cnt[b]||0));
+  return `<div class="bars tight" role="group" aria-label="Instalaciones por ${c.k==='dia'?'día':c.k==='sem'?'semana':'mes'}">${bs.map(b=>{const v=c.cnt[b]||0;
+    return `<button type="button" class="bar${b===c.ref?' now':''}" data-b="${b}" aria-pressed="${b===c.ref}" aria-label="${esc(instTitulo(c.k,b,hoy)+': '+v+(v===1?' instalación':' instalaciones'))}"><b>${v||''}</b><i style="height:${Math.max(2,Math.round(96*v/max))}px"></i><span>${instEtiq(c.k,b)}</span></button>`;}).join('')}</div>`;
+}
+function instItem(e){
+  const c=S.clientes.get(e.cid),dir=c?(c.dir||'')+(c.loc?', '+c.loc:''):'';
+  const quien=e.tec&&(tecById(e.tec)||{}).nombre||e.tecN;
+  return `<button class="item" type="button"${c?` data-open-client="${esc(c.id)}"`:' disabled'}><div><div class="t">${esc(c?c.nombre:'Cliente no encontrado')}</div><div class="s muted">${esc(dir)}${dir&&quien?' · ':''}${quien?esc(quien):''}</div></div><div class="side">${e.sc?'<span class="chip warn">Sin cobrar</span>':''}${e.sinOrden?'<span class="chip quiet">Sin orden</span>':''}${e.h?`<span class="small muted tnum">${esc(e.h)}</span>`:''}</div></button>`;
+}
+VIEWS.instalaciones={
+  mount(el){
+    el.innerHTML='<div id="in" class="wrap" style="padding:0"></div>';
+    const root=$('#in',el);
+    root.addEventListener('click',e=>{
+      const hoy=todayStr();
+      const sg=e.target.closest('[data-k]');if(sg){INST.k=sg.dataset.k;this.update();return;}
+      const br=e.target.closest('[data-b]');if(br){INST.ref=br.dataset.b;this.update();return;}
+      const nv=e.target.closest('[data-n]');
+      if(nv){const k=INST.k,cur=inInicio(k,hoy),ref=inInicio(k,INST.ref||hoy);INST.ref=nv.dataset.n==='hoy'?cur:inMover(k,ref,Number(nv.dataset.n));this.update();return;}
+      const oc=e.target.closest('[data-open-client]');if(oc)openClient(oc.dataset.openClient);
+    });
+    this.update();
+  },
+  update(){
+    const root=$('#in');if(!root)return;
+    const hoy=todayStr(),k=INST.k;
+    if(!S.loaded.ordenes){root.innerHTML='<div class="empty"><b>Cargando…</b></div>';return;}
+    if(INST.ref>hoy)INST.ref=hoy;   /* INST.ref queda como se eligió (por ejemplo, hoy), así al pasar de «Mes» a «Día» se vuelve al mismo día */
+    const c=instCalc(k,INST.ref,hoy);
+    const rel=instRel(k,c.ref,hoy),dif=c.n-c.prev,esAct=c.ref===c.cur;
+    const tecs=instPorTec(c.sel);
+    /* la lista, con un renglón por día cuando el período tiene varios */
+    let lista='';
+    if(!c.n)lista=`<div class="empty"><b>No hubo instalaciones ${k==='dia'?'ese día':k==='sem'?'esa semana':'ese mes'}</b><span>Se anotan el día en que se cierra la orden de instalación.</span></div>`;
+    else{
+      const porDia={};for(const e of c.sel)porDia[e.f]=(porDia[e.f]||0)+1;
+      lista=c.sel.slice(0,200).map((e,i,a)=>(k!=='dia'&&(!i||a[i-1].f!==e.f)?`<div class="in-day">${esc(instTitulo('dia',e.f,hoy))} · ${porDia[e.f]}</div>`:'')+instItem(e)).join('')+(c.n>200?`<div class="hint">Se muestran las primeras 200 de ${c.n}.</div>`:'');
+    }
+    root.innerHTML=`<div class="head-row"><h2>Instalaciones</h2></div>
+      <div class="toolbar"><div class="seg" role="group" aria-label="Ver por">${INST_ESC.map(([x,l])=>`<button type="button" data-k="${x}" aria-pressed="${k===x}">${l}</button>`).join('')}</div></div>
+      <div class="card">
+        <div class="in-nav"><button class="btn small" type="button" data-n="-1" aria-label="${esc(INST_ANT[k])}">‹</button>
+          <div class="tt"><b>${esc(instTitulo(k,c.ref,hoy))}</b>${rel?`<span class="small muted">${esc(rel)}</span>`:''}</div>
+          <button class="btn small" type="button" data-n="1" aria-label="Período siguiente"${esAct?' disabled':''}>›</button></div>
+        ${esAct?'':'<div class="actions start"><button class="btn small" type="button" data-n="hoy">Volver a '+esc(INST_HOY[k].toLowerCase())+'</button></div>'}
+        ${instBarras(c,hoy)}
+        <div class="kpis three">
+          <div class="kpi"><span class="n">${c.n}</span><span class="l">${c.n===1?'Instalada':'Instaladas'}</span></div>
+          <div class="kpi"><span class="n">${c.prev}</span><span class="l">${esc(INST_ANT[k])}</span></div>
+          <div class="kpi${c.sinHacer?' bad':''}"><span class="n">${c.sinHacer}</span><span class="l">Sin hacer</span></div></div>
+        <div class="hint">${c.n||c.prev?(dif?`${Math.abs(dif)} ${dif>0?'más':'menos'} que ${INST_QUE[k]}.`:`Igual que ${INST_QUE[k]}.`):'Todavía no hay instalaciones para comparar.'} «Sin hacer» son las órdenes de instalación programadas ${k==='dia'?'ese día':k==='sem'?'esa semana':'ese mes'} que siguen abiertas.</div>
+        ${c.sinCobrar?`<div class="notice" role="status"><b>${c.sinCobrar===1?'1 instalación todavía sin cobrar':c.sinCobrar+' instalaciones todavía sin cobrar'}.</b> Se cobran desde su orden cerrada o desde la ficha del cliente.</div>`:''}
+      </div>
+      ${c.n?`<div class="card"><h3>Por técnico</h3><div class="tbl-wrap"><table><thead><tr><th>Técnico</th><th class="right">Instaladas</th></tr></thead><tbody>${tecs.map(t=>`<tr><td>${esc(t.nombre)}</td><td class="right tnum">${t.n}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+      <div class="list" id="in-list">${lista}</div>
+      <div class="hint">Cuenta las órdenes de instalación cerradas, el día en que se cerraron. También suma las instalaciones cobradas que no tienen orden (marcadas «Sin orden»).</div>`;
+  }
+};
+
 /* ===== ubicación de los técnicos en horario laboral =====
    Los técnicos aceptan un aviso y, solo dentro del horario (por defecto de 8 a 20 h), la app manda su posición cada minuto.
    El servidor vuelve a controlar el horario con su reloj y borra todo a los 14 días. Quien tiene el permiso «verTecnicos» la ve en la pestaña Técnicos. */
@@ -6014,6 +6165,7 @@ VIEWS.resumen={
     const max=Math.max(1,...meses.map(m=>porMes[m]||0));
     const open=[...S.ordenes.values()].filter(ORD_OPEN);
     const urg=open.filter(o=>o.prioridad==='urgente').length;
+    const ins=can('ordenesTodas')&&S.loaded.ordenes?instResumen():null;
     debtors.sort((a,b)=>b.b.deuda-a.b.deuda);
     const cd=cortesData();
     const steps=[['Crear los planes de velocidad',S.planes.size>0,'planes'],['Crear los perfiles del equipo',S.ajustes.perfiles.length>0,'ajustes'],['Cargar o importar los clientes',S.clientes.size>0,'clientes']];
@@ -6025,7 +6177,8 @@ VIEWS.resumen={
       <div class="kpi bad"><span class="n">${fmtMoney(deuda)}</span><span class="l">Deuda vencida · ${morosos} ${morosos===1?'cliente':'clientes'}</span></div>
       ${dantN&&can('caja')?`<div class="kpi tap" data-go="cobranzas" data-sub="dant" role="button" tabindex="0"><span class="n">${fmtMoney(dant)}</span><span class="l">Deuda anterior · ${dantN} ${dantN===1?'cliente':'clientes'}</span></div>`:''}
       <div class="kpi"><span class="n">${fmtMoney(ingreso)}</span><span class="l">Facturación mensual de activos</span></div>
-      <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div></div>
+      <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div>
+      ${ins?`<div class="kpi tap" data-go="instalaciones" role="button" tabindex="0"><span class="n">${ins.mes}</span><span class="l">Instalaciones en ${esc(monthLabel(cur))} · hoy ${ins.hoy}</span></div>`:''}</div>
     <div class="card"><div class="head-row"><h3>Cortes y promesas</h3>${can('caja')?'<button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Ver lista</button>':''}</div>
       <div class="kpis three"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
       <div class="list" style="margin-top:8px">${calendarHTML()}</div></div>
@@ -6043,7 +6196,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='22d25ee28b';
+const BUILD='b8a1556104';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -6129,6 +6282,7 @@ function allowedTabs(){
   if(can('cobrar')||can('caja'))t.push(['cobranzas','Cobranzas']);
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
+  if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
   if(can('red'))t.push(['red','Red']);
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
@@ -6163,6 +6317,7 @@ function dataChanged(key){
   renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab);});
+$('#view').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('.kpi.tap[data-go]')){e.preventDefault();e.target.click();}});   /* los recuadros del Resumen que llevan a otra pestaña también se abren con el teclado */
 $('#view').addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');
   if(g){if(g.dataset.sub)CB.sub=g.dataset.sub;showTab(g.dataset.go);return;}

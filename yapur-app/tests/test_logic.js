@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm');
 const dir=__dirname+'/../app/src/';
-const src=['p04_core.js','p05_clients.js','p05c_comodato.js','p05b_red.js','p06_plans_settings.js','p06b_import.js','p06d_routers.js','p07_orders.js','p08_pay.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
+const src=['p04_core.js','p05_clients.js','p05c_comodato.js','p05b_red.js','p06_plans_settings.js','p06b_import.js','p06d_routers.js','p07_orders.js','p07d_instal.js','p08_pay.js'].map(f=>fs.readFileSync(dir+f,'utf8')).join('\n');
 const test=`
 const out=[];const t=(n,ok,x)=>out.push((ok?'ok   ':'FAIL ')+n+(ok?'':' -> '+JSON.stringify(x)));
 // coordenadas
@@ -265,6 +265,52 @@ t('router: con las tres lee colas, DHCP, perfiles y secretos',scr.includes('/que
   t('actualizar: «Sin plan» + Multimedia deja solo el servicio',P('d').planId===null&&P('d').extras.length===1&&priceAt(ap('d'),'2026-11')===15000,[P('d'),priceAt(ap('d'),'2026-11')]);
   t('actualizar: si ya estaba así no cambia nada; una fila sin plan ni servicios no toca a nadie',!P('f')&&!P('g'));
   S.clientes.clear();S.planes.clear();S.pagos.clear();rebuildDerived();
+}
+
+// instalaciones por día, semana y mes
+{
+  setToday('2026-11-06');   /* viernes */
+  t('semana: el lunes de un viernes, de un domingo y de un lunes',inLunes('2026-11-06')==='2026-11-02'&&inLunes('2026-11-08')==='2026-11-02'&&inLunes('2026-11-09')==='2026-11-09'&&inLunes('2026-11-01')==='2026-10-26',[inLunes('2026-11-06'),inLunes('2026-11-08'),inLunes('2026-11-09'),inLunes('2026-11-01')]);
+  t('períodos: fin de mes (también bisiesto), mes anterior, semana anterior y cambio de año',inFin('mes','2026-02-10')==='2026-02-28'&&inFin('mes','2028-02-10')==='2028-02-29'&&inMover('mes','2026-01-15',-1)==='2025-12-01'&&inMover('sem','2026-11-06',-1)==='2026-10-26'&&inAddDays('2026-12-31',1)==='2027-01-01'&&inFin('sem','2026-11-06')==='2026-11-08');
+  t('títulos: día, semana (en un mes y entre dos) y mes',instTitulo('dia','2026-11-06','2026-11-06')==='Viernes 6 de noviembre'&&instTitulo('sem','2026-11-06','2026-11-06')==='Semana del 2 al 8 de noviembre'&&instTitulo('sem','2026-10-30','2026-11-06')==='Semana del 26 de octubre al 1 de noviembre'&&instTitulo('mes','2026-11-20','2026-11-06')===monthLabel('2026-11'),[instTitulo('sem','2026-10-30','2026-11-06')]);
+  t('título de otro año lleva el año',instTitulo('dia','2025-12-31','2026-11-06')==='Miércoles 31 de diciembre de 2025',instTitulo('dia','2025-12-31','2026-11-06'));
+  t('«hoy», «ayer» y nada para lo más viejo',instRel('dia','2026-11-06','2026-11-06')==='Hoy'&&instRel('sem','2026-11-03','2026-11-06')==='Esta semana'&&instRel('mes','2026-10-05','2026-11-06')==='El mes pasado'&&instRel('dia','2026-11-01','2026-11-06')==='');
+  S.ordenes.clear();S.pagos.clear();S.clientes.clear();
+  S.ajustes.tecnicos=[{id:'t1',nombre:'Pedro'},{id:'t2',nombre:'Juan'}];
+  for(const id of 'abcdefgh')S.clientes.set(id,{id,nombre:'Cliente '+id,estado:'activo'});
+  const O=(id,x)=>S.ordenes.set(id,Object.assign({id,tipo:'instalacion',estado:'hecha',clientId:'a',fecha:'2026-11-01',creado:'2026-11-01'},x));
+  O('o1',{clientId:'a',tecnico:'t1',cierre:'2026-11-06 10:30'});
+  O('o2',{clientId:'b',tecnico:'t2',cierre:'2026-11-06 15:00'});
+  O('o3',{clientId:'c',tecnico:'t1',cierre:'2026-11-04 09:00',sinCobro:'oficina'});
+  O('o4',{clientId:'d',tecnico:'t1',fecha:'2026-10-28',cierre:'2026-10-30 11:00'});
+  O('o5',{clientId:'e',estado:'pendiente',fecha:'2026-11-07'});
+  O('o6',{tipo:'falla',cierre:'2026-11-06 12:00'});
+  O('o7',{estado:'cancelada',fecha:'2026-11-06'});
+  O('o8',{clientId:'e',tecnico:'t2',fecha:'2026-11-05'});
+  const P=(id,x)=>S.pagos.set(id,Object.assign({id,concepto:'instalacion',monto:65000,metodo:'efectivo',por:'t1',porNombre:'Pedro'},x));
+  P('p1',{c:'f',fecha:'2026-11-03',hora:'16:00'});
+  P('p2',{c:'f',fecha:'2026-11-05',hora:'09:00'});   /* el mismo cliente pagó otra parte: no es otra instalación */
+  P('p3',{c:'a',fecha:'2026-11-06'});               /* ya tiene su orden cerrada */
+  P('p4',{c:'g',fecha:'2026-11-04',anulado:true});
+  P('p5',{c:'h',fecha:'2026-11-02',por:'u9',porNombre:'Laura'});   /* lo cargó la oficina */
+  P('p6',{c:'e',fecha:'2026-11-04',concepto:'mensualidad'});
+  rebuildDerived();
+  const dia=instCalc('dia','2026-11-06','2026-11-06'),sem=instCalc('sem','2026-11-06','2026-11-06'),mes=instCalc('mes','2026-11-06','2026-11-06');
+  t('día: 2 instaladas, 1 el día anterior, nada sin hacer',dia.n===2&&dia.prev===1&&dia.sinHacer===0,[dia.n,dia.prev,dia.sinHacer]);
+  t('semana: 6 (órdenes cerradas + cobros sin orden), 1 la semana anterior, 1 sin hacer, 1 sin cobrar',sem.n===6&&sem.prev===1&&sem.sinHacer===1&&sem.sinCobrar===1&&sem.d1==='2026-11-02'&&sem.d2==='2026-11-08',[sem.n,sem.prev,sem.sinHacer,sem.sinCobrar,sem.d1,sem.d2]);
+  t('mes: 6 en noviembre y 1 en octubre (cuenta por el día de cierre, no por el programado)',mes.n===6&&mes.prev===1,[mes.n,mes.prev]);
+  t('van de la más nueva a la más vieja y se cuenta una vez por cliente',sem.sel.map(e=>e.id).join()==='o2,o1,o8,o3,pf,ph',sem.sel.map(e=>e.id).join());
+  t('el cobro sin orden queda marcado; el que tiene orden y el anulado no suman',sem.sel.filter(e=>e.sinOrden).length===2&&!sem.sel.some(e=>e.cid==='g')&&sem.sel.filter(e=>e.cid==='a').length===1);
+  t('no cuenta lo que no es instalación, la orden cancelada ni la abierta',!sem.sel.some(e=>e.id==='o5'||e.id==='o6'||e.id==='o7'));
+  t('una orden cerrada sin fecha de cierre cuenta el día programado',sem.sel.some(e=>e.id==='o8'&&e.f==='2026-11-05'));
+  const pt=instPorTec(sem.sel);
+  t('por técnico: Pedro 3, Juan 2 y 1 sin técnico (lo cargó la oficina)',pt.map(x=>x.nombre+':'+x.n).join()==='Pedro:3,Juan:2,Sin técnico:1',pt.map(x=>x.nombre+':'+x.n).join());
+  t('no se puede mirar un período que todavía no empezó',instCalc('dia','2026-11-20','2026-11-06').ref==='2026-11-06'&&instCalc('mes','2027-03-05','2026-11-06').ref==='2026-11-01');
+  const rs=instResumen();t('resumen: hoy 2 y en el mes 6',rs.hoy===2&&rs.mes===6,rs);
+  /* una instalación que se cobró después de cerrar la orden ya no figura «sin cobrar» */
+  P('p7',{c:'c',fecha:'2026-11-06'});rebuildDerived();
+  t('al cobrarla deja de estar «sin cobrar» (y sigue contando una sola vez)',instCalc('sem','2026-11-06','2026-11-06').sinCobrar===0&&instCalc('sem','2026-11-06','2026-11-06').n===6);
+  S.ordenes.clear();S.pagos.clear();S.clientes.clear();S.ajustes.tecnicos=[];rebuildDerived();setToday(null);
 }
 console.log(out.join('\\n'));
 `;

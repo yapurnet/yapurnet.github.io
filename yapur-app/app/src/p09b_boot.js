@@ -32,6 +32,7 @@ function allowedTabs(){
   if(can('cobrar')||can('caja'))t.push(['cobranzas','Cobranzas']);
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
+  if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
   if(can('red'))t.push(['red','Red']);
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
@@ -66,6 +67,7 @@ function dataChanged(key){
   renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab);});
+$('#view').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('.kpi.tap[data-go]')){e.preventDefault();e.target.click();}});   /* los recuadros del Resumen que llevan a otra pestaña también se abren con el teclado */
 $('#view').addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');
   if(g){if(g.dataset.sub)CB.sub=g.dataset.sub;showTab(g.dataset.go);return;}
