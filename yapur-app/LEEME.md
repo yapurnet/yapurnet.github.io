@@ -96,7 +96,11 @@ Con la OLT, las botellas, los splitters y las cajas ya cargados, la pestaña Red
 - **Varios orígenes:** si hay más de una OLT, o quedó alguna botella vieja sin OLT cargada (de antes de que existiera este punto), cada una se dibuja como su propio árbol, uno al lado del otro.
 - **Tocar una caja** del plano abre su ficha, igual que en la lista. **Acercar / Alejar / Tamaño real** cambian el zoom para ver mejor un sector o toda la red junta.
 - **Imprimir:** el botón **«Imprimir»** arma una hoja aparte (A4 apaisada, para que entre un árbol más ancho que alto) solo con el dibujo, lista para guardar en papel o como PDF. Desde la aplicación del celular abre la impresión de Android; desde la computadora, abre el diálogo de impresión del navegador.
-- **Permisos:** es un permiso aparte, **«Ver el plano de la red»**, para que cada administrador elija a qué técnicos se lo muestra (además del permiso de red, que es el que da acceso a la pestaña). Viene **apagado** por defecto en los técnicos (se activa por perfil en Ajustes → Usuarios, igual que los demás permisos) y **encendido** en la oficina. Desde el plano no se puede editar nada: solo mirar y, si se toca una caja, ver su ficha con los mismos permisos de siempre.
+- **Permisos:** hay dos permisos aparte, para que cada administrador elija qué ve cada técnico (además del permiso de red, que es el que da acceso a la pestaña):
+  - **«Ver el plano de la red»**: el dibujo completo, con la OLT, las botellas, los splitters y las cajas, como se describió arriba.
+  - **«Ver el plano, solo las cajas»**: una versión simplificada, con nomás las cajas NAP (nombre, referencia y puertos) una al lado de la otra, sin mostrar los splitters ni la OLT. Sirve para técnicos que solo necesitan saber qué cajas hay y dónde, sin ver cómo está armada la red por dentro. Si el técnico tiene los dos permisos, ve el plano completo.
+  
+  Los dos vienen **apagados** por defecto en los técnicos (se activan por usuario en Ajustes → Usuarios, igual que los demás permisos); «Ver el plano de la red» viene **encendido** en la oficina. Desde cualquiera de las dos vistas no se puede editar nada: solo mirar y, si se toca una caja, ver su ficha con los mismos permisos de siempre.
 
 ## Red: clonar con todo lo que cuelga
 

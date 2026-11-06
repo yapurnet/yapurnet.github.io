@@ -37,8 +37,9 @@ async def login(ctx, user, clave):
 
 async def main():
     st, j = api('POST', '/api/setup', {'codigo': CODE, 'usuario': 'mauro', 'clave': 'claveSegura1', 'nombre': 'Mauro'}); TA = j['token']
-    api('POST', '/api/users', {'usuario': 'sinplano', 'nombre': 'Sin Plano', 'role': 'tecnico', 'clave': 'sinplano123', 'permisos': {'red': True, 'redPlano': False}}, TA)
+    api('POST', '/api/users', {'usuario': 'sinplano', 'nombre': 'Sin Plano', 'role': 'tecnico', 'clave': 'sinplano123', 'permisos': {'red': True, 'redPlano': False, 'redPlanoCajas': False}}, TA)
     api('POST', '/api/users', {'usuario': 'conplano', 'nombre': 'Con Plano', 'role': 'tecnico', 'clave': 'conplano123', 'permisos': {'red': True, 'redPlano': True}}, TA)
+    api('POST', '/api/users', {'usuario': 'solocajas', 'nombre': 'Solo Cajas', 'role': 'tecnico', 'clave': 'solocajas123', 'permisos': {'red': True, 'redPlano': False, 'redPlanoCajas': True}}, TA)
 
     def red(items):
         return api('PATCH', '/api/doc/red/puntos', {'data': {'items': items}}, TA)
@@ -145,6 +146,21 @@ async def main():
         await pgB.click('#rd-plano'); await pgB.wait_for_selector('.plano-wrap svg', timeout=8000)
         check('y puede ver el plano con los 8 puntos', await pgB.locator('.pnode').count() == 8)
         await ctx3.close()
+
+        # 8) el permiso «solo cajas»: ve el botón (con otro texto) y un plano simplificado, nomás con las 2 cajas NAP,
+        #    sin la OLT, las botellas ni los splitters, y sin líneas (no hay jerarquía que dibujar)
+        ctx4 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        await ctx4.route('**/fonts.g*/**', lambda r: r.abort())
+        pgC = await login(ctx4, 'solocajas', 'solocajas123')
+        await pgC.click('#tabs [data-tab=red]')
+        await pgC.wait_for_selector('#rd-plano', timeout=8000)
+        check('«solo cajas» ve el botón, con el texto que avisa que es la versión simplificada', 'solo cajas' in await pgC.inner_text('#rd-plano'))
+        await pgC.click('#rd-plano'); await pgC.wait_for_selector('.plano-wrap svg', timeout=8000)
+        names4 = await pgC.evaluate("[...document.querySelectorAll('.pnode title')].map(t=>t.textContent)")
+        check('el plano simplificado dibuja solo las 2 cajas NAP (nada de OLT, botellas ni splitters)', sorted(names4) == ['NAP-01', 'NAP-03 (sin salida anotada)'], names4)
+        check('no dibuja ninguna línea (no hay splitters que conecten)', await pgC.locator('.pedge').count() == 0)
+        check('el título del modal avisa que es la versión simplificada', 'solo cajas' in await pgC.inner_text('.sheet-head h2'))
+        await ctx4.close()
 
         await br.close()
     check('sin errores de la página', not ERR, ERR)
