@@ -77,7 +77,7 @@ async function openSSE(token) {
     r = await call('POST', '/api/users', { usuario: 'ofi', nombre: 'Laura', role: 'oficina', clave: 'laura1' }, A);
     t('admin crea oficina', r.s === 200 && r.j.user.role === 'oficina' && r.j.user.perms.cobrar === true && r.j.user.perms.anular === false, r);
     const OFI_ID = r.j.user.id;
-    r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Pedro', role: 'tecnico', clave: 'pedro1', tel: '3844111111', permisos: { cobrar: true, dni: true } }, A);
+    r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Pedro', role: 'tecnico', clave: 'pedro1', tel: '3844111111', permisos: { cobrar: true, dni: true, elegirPlan: false } }, A);
     t('técnico: permisos de dinero siempre apagados', r.s === 200 && r.j.user.perms.cobrar === false && r.j.user.perms.dni === true, r.j);
     const TEC_ID = r.j.user.id;
     r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Otro', role: 'tecnico', clave: 'pedro1' }, A);
@@ -179,13 +179,13 @@ async function openSSE(token) {
     t('red: con el cliente dado de baja la caja se puede eliminar (la oficina puede)', r.s === 200 && r.j.data.items.n1 === null, r);
     r = await RED(T, { n1: { tipo: 'nap', nombre: 'Resucitada' } });
     t('red: se puede volver a cargar un punto con el mismo código luego de eliminarlo', r.s === 200 && r.j.data.items.n1.nombre === 'Resucitada', r);
-    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: false } }, A);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: false, elegirPlan: false } }, A);
     t('red: el administrador apaga el permiso de red a un técnico', r.s === 200 && r.j.user.perms.red === false, r);
     r = await RED(T, { n9: { tipo: 'nap', nombre: 'Prohibida' } });
     t('red: sin permiso de red no puede escribir', r.s === 403 && /red/i.test(r.j.error), r);
     r = await call('GET', '/api/sync', undefined, T);
     t('red: aun sin permiso de escribir, el técnico ve la red (la usa para llegar)', r.s === 200 && r.j.cols.red && r.j.cols.red[0] && r.j.cols.red[0].data.items.e1.nombre === 'BE-01', r.j && Object.keys(r.j.cols || {}));
-    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true } }, A);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false } }, A);
     r = await call('GET', '/api/backup', undefined, A);
     t('red: la copia de seguridad incluye la red', r.s === 200 && r.j.docs.some(d => d.coll === 'red' && d.data.items.e1), r.j && Object.keys(r.j));
 
@@ -241,7 +241,7 @@ async function openSSE(token) {
 
     /* ---- cobros en la calle (técnicos con permiso) ---- */
     const HOY = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10), AYER = new Date(Date.now() - 27 * 3600e3).toISOString().slice(0, 10), PG = HOY.slice(0, 4) + '-s07';
-    r = await call('POST', '/api/users', { usuario: 'tec2', nombre: 'Marcos', role: 'tecnico', clave: 'marcos1', permisos: { cobrarCampo: true } }, A);
+    r = await call('POST', '/api/users', { usuario: 'tec2', nombre: 'Marcos', role: 'tecnico', clave: 'marcos1', permisos: { cobrarCampo: true, elegirPlan: false } }, A);
     t('cobros: el administrador crea un técnico que puede cobrar en la calle', r.s === 200 && r.j.user.perms.cobrarCampo === true && r.j.user.perms.cobrar === false, r);
     const TEC2_ID = r.j.user.id;
     r = await call('POST', '/api/login', { usuario: 'tec2', clave: 'marcos1' });
@@ -400,6 +400,58 @@ async function openSSE(token) {
     r = await call('POST', '/api/login', { usuario: 'tec1', clave: 'pedro1' });
     const rOf = await call('POST', '/api/login', { usuario: 'OFI', clave: 'laura1' });
     t('plan oculto: el permiso viene apagado en el técnico y prendido en la oficina', r.s === 200 && r.j.me.perms.verPlan === false && rOf.j.me.perms.verPlan === true, r.j);
+    /* elegir el plan de un abonado por instalar: el técnico recibe la lista de planes (sin precios) y el plan solo de los «por instalar» */
+    r = await call('POST', '/api/users', { usuario: 'tecelige', nombre: 'Elena Elige', role: 'tecnico', clave: 'elige123' }, A);
+    t('elegir plan: el técnico nuevo trae el permiso prendido de fábrica', r.s === 200 && r.j.user.perms.elegirPlan === true && r.j.user.perms.verPlan === false && r.j.user.perms.precios === false, r.j);
+    const TE = (await call('POST', '/api/login', { usuario: 'tecelige', clave: 'elige123' })).j.token;
+    r = await call('POST', '/api/users', { usuario: 'tecnoelige', nombre: 'No Elige', role: 'tecnico', clave: 'noelige1', permisos: { elegirPlan: false } }, A);
+    t('elegir plan: el administrador se lo puede sacar a un técnico', r.s === 200 && r.j.user.perms.elegirPlan === false, r.j);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { nombre: 'Pablo Pendiente', estado: 'pendiente', dir: 'Calle 9' } } } }, O);
+    t('elegir plan: la oficina carga un abonado por instalar sin plan', r.s === 200, r);
+    r = await call('GET', '/api/doc/planes/pv1', undefined, TE);
+    t('elegir plan: el técnico recibe la lista de planes con nombre y velocidad, sin precio ni historial', r.s === 200 && r.j.exists === true && r.j.data.nombre === 'Con historial' && r.j.data.bajada === 50 && !('precio' in r.j.data) && !('hist' in r.j.data), r);
+    r = await call('GET', '/api/sync', undefined, TE);
+    t('elegir plan: también en la sincronización, sin precios', r.j.cols.planes.some(d => d.id === 'pv1') && !r.j.cols.planes.some(d => 'precio' in d.data || 'hist' in d.data), r.j.cols.planes);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { planId: 'pv1' } } } }, TE);
+    t('elegir plan: el técnico indica el plan de un abonado por instalar', r.s === 200, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('elegir plan: queda guardado para la oficina', r.j.data.items.cpen.planId === 'pv1' && r.j.data.items.cpen.estado === 'pendiente', r.j.data.items.cpen);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, TE);
+    t('elegir plan: el técnico ve el plan de los por instalar', r.j.data.items.cpen.planId === 'pv1', r.j.data.items.cpen);
+    t('elegir plan: pero no el de los clientes ya instalados (ni su precio ni su historial)', r.j.data.items.cpl && !('planId' in r.j.data.items.cpl) && !('precio' in r.j.data.items.cpl) && !r.j.data.items.cv1.hp && !('planId' in r.j.data.items.cv1), [r.j.data.items.cpl, r.j.data.items.cv1]);
+    r = await call('GET', '/api/sync', undefined, TE);
+    t('elegir plan: ni en la sincronización', r.j.cols.clientes.every(d => Object.values(d.data.items || {}).every(c => c.estado === 'pendiente' || !('planId' in c))) && r.j.cols.clientes.some(d => d.data.items && d.data.items.cpen && d.data.items.cpen.planId === 'pv1'));
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { planId: null } } } }, TE);
+    t('elegir plan: puede quitarlo (el cliente todavía no decidió)', r.s === 200, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { planId: 'pv1', nombre: 'Pablo Pendiente', dir: 'Calle 9 bis' } } } }, TE);
+    t('elegir plan: junto con los datos del abonado en el mismo guardado', r.s === 200, r);
+    for (const [nom, patch] of [['el precio', { precio: 100 }], ['los servicios', { extras: ['multimedia'] }], ['el ciclo', { ciclo: 2 }], ['desde cuándo se cobra', { desde: '2026-01' }], ['la deuda anterior', { deudaAnt: { m: 5000 } }], ['el historial de planes', { hp: [{ h: '2026-01', planId: 'pv1' }] }], ['un plan con un id inválido', { planId: 'plan con espacios' }], ['un plan que no es texto', { planId: 5 }], ['un plan que es un objeto', { planId: { x: 1 } }]]) {
+      r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: patch } } }, TE);
+      t('elegir plan: no puede cambiar ' + nom + ' ni siquiera en un abonado por instalar', r.s === 403, r);
+    }
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpl: { planId: 'pv1', precio: 31000 } } } }, TE);
+    t('elegir plan: en un cliente ya instalado no cambia el plan (aunque mande el mismo)', r.s === 200, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpl: { planId: null } } } }, TE);
+    t('elegir plan: ni se lo saca a un cliente ya instalado', r.s === 403, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('elegir plan: el plan y el precio especial de los instalados siguen intactos', r.j.data.items.cpl.planId === 'pv1' && r.j.data.items.cpl.precio === 31000, r.j.data.items.cpl);
+    const TNE = (await call('POST', '/api/login', { usuario: 'tecnoelige', clave: 'noelige1' })).j.token;
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { planId: null } } } }, TNE);
+    t('elegir plan: con el permiso apagado el técnico no puede cambiarlo', r.s === 403, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, TNE);
+    t('elegir plan: ni ve el plan de los por instalar', !('planId' in r.j.data.items.cpen), r.j.data.items.cpen);
+    r = await call('GET', '/api/doc/planes/pv1', undefined, TNE);
+    t('elegir plan: ni la lista de planes', r.j.exists === false, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { estado: 'activo' } } } }, O);
+    t('elegir plan: la oficina activa al abonado', r.s === 200, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, TE);
+    t('elegir plan: ya activo, el técnico deja de ver su plan', !('planId' in r.j.data.items.cpen), r.j.data.items.cpen);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cpen: { planId: null } } } }, TE);
+    t('elegir plan: y ya no puede cambiarlo', r.s === 403, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('elegir plan: el plan que había elegido queda para la oficina', r.j.data.items.cpen.planId === 'pv1' && r.j.data.items.cpen.estado === 'activo', r.j.data.items.cpen);
+    r = await call('POST', '/api/login', { usuario: 'OFI', clave: 'laura1' });
+    t('elegir plan: la oficina trae el permiso prendido', r.j.me.perms.elegirPlan === true, r.j.me.perms);
     const sT2 = await openStream(T2);
     await sleep(200);
     await call('PATCH', '/api/doc/clientes/c01', { data: { items: { csus: { estado: 'activo', corteMora: null } } } }, O);
@@ -624,7 +676,7 @@ async function openSSE(token) {
     r = await call('GET', '/api/doc/planes/p1', undefined, T);
     t('técnico no recibe los planes', r.j.exists === false && r.j.data === null, r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, T);
-    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 4 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
+    t('ajustes: perfiles virtuales, sin claves, sin precios de servicios', Array.isArray(r.j.data.perfiles) && r.j.data.perfiles.length === 6 && !r.j.data.perfiles.some(p => p.hash || p.salt || p.pin) && !('precio' in r.j.data.servicios[0]) && !r.j.data.perfiles.some(p => p.id === 'falso'), r.j);
     r = await call('GET', '/api/doc/ajustes/general', undefined, A);
     t('administrador sí ve precios de servicios', r.j.data.servicios[0].precio === 15000);
 
@@ -741,7 +793,7 @@ async function openSSE(token) {
     t('ticket inválido rechazado', r.status === 401);
 
     /* permisos en vivo */
-    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { dni: false } }, A);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { dni: false, elegirPlan: false } }, A);
     await sleep(200);
     t('cambio de permisos llega al usuario (evento me)', sT.events.some(e => e.ev === 'me' && e.data.perms.dni === false));
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);
@@ -782,7 +834,7 @@ async function openSSE(token) {
 
     /* ---- copia y restauración (formato propio y formato anterior) ---- */
     r = await call('GET', '/api/backup', undefined, A);
-    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 5, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
+    t('copia completa descargable', r.s === 200 && r.j.docs.length >= 4 && r.j.users.length === 7, r.j && [r.j.docs && r.j.docs.length, r.j.users && r.j.users.length]);
     const backup = r.j;
     const legacy = { app: 'yapur-legacy', v: 1, docs: [
       { coll: 'clientes', id: 'c05', data: { items: { x1: { nombre: 'Legacy 1' }, x2: { nombre: 'Legacy 2' } } } },

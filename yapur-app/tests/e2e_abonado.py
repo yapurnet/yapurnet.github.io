@@ -87,7 +87,7 @@ async def main():
         await pg.click('[data-oid="o1"] [data-oact=cliente]'); await pg.wait_for_selector('#cform')
         check('el formulario deja cargar nombre, teléfonos, DNI, calle y localidad', all([await pg.query_selector(s) is not None for s in ('#cf-nombre', '#cf-tel', '#cf-tel2', '#cf-dni', '#cf-dir', '#cf-loc')]))
         check('y la caja NAP con su puerto, IP, usuario y equipo', all([await pg.query_selector(s) is not None for s in ('#cf-nap', '#cf-nap-puerto', '#cf-ip', '#cf-usuario', '#cf-equipo')]))
-        check('pero no el plan, el precio, el estado ni nada de facturación', all([await pg.query_selector(s) is None for s in ('#cf-precio', '#cf-estado', '#cf-desde', '#cf-ciclo', '#cf-da')]) and (await pg.input_value('#cf-plan') if await pg.query_selector('#cf-plan') else '') == '')
+        check('pero no el precio, el estado ni nada de facturación (el plan sí: lo elige el técnico, sin precios)', all([await pg.query_selector(s) is None for s in ('#cf-precio', '#cf-estado', '#cf-desde', '#cf-ciclo', '#cf-da')]) and await pg.query_selector('#cf-plan') is not None and '$' not in await pg.inner_text('#cf-plan'))
         await pg.fill('#cf-nombre', 'Tevez Carlos'); await pg.fill('#cf-tel', '3844111222'); await pg.fill('#cf-dni', '30111222')
         await pg.fill('#cf-dir', 'Belgrano 123'); await pg.fill('#cf-loc', 'Añatuya'); await pg.fill('#cf-ip', '10.20.41.5'); await pg.fill('#cf-usuario', 'tevez'); await pg.fill('#cf-equipo', 'ZTEG1234')
         await pg.select_option('#cf-nap', 'n1'); await pg.fill('#cf-nap-puerto', '3')

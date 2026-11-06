@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'comodato', 'contratosGestion'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, comodato: true, contratosGestion: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, comodato: true, contratosGestion: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, elegirPlan: true, comodato: true, contratosGestion: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -193,7 +193,11 @@ function guard(u, p, coll, existing, patch, ctx) {
       if (('sinCargo' in nw && !same(nw.sinCargo || null, prev && prev.sinCargo || null)) || ('sinCargoMotivo' in nw && !same(nw.sinCargoMotivo || null, prev && prev.sinCargoMotivo || null))) return 'Solo el administrador puede marcar un servicio sin cargo.';
       if (!prev) { if (!p.editarClientes) return 'Tu usuario no puede dar de alta clientes.'; continue; }
       if (p.editarClientes) continue;
-      for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
+      for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) {
+        /* con el permiso «Elegir el plan de un abonado por instalar» el técnico indica qué plan quiere el cliente nuevo: solo el plan, y solo mientras el cliente está por instalar */
+        if (k === 'planId' && p.elegirPlan && prev.estado === 'pendiente' && (nw.planId === null || (typeof nw.planId === 'string' && ID_RE.test(nw.planId)))) continue;
+        return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
+      }
       if ('promesas' in nw && !same(nw.promesas, prev.promesas) && !p.promesas) return 'Tu usuario no puede dar promesas de pago.';
     }
   } else if (coll === 'red') {
@@ -813,12 +817,13 @@ export class YapurDB extends DurableObject {
       return d;
     }
     if (u.role === 'admin') return data;
-    if (coll === 'planes') { if (!p.verPlan) return null; if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
+    if (coll === 'planes') { if (!p.verPlan && !p.elegirPlan) return null; if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
     if (coll === 'clientes') {
       const drop = [];
       if (!p.precios) drop.push('precio', 'hp');
       /* el plan contratado (velocidad y nombre) tampoco lo ve quien no tiene el permiso: ni el plan actual ni los anteriores */
-      if (!p.verPlan) drop.push('planId', 'hp');
+      if (!p.verPlan) drop.push('hp');
+      if (!p.verPlan && !p.elegirPlan) drop.push('planId');
       if (!p.comodato) drop.push('comodato');
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
@@ -826,10 +831,23 @@ export class YapurDB extends DurableObject {
       /* los servicios adicionales (Multimedia, Multimedia Net…) son de facturación: el técnico no tiene que enterarse de cuáles tiene cada cliente */
       if (!(p.cobrar || p.caja || p.editarClientes || p.precios)) drop.push('extras');
       if (!p.telefono) drop.push('tel', 'tel2');
-      const out = drop.length ? strip(data, drop) : data;
+      let out = drop.length ? strip(data, drop) : data;
+      if (!p.verPlan && p.elegirPlan) out = this.planSoloDePorInstalar(out);
       return p.cobrar || p.caja || p.editarClientes ? out : this.sinEstadoDePago(out);
     }
     return data;
+  }
+  /* quien puede elegir el plan de un abonado nuevo (el técnico) ve el plan solo de los clientes «por instalar»: el de los ya instalados sigue siendo de la oficina */
+  planSoloDePorInstalar(data) {
+    if (!isPlain(data) || !isPlain(data.items)) return data;
+    const items = {};
+    for (const id of Object.keys(data.items)) {
+      const it = data.items[id];
+      if (!isPlain(it) || it.estado === 'pendiente' || !('planId' in it)) { items[id] = it; continue; }
+      const c = Object.assign({}, it); delete c.planId;
+      items[id] = c;
+    }
+    return Object.assign({}, data, { items });
   }
   /* Quien no ve la facturación (el técnico) no tiene que enterarse de si un cliente está activo o suspendido por falta de pago:
      se le saca el estado «activo» o «suspendido» (queda «por instalar» y «baja», que usa para trabajar) y todo lo que delata un corte o una deuda.
