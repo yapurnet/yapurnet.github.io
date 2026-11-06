@@ -75,6 +75,12 @@ Pestaña **Instalaciones** (la ven el administrador y la oficina; el técnico no
 
 Una instalación cuenta **el día en que se cerró su orden** (no el día para el que estaba programada). Si un cliente pagó la instalación pero no tiene ninguna orden de instalación cerrada (la cargó la oficina a mano), también cuenta, el día de su primer cobro, y se marca «Sin orden». Las órdenes canceladas y las abiertas no cuentan. En el **Resumen** hay un recuadro «Instalaciones en <mes> · hoy N» que lleva a esta pestaña.
 
+## Órdenes canceladas: quién, cuándo y cómo reabrirlas
+
+Una orden solo se cancela a mano: el administrador o la oficina tocan **Cancelar orden** y confirman (el sistema nunca cancela solo). Queda anotado **quién** la canceló y **cuándo**, y se ve en la propia orden («Cancelada el 06/11/2026 01:52 por Laura») y en la ficha del cliente, debajo de la fecha programada. Las que se cancelaron antes de esta versión muestran la fecha y la hora, pero no el nombre.
+
+Si fue un error, en **Órdenes → Cerradas** (o «Todas») la orden cancelada tiene **Reabrir la orden**: vuelve a quedar pendiente, con el mismo técnico, sin la marca de cancelada. El técnico ve que se canceló, pero no puede cancelar ni reabrir. Cancelar una orden no cambia el estado del cliente (sigue «Por instalar» hasta que se lo active).
+
 ## Cobros del técnico y cierre de caja por cobrador
 
 Si un técnico cobra la instalación, una reinstalación (mudanza) o un reclamo, lo carga en la app y entra a la caja del día con su nombre:
