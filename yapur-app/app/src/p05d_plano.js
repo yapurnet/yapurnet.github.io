@@ -12,23 +12,15 @@ function planoResumen(p){
   if(p.tipo==='empalme')return p.hilos?(pelosUsados(p)+'/'+p.hilos+' pelos'):'Sin pelos';
   return '';
 }
-/* el árbol: cada punto sin «padre» (o cuyo padre ya no existe) es la raíz de su propio árbol; redConecta()
-   es la misma función que arma «De acá salen» en la ficha, así que un punto nunca aparece en dos árboles */
-function planoArbol(p,visitado){
-  const nodo={p,hijos:[]};
-  redConecta(p).forEach(({r,pelos})=>{
-    if(visitado.has(r.id))return;
-    visitado.add(r.id);
-    nodo.hijos.push({pelos,nodo:planoArbol(r,visitado)});
-  });
-  return nodo;
-}
+/* el árbol: cada punto sin «padre» (o cuyo padre ya no existe) es la raíz de su propio árbol. Usa redArbol (en Red),
+   armado con redConecta() —la misma función que «De acá salen» en la ficha—, así un punto nunca aparece en dos árboles
+   y el plano nunca puede dibujar algo distinto de lo que ya usa «Clonar con todo lo que cuelga» para copiar una rama */
 function planoBosque(){
   const visitado=new Set(),arboles=[];
   const raices=[...S.red.values()].filter(p=>!p.padre||!S.red.has(p.padre)).sort(redTipoCmp);
-  raices.forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(planoArbol(p,visitado));}});
+  raices.forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(redArbol(p,visitado));}});
   /* por las dudas, algún punto raro que quedó sin alcanzar (padre apuntando en círculo) también se dibuja */
-  [...S.red.values()].sort(redTipoCmp).forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(planoArbol(p,visitado));}});
+  [...S.red.values()].sort(redTipoCmp).forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(redArbol(p,visitado));}});
   return arboles;
 }
 /* primero el ancho de cada nodo (el de las hojas es fijo, el de un padre es la suma de sus hijos), después
