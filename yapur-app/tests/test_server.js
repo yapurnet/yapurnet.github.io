@@ -215,6 +215,30 @@ async function openSSE(token) {
     r = await call('GET', '/api/doc/clientes/c01', undefined, T);
     t('deuda anterior: al técnico (sin permisos de dinero) no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined, r.j);
 
+    /* ---- «sin cargo»: lo marca solo el administrador ---- */
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { sinCargo: true, sinCargoMotivo: 'Casa de Mauro' } } } }, A);
+    t('sin cargo: el administrador lo marca', r.s === 200 && r.j.data.items.cv1.sinCargo === true && r.j.data.items.cv1.sinCargoMotivo === 'Casa de Mauro', r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { sinCargo: null } } } }, O);
+    t('sin cargo: la oficina no puede sacarlo', r.s === 403 && /administrador/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { sinCargoMotivo: 'otro' } } } }, O);
+    t('sin cargo: la oficina no puede cambiar el motivo', r.s === 403 && /administrador/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cvx: { nombre: 'Nuevo Gratis', estado: 'activo', sinCargo: true } } } }, O);
+    t('sin cargo: la oficina no puede dar de alta un cliente ya marcado', r.s === 403 && /administrador/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { sinCargo: false } } } }, T);
+    t('sin cargo: el técnico tampoco', r.s === 403 && /administrador/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { nombre: 'Vera Vigencia', sinCargo: true } } } }, O);
+    t('sin cargo: la oficina sí puede guardar la ficha (sin cambiar la marca)', r.s === 200, r);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('sin cargo: guardar la ficha desde la oficina no pierde la marca ni el motivo', r.s === 200 && r.j.data.items.cv1.sinCargo === true && r.j.data.items.cv1.sinCargoMotivo === 'Casa de Mauro', r.j.data.items.cv1);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, O);
+    t('sin cargo: la oficina ve la marca pero no el motivo', r.s === 200 && r.j.data.items.cv1.sinCargo === true && r.j.data.items.cv1.sinCargoMotivo === undefined, r.j.data.items.cv1);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, T);
+    t('sin cargo: al técnico no le llega ni la marca ni el motivo', r.s === 200 && r.j.data.items.cv1.sinCargo === undefined && r.j.data.items.cv1.sinCargoMotivo === undefined, r.j.data.items.cv1);
+    r = await call('GET', '/api/doc/clientes/c01', undefined, A);
+    t('sin cargo: el administrador ve todo', r.s === 200 && r.j.data.items.cv1.sinCargo === true && r.j.data.items.cv1.sinCargoMotivo === 'Casa de Mauro', r.j.data.items.cv1);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cv1: { sinCargo: null, sinCargoMotivo: null } } } }, A);
+    t('sin cargo: el administrador se lo saca', r.s === 200 && !r.j.data.items.cv1.sinCargo && !r.j.data.items.cv1.sinCargoMotivo, r);
+
     /* ---- cobros en la calle (técnicos con permiso) ---- */
     const HOY = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10), AYER = new Date(Date.now() - 27 * 3600e3).toISOString().slice(0, 10), PG = HOY.slice(0, 4) + '-s07';
     r = await call('POST', '/api/users', { usuario: 'tec2', nombre: 'Marcos', role: 'tecnico', clave: 'marcos1', permisos: { cobrarCampo: true } }, A);
