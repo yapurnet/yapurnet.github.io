@@ -198,6 +198,19 @@ function guard(u, p, coll, existing, patch, ctx) {
     return guardRed(u, p, old, items);
   } else if (coll === 'pagos') {
     const usadas = new Set();   /* fotos de comprobante ya tomadas por un cobro de este mismo lote */
+    /* quien cobra en la calle puede repartir una instalación o reinstalación entre varios medios (50.000 por transferencia + 15.000 en efectivo): un solo recibo, un registro por medio.
+       Se agrupa por cliente y concepto: lo que suman los medios tiene que ser exactamente el precio fijo, sin repetir el medio, y no puede haber dos cobros del mismo concepto en el lote */
+    const fijoGrupo = new Map();
+    if (u.role !== 'admin' && !p.cobrar && p.cobrarCampo) {
+      for (const id of Object.keys(items)) {
+        const nw = items[id];
+        if (old[id] || !isPlain(nw) || (nw.concepto !== 'instalacion' && nw.concepto !== 'reinstalacion') || !isNum(nw.monto)) continue;
+        const k = String(nw.c) + '|' + nw.concepto;
+        let g = fijoGrupo.get(k);
+        if (!g) fijoGrupo.set(k, g = { cents: 0, n: 0, metodos: new Set(), recibos: new Set() });
+        g.cents += Math.round(nw.monto * 100); g.n++; g.metodos.add(nw.metodo); g.recibos.add(typeof nw.recibo === 'string' ? nw.recibo : '');
+      }
+    }
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
       if (!isPlain(nw)) return 'Formato inválido.';
@@ -209,8 +222,16 @@ function guard(u, p, coll, existing, patch, ctx) {
           if (!isNum(nw.monto) || nw.monto <= 0 || nw.monto > 1e8) return 'El monto del cobro no es válido.';
           /* instalación y reinstalación se cobran al precio fijo que cargó el administrador: no se puede poner otro monto */
           const fijos = ctx && ctx.preciosFijos ? ctx.preciosFijos() : PRECIO_DEF;
-          if ((nw.concepto === 'instalacion' || nw.concepto === 'reinstalacion') && nw.monto !== fijos[nw.concepto])
-            return (nw.concepto === 'instalacion' ? 'La instalación' : 'La reinstalación') + ' se cobra a precio fijo: ' + pesos(fijos[nw.concepto]) + '. Lo define el administrador.';
+          if (nw.concepto === 'instalacion' || nw.concepto === 'reinstalacion') {
+            const g = fijoGrupo.get(String(nw.c) + '|' + nw.concepto), nom = nw.concepto === 'instalacion' ? 'La instalación' : 'La reinstalación';
+            const base = nom + ' se cobra a precio fijo: ' + pesos(fijos[nw.concepto]) + '. Lo define el administrador.';
+            if (g.n === 1) { if (nw.monto !== fijos[nw.concepto]) return base; }
+            else {
+              if (Math.round(nw.monto * 100) < 1) return 'El monto del cobro no es válido.';
+              if (g.cents !== Math.round(fijos[nw.concepto] * 100) || g.metodos.size !== g.n || g.n > METODOS_PAGO.length) return base + ' Si se paga con varios medios, tienen que sumar ese monto y no repetir el medio.';
+              if (g.recibos.size !== 1 || g.recibos.has('')) return 'Los medios de un mismo cobro tienen que ir en el mismo recibo.';
+            }
+          }
           if (nw.fecha !== ymd()) return 'Los cobros en la calle se registran con la fecha de hoy.';
           if (typeof nw.c !== 'string' || !ID_RE.test(nw.c)) return 'Falta el cliente del cobro.';
           if (!METODOS_PAGO.includes(nw.metodo)) return 'El medio de pago no es válido.';

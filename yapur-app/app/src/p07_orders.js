@@ -99,6 +99,7 @@ function cobroOrdenHTML(o,c){
       ${F('Monto cobrado','ff-monto',`<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off"${precioFijo(con0)?` value="${precioFijo(con0)}"${soloCampo()?' readonly':''}`:''}>`,'')}
       <div class="hint" id="ff-fijo">${precioFijo(con0)&&soloCampo()?'Precio fijo: '+fmtMoney(precioFijo(con0))+'. Lo define el administrador.':''}</div>
       ${soloCampo()?compHTML('ff'):''}
+      ${dividirHTML('ff')}
     </div>
     ${exigeMotivo(o,c)?`<div id="ff-nocobro"><div class="notice">Si no cobraste la instalación, dejá anotado por qué: la oficina la ve como «sin cobrar» hasta que se registre el pago.</div>
       ${F('¿Por qué no cobraste?','ff-motivo',`<select id="ff-motivo"><option value="">Elegí el motivo…</option>${Object.entries(SIN_COBRO).map(([k,v])=>opt(k,v,false)).join('')}</select>`)}
@@ -118,8 +119,10 @@ function openFinishOrder(o){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
     const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
     const ckc=$('#ff-cobro',el);
-    const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>$('#ff-met',el).value):null;
+    let dv=null;   /* el reparto en 2 medios: si está activo, el medio que cuenta para el comprobante es el del reparto */
+    const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>(dv&&dv.metodo())||$('#ff-met',el).value):null;
     if(comp){$('#ff-met',el).addEventListener('change',comp.sync);comp.sync();}
+    if(ckc)dv=mountDividir(el,'ff',{ocultar:()=>[$('#ff-met',el).closest('.field'),$('#ff-monto',el).closest('.field')],total:()=>soloCampo()?precioFijo($('#ff-con',el).value):null,onChange:()=>{if(comp)comp.sync();}});
     const noc=$('#ff-nocobro',el),mot=$('#ff-motivo',el);
     if(ckc)ckc.addEventListener('change',()=>{$('#ff-cobro-box',el).hidden=!ckc.checked;if(noc)noc.hidden=ckc.checked;if(ckc.checked)$('#ff-monto',el).focus();});
     if(mot)mot.addEventListener('change',()=>{$('#ff-motivo-nota-box',el).hidden=mot.value!=='otro';if(mot.value==='otro')$('#ff-motivo-nota',el).focus();});
@@ -129,12 +132,15 @@ function openFinishOrder(o){
       const m=$('#ff-monto',el),pf=precioFijo(selCon.value),campo=soloCampo();
       if(pf){m.value=pf;m.readOnly=campo;}else{if(m.readOnly)m.value='';m.readOnly=false;}
       $('#ff-fijo',el).textContent=pf&&campo?'Precio fijo: '+fmtMoney(pf)+'. Lo define el administrador.':'';
+      if(dv)dv.reiniciar();
     });
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read?read():{empty:true};if(g.invalid)return toast('Revisá las coordenadas','bad');
       const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
-      const cobra=ckc&&ckc.checked,fijoC=cobra&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(fijoC||num($('#ff-monto',el).value)):0;
+      const cobra=ckc&&ckc.checked,rp=cobra&&dv&&dv.activo()?dv.leer():null;   /* rp: cobro repartido entre 2 medios */
+      if(rp&&rp.error)return toast(rp.error,'bad');
+      const fijoC=cobra&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(rp?rp.total:fijoC||num($('#ff-monto',el).value)):0;
       if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
       const sinFoto=cobra&&comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');   /* antes de cerrar la orden: si falta la foto no se cierra nada */
       /* una instalación que se cierra sin cobrar lleva el motivo (y, si es «otro», qué pasó) */
@@ -152,7 +158,7 @@ function openFinishOrder(o){
         let rec=null;
         if(cobra){
           /* la orden ya quedó cerrada: si el cobro falla se avisa claro y se carga a mano, sin repetir nada */
-          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:$('#ff-met',el).value,nota:TIPOS_ORD[o.tipo]||'',comp:comp?comp.id():null});}
+          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:rp?rp.medios[0].metodo:$('#ff-met',el).value,medios:rp?rp.medios:null,nota:TIPOS_ORD[o.tipo]||'',comp:comp?comp.id():null});}
           catch(err2){toast('La orden se cerró, pero el cobro NO se registró. Cargalo con «Cobrar».','bad');}
         }
         toast(rec?'Orden cerrada y cobro registrado':motivo?'Orden cerrada: la instalación queda «sin cobrar» para la oficina':'Orden cerrada');closeModal();
