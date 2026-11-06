@@ -62,8 +62,12 @@ public class UbicacionService extends Service implements LocationListener {
     static final String P_ACTIVO = "ub_activo";
     static final String P_TOKEN = "ub_token";
     static final String P_TRAMOS = "ub_tramos";
-    private static final String CANAL_ACTIVA = "ubicacion";
-    private static final String CANAL_ESPERA = "ubicacion_espera";
+    /* Android no deja que una app cambie la importancia de un canal ya creado (solo el usuario puede), así que la notificación
+       silenciosa va en canales NUEVOS. «ubicacion» (el viejo, con ícono en la barra) se borra en cuanto el servicio deja de usarlo. */
+    private static final String CANAL_VIEJO = "ubicacion";
+    private static final String CANAL_ACTIVA = "ubicacion_discreta";    // dentro del horario: importancia mínima
+    private static final String CANAL_ESPERA = "ubicacion_espera";     // fuera del horario: importancia mínima
+    private static final String CANAL_PROBLEMA = "ubicacion_problema";  // GPS apagado o sin permiso: es lo único que sí conviene que se note
     private static final String CANAL_AVISO = "ubicacion_aviso";
     private static final int NOTIF_ID = 4107;
     private static final int NOTIF_AVISO_ID = 4108;
@@ -138,6 +142,7 @@ public class UbicacionService extends Service implements LocationListener {
             return START_NOT_STICKY;
         }
         quitarAviso(this);
+        borrarCanalViejo(this);
         if (!sp.getBoolean(P_ACTIVO, false) || token.length() == 0) { desactivar(this); stopSelf(); return START_NOT_STICKY; }
         if (!running) {
             running = true;
@@ -503,18 +508,20 @@ public class UbicacionService extends Service implements LocationListener {
     }
 
     private Notification notificacion(int estado) throws Exception {
-        String titulo, texto, canal = estado == FUERA ? CANAL_ESPERA : CANAL_ACTIVA;
+        String titulo, texto, canal = estado == FUERA ? CANAL_ESPERA : estado == PROBLEMA ? CANAL_PROBLEMA : CANAL_ACTIVA;
         if (estado == DENTRO) {
-            titulo = "Gestión YAPUR: ubicación activa";
-            texto = "Se comparte con la oficina de " + textoHorario() + " h";
+            titulo = "Gestión YAPUR";
+            texto = "Ubicación compartida de " + textoHorario() + " h";
         } else if (estado == PROBLEMA) {
             titulo = "Gestión YAPUR: no se puede tomar la ubicación";
             texto = "Revisá que el GPS esté prendido y que la app tenga permiso de ubicación.";
         } else {
-            titulo = "Gestión YAPUR: en espera";
-            texto = "Fuera de horario no se comparte nada. Horario: " + textoHorario() + " h";
+            titulo = "Gestión YAPUR";
+            texto = "En espera, fuera de horario (" + textoHorario() + " h)";
         }
-        Notification.Builder b = constructor(this, canal, estado == FUERA ? 1 : 2);   // 2 = IMPORTANCE_LOW (sin sonido), 1 = IMPORTANCE_MIN
+        /* Android obliga a dejar una notificación mientras un servicio usa la ubicación, pero puede ser la más discreta que existe:
+           importancia mínima (1) = sin sonido, sin ícono en la barra de arriba y abajo de todo en el panel. Solo el problema de GPS es 2 = IMPORTANCE_LOW. */
+        Notification.Builder b = constructor(this, canal, estado == PROBLEMA ? 2 : 1);
         Intent open = new Intent(this, MainActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -522,7 +529,13 @@ public class UbicacionService extends Service implements LocationListener {
             .setContentTitle(titulo)
             .setContentText(texto)
             .setOngoing(true)
+            .setShowWhen(false)
             .setContentIntent(pi);
+        if (estado != PROBLEMA) {
+            b.setPriority(Notification.PRIORITY_MIN)                       // Android 7 o anterior (desde la 8 manda el canal)
+                .setVisibility(Notification.VISIBILITY_SECRET)             // no se muestra en la pantalla bloqueada
+                .setCategory(Notification.CATEGORY_SERVICE);
+        }
         return b.build();
     }
 
@@ -530,7 +543,7 @@ public class UbicacionService extends Service implements LocationListener {
     static Notification.Builder constructor(Context c, String canal, int importancia) throws Exception {
         if (Build.VERSION.SDK_INT >= 26) {
             Class<?> chC = Class.forName("android.app.NotificationChannel");
-            String nombre = CANAL_ACTIVA.equals(canal) ? "Ubicación en horario laboral" : CANAL_ESPERA.equals(canal) ? "Ubicación en espera" : "Avisos de ubicación";
+            String nombre = CANAL_ACTIVA.equals(canal) ? "Ubicación en horario laboral" : CANAL_ESPERA.equals(canal) ? "Ubicación en espera" : CANAL_PROBLEMA.equals(canal) ? "Problemas con el GPS" : "Avisos de ubicación";
             Object ch = chC.getConstructor(String.class, CharSequence.class, int.class).newInstance(canal, nombre, importancia);
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             NotificationManager.class.getMethod("createNotificationChannel", chC).invoke(nm, ch);
@@ -554,6 +567,15 @@ public class UbicacionService extends Service implements LocationListener {
                 .setContentIntent(pi);
             ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).notify(NOTIF_AVISO_ID, b.build());
         } catch (Throwable t) { /* sin aviso: la oficina igual ve «Sin señal» en la pestaña Técnicos */ }
+    }
+
+    /** El canal de antes («ubicacion», con ícono en la barra) ya no se usa. Android no deja borrarlo mientras una notificación del servicio lo ocupa: si pasa, queda para el próximo arranque. */
+    static void borrarCanalViejo(Context c) {
+        if (Build.VERSION.SDK_INT < 26) return;
+        try {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            NotificationManager.class.getMethod("deleteNotificationChannel", String.class).invoke(nm, CANAL_VIEJO);
+        } catch (Throwable t) { /* nada */ }
     }
 
     static void quitarAviso(Context c) {
