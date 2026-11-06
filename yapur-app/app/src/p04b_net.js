@@ -24,7 +24,7 @@ const NET=(function(){
   let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
-  const handlers={status:[],me:[],kick:[],disp:[],contrato:[],sync:[]};
+  const handlers={status:[],me:[],kick:[],disp:[],contrato:[],ubic:[],sync:[]};
   const emit=(k,v)=>handlers[k].forEach(f=>{try{f(v);}catch(e){console.error(e);}});
 
   const isPlain=o=>o&&typeof o==='object'&&!Array.isArray(o);
@@ -147,7 +147,7 @@ const NET=(function(){
     if(name==='hello'){retry=0;setOnline(true);if(started)fullSync().catch(()=>{});}
     else if(name==='doc'){if(!m)return;if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);}
     else if(name==='me'){try{me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}}
-    else if(name==='disp'||name==='contrato'){try{emit(name,m);}catch(e){}}
+    else if(name==='disp'||name==='contrato'||name==='ubic'){try{emit(name,m);}catch(e){}}
     else if(name==='kick'){lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');}
   }
   /* WebSocket: el servidor se duerme mientras nadie hace nada (el plan gratis de Cloudflare limita el tiempo que está encendido).
@@ -181,7 +181,7 @@ const NET=(function(){
     const seen=()=>{lastMsg=Date.now();};
     s.addEventListener('hello',()=>onLive('hello'));
     s.addEventListener('ping',seen);
-    for(const nm of ['doc','me','disp','contrato'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
+    for(const nm of ['doc','me','disp','contrato','ubic'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
     s.addEventListener('kick',()=>onLive('kick'));
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);

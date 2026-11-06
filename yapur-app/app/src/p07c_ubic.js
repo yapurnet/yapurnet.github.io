@@ -6,7 +6,9 @@ const arNow=()=>{const d=new Date(Date.now()-3*3600e3);return {fecha:d.toISOStri
 /* tramos del día: [[8,20]] de corrido, o [[8,13],[17,22]] en un día cortado (con siesta). Los datos viejos traen solo desde/hasta. */
 const stTramos=s=>!s?[]:(s.tramos&&s.tramos.length?s.tramos:[[s.desde,s.hasta]]);
 const trTxt=tr=>tr.map(t=>t[0]+' a '+t[1]).join(' y de ');   /* «8 a 13 y de 17 a 22»: se usa como «de … h» */
-const ubDentro=()=>{const h=arNow().h;return stTramos(UB.st).some(t=>h>=t[0]&&h<t[1]);};
+/* la oficina puede cortarle el GPS a un técnico a una hora de hoy: desde ahí no se comparte nada más (el servidor igual descarta lo que llegue) */
+const ubCortado=()=>!!(UB.st&&UB.st.corte&&Date.now()>=UB.st.corte);
+const ubDentro=()=>{if(ubCortado())return false;const h=arNow().h;return stTramos(UB.st).some(t=>h>=t[0]&&h<t[1]);};
 const hhmm=ts=>new Date(ts).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
 const haceTxt=ts=>{
   const m=Math.max(0,Math.round((Date.now()-ts)/60000));
@@ -76,15 +78,16 @@ function ubicChip(){
   if(!c){c=document.createElement('span');c.id='ubChip';const rc=$('#roleChip');if(!rc||!rc.parentNode)return;rc.parentNode.insertBefore(c,rc);}
   const dentro=ubDentro();
   c.className='chip '+(UB.denied?'bad':dentro?'ok':'quiet');
-  c.textContent=UB.denied?'Ubicación sin permiso':dentro?'Ubicación activa':'Ubicación fuera de horario';
-  c.title=UB.denied?'Activá el permiso de ubicación de la app en el celular.':`Se comparte con la oficina de ${trTxt(stTramos(UB.st))} h.`;
+  c.textContent=UB.denied?'Ubicación sin permiso':ubCortado()?'Ubicación cortada por la oficina':dentro?'Ubicación activa':'Ubicación fuera de horario';
+  c.title=UB.denied?'Activá el permiso de ubicación de la app en el celular.':ubCortado()?'La oficina dio por terminado tu día: no se comparte más tu ubicación hoy.':`Se comparte con la oficina de ${trTxt(stTramos(UB.st))} h.`;
 }
 async function ubicFlush(){
   if(UB.sending||!UB.queue.length||!NET.online)return;
   UB.sending=true;const pts=UB.queue.slice(0,30);
   try{
-    await NET.api('POST','/api/ubicacion',{pts},{noKick:true,timeout:20000});
+    const r=await NET.api('POST','/api/ubicacion',{pts},{noKick:true,timeout:20000});
     UB.queue.splice(0,pts.length);
+    if(r&&r.cortado&&!ubCortado())ubicActualizar();   /* el servidor descartó todo porque la oficina cortó el GPS: se pide el estado ya mismo */
   }catch(e){
     if(e&&e.status===409){UB.st.acepto=false;ubicStop();}
     else if(e&&e.status===403)UB.queue.length=0;
@@ -115,6 +118,13 @@ async function ubicRefrescar(){
   UB.refr=true;
   try{UB.st=await NET.api('GET','/api/ubicacion/estado',undefined,{noKick:true,timeout:15000});UB.stTs=Date.now();}catch(e){/* sin conexión: queda el último horario conocido */}
   UB.refr=false;
+}
+/* se pide el horario ya mismo (sin esperar los 10 minutos) y se aplica: lo usa el aviso en vivo de que la oficina cortó o reanudó el GPS */
+function ubicActualizar(){
+  if(!UB.st)return;
+  UB.stTs=0;UB.refr=false;
+  ubicRefrescar().then(ubicLoop,ubicLoop);
+  if(typeof jornadaCargar==='function')jornadaCargar();
 }
 function ubicLoop(){
   if(!UB.st||!UB.st.acepto||UB.denied&&!UB.nat){ubicChip();return;}
@@ -166,6 +176,7 @@ async function ubicInit(){
     if(await ubicSiempreAviso(UB.st))ubSiempreMarcar();
   }
   UB.stTs=Date.now();
+  NET.on('ubic',ubicActualizar);
   ubicLoop();
   const tick=()=>ubicRefrescar().then(ubicLoop,ubicLoop);
   setInterval(tick,60000);
@@ -193,7 +204,7 @@ function jornadaBarra(){
   }else if(tr2.length>1&&h>=tr2[0][1]&&h<tr2[1][0]){
     cls='quiet';html=`<span>Tu mañana${f.regreso&&f.enBase?' terminó a las <b>'+hhmm(f.regreso)+'</b> al volver a la base':' terminó'}. Retomás a las <b>${tr2[1][0]}</b> h.</span>`;
   }else if(f.regreso&&f.enBase&&!(f.ingreso2&&f.regreso<f.ingreso2)){
-    cls='quiet';html=`<span>Tu jornada comenzó a las <b>${hhmm(f.ingreso)}</b>${f.ingreso2?', retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''} y terminó a las <b>${hhmm(f.regreso)}</b> al volver a la base${tr2.length>1?'':' ('+esc(durTxt((f.regreso-f.ingreso)/60000))+')'}.</span>`;
+    cls='quiet';html=`<span>Tu jornada comenzó a las <b>${hhmm(f.ingreso)}</b>${f.ingreso2?', retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''} y terminó a las <b>${hhmm(f.regreso)}</b>${st.corte?' (la oficina cortó tu ubicación)':' al volver a la base'}${tr2.length>1?'':' ('+esc(durTxt((f.regreso-f.ingreso)/60000))+')'}.</span>`;
   }else{
     html=`<span>Tu jornada laboral comenzó a las <b>${hhmm(f.ingreso)}</b>${f.origen==='base'?' · en la base':''}${f.ingreso2?' · retomaste a las <b>'+hhmm(f.ingreso2)+'</b>':''}.</span>`;
   }
@@ -291,7 +302,7 @@ function jornadaTec(t,d){
     ch(j.tarde?'warn':'ok','Ingresó '+hhmm(j.ingreso)+(j.tarde?' · '+durTxt(j.atrasoMin)+' tarde':''));
     notas.push(j.origen==='base'?'Ingresó en la base':'Inició a mano'+(hasNum(j.dist)?', a '+fmtDist(j.dist)+' de la base':''));
     if(j.estado==='siesta')ch('quiet','En siesta'+(j.regreso&&j.enBase?' · volvió a la base a las '+hhmm(j.regreso):''));
-    else if(j.estado==='termino')ch('quiet','Terminó '+hhmm(j.regreso)+(j.cortado?'':' · jornada de '+durTxt((j.regreso-j.ingreso)/60000)));
+    else if(j.estado==='termino')ch('quiet','Terminó '+hhmm(j.regreso)+(j.cortado?'':' · jornada de '+durTxt((j.regreso-j.ingreso)/60000))+(j.corte?' · GPS cortado a mano':''));
     else if(j.estado==='sin_cierre')ch('warn',j.regreso?'Último regreso a la base '+hhmm(j.regreso)+', después no volvió':'No volvió a la base');
     else ch('quiet',j.enBase?'En la base':'Fuera de la base');
     if(j.ingreso2)ch(j.tarde2?'warn':'ok','Retomó '+hhmm(j.ingreso2)+(j.tarde2?' · '+durTxt(j.atraso2Min)+' tarde':''));
@@ -311,14 +322,15 @@ function tecCard(t,d){
   else if(e==='en_linea')chip=`<span class="chip ok">En línea · ${esc(haceTxt(u.ts))}</span>`;
   else if(e==='sin_senal')chip=`<span class="chip ${m<=60?'warn':'bad'}">Sin señal · ${esc(haceTxt(u.ts))}</span>`;
   else if(e==='fuera_horario')chip=`<span class="chip quiet">Fuera de horario${u?' · visto '+esc(haceTxt(u.ts)):''}</span>`;
-  else chip=u?'<span class="chip quiet">'+t.puntos+' '+(t.puntos===1?'punto':'puntos')+'</span>':'<span class="chip quiet">Sin ubicación ese día</span>';
+  else if(e==='cortado')chip=`<span class="chip warn">GPS cortado a las ${esc(hhmmAR(t.corte))}</span>`;
+  else chip=u?'<span class="chip quiet">'+t.puntos+' '+(t.puntos===1?'punto':'puntos')+(t.corte?' · cortado '+esc(hhmmAR(t.corte)):'')+'</span>':'<span class="chip quiet">Sin ubicación ese día</span>';
   const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(e==='sin_datos'?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
   const hu=t.huecos||[];
   const huHTML=hu.length?`<details class="small tec-hu"><summary>Sin señal ${esc(durTxt(t.sinSenalMin))} en ${hu.length} ${hu.length===1?'tramo':'tramos'}</summary><ul class="plain">${hu.map(g=>`<li>${hhmm(g.desde)} a ${hhmm(g.hasta)} · ${durTxt((g.hasta-g.desde)/60000)}${g.inicio?' (antes de su primera posición)':''}${g.sigue?' (sigue sin señal)':''}</li>`).join('')}</ul></details>`:'';
   const ruta=rutaUrl(t.ruta),aviso=tecProblema(t)&&t.tel&&can('telefono');
   return `<article class="card tcard"><div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(t.nombre)}</h3>${chip}</div>
     ${jornadaTec(t,d)}${detalle?`<div class="small muted">${esc(detalle)}</div>`:''}${huHTML}
-    <div class="actions start">${aviso?`<a class="btn small primary" href="${tecAvisoUrl(t)}" target="_blank" rel="noopener">Avisarle por WhatsApp</a>`:''}${u?`<a class="btn small${aviso?'':' primary'}" href="${mapaUrl(u.lat,u.lng)}" target="_blank" rel="noopener">Ver en el mapa</a>`:''}${ruta?`<a class="btn small" href="${ruta}" target="_blank" rel="noopener">Recorrido del día</a>`:''}${!aviso&&t.tel&&can('telefono')?`<a class="btn small ghost" href="${waUrl(t.tel,'')}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div></article>`;
+    <div class="actions start">${aviso?`<a class="btn small primary" href="${tecAvisoUrl(t)}" target="_blank" rel="noopener">Avisarle por WhatsApp</a>`:''}${u?`<a class="btn small${aviso?'':' primary'}" href="${mapaUrl(u.lat,u.lng)}" target="_blank" rel="noopener">Ver en el mapa</a>`:''}${ruta?`<a class="btn small" href="${ruta}" target="_blank" rel="noopener">Recorrido del día</a>`:''}${!aviso&&t.tel&&can('telefono')?`<a class="btn small ghost" href="${waUrl(t.tel,'')}" target="_blank" rel="noopener">WhatsApp</a>`:''}${esHoy&&isAdmin()&&t.acepto?(t.corte?`<button class="btn small" type="button" data-gps-reanudar="${esc(t.id)}">Reanudar GPS</button>`:`<button class="btn small ghost" type="button" data-gps-cortar="${esc(t.id)}">Cortar GPS</button>`):''}</div></article>`;
 }
 function tecRender(){
   const out=$('#tu-out');if(!out)return;
@@ -550,6 +562,36 @@ function horaCorregir(t,x){
       const au=$('#hc-auto',el);if(au)au.addEventListener('click',()=>enviar({quitar:true}));
     }});
 }
+/* ----- cortar el GPS de un técnico a la hora en que se fue (solo el administrador) -----
+   Desde esa hora el servidor no guarda más su ubicación, borra lo que ya hubiera guardado y deja esa hora como el fin de su jornada de hoy. */
+function openCortarGps(t){
+  const d=TU.data;if(!d||d.dia!==d.hoy)return;
+  const ahoraAR=hhmmAR(Date.now()),sinIngreso=!t.jornada||!t.jornada.ingreso;
+  openModal({title:'Cortar el GPS de '+t.nombre,html:`<form class="form" id="cg-form" novalidate>
+    <div class="hint">Elegí <b>a qué hora se fue</b>. Desde esa hora no se guarda más su ubicación, se borra lo que se haya guardado después y esa hora queda como el <b>fin de su jornada de hoy</b>. Mañana arranca normal.</div>
+    ${F('Hora a la que se fue (hoy)','cg-h',`<input id="cg-h" type="time" step="60" required value="${ahoraAR}" max="${ahoraAR}">`)}
+    ${sinIngreso?'<div class="hint">Todavía no tiene el ingreso anotado hoy, así que solo se corta el GPS (no queda ninguna jornada para cerrar).</div>':''}
+    <div class="hint">En el celular del técnico se entera enseguida si tiene la app abierta, y si no, en menos de 10 minutos. Mientras tanto el servidor descarta lo que mande. Si te equivocás, tocá «Reanudar GPS».</div>
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Cortar el GPS</button></div></form>`,
+    onMount(el){
+      $('#cg-form',el).addEventListener('submit',async e=>{
+        e.preventDefault();
+        const v=$('#cg-h',el).value;if(!/^\d{2}:\d{2}$/.test(v))return toast('Elegí la hora','bad');
+        const ts=Date.parse(d.hoy+'T'+v+':00-03:00');
+        if(!(ts<=Date.now()+60e3))return toast('Esa hora todavía no llegó','bad');
+        const b=$('#cg-form button[type=submit]',el);b.disabled=true;
+        try{
+          const r=await NET.api('POST','/api/ubicacion/cortar',{uid:t.id,ts});
+          toast('GPS de '+t.nombre+' cortado a las '+hhmmAR(r.corte)+(r.jornada==='cerrada'?' · su jornada terminó ahí':''));
+          closeModal();tecCargar();
+        }catch(err){b.disabled=false;toast(err&&err.message||'No se pudo cortar','bad');}
+      });
+    }});
+}
+async function reanudarGps(t){
+  try{await NET.api('POST','/api/ubicacion/reanudar',{uid:t.id});toast('GPS de '+t.nombre+' reanudado');tecCargar();}
+  catch(err){toast(err&&err.message||'No se pudo reanudar','bad');}
+}
 VIEWS.tecnicos={
   mount(el){
     el.innerHTML=`<div class="head-row"><h2>Técnicos</h2><button class="btn small" type="button" id="tu-act">Actualizar</button></div>
@@ -574,6 +616,11 @@ VIEWS.tecnicos={
       const c=e.target.closest('[data-hr]');if(c){const [tid,dia]=c.dataset.hr.split('|');horaDetalle(tid,dia);return;}
       if(e.target.closest('#hr-copy')&&HR.data)copyText(horasTexto(HR.data),'Resumen');
       if(e.target.closest('#hr-csv')&&HR.data)saveFile('horas-'+HR.data.desde+'.csv',horasCsv(HR.data));
+    });
+    $('#tu-out',el).addEventListener('click',e=>{
+      const c=e.target.closest('[data-gps-cortar]'),r=e.target.closest('[data-gps-reanudar]'),id=c?c.dataset.gpsCortar:r?r.dataset.gpsReanudar:'';
+      const t=id&&TU.data&&TU.data.tecnicos.find(x=>x.id===id);if(!t||!isAdmin())return;
+      if(c)openCortarGps(t);else reanudarGps(t);
     });
     $('#tu-act',el).addEventListener('click',()=>{if(TU.vista==='horas')horasCargar();else tecCargar();});
     $('#tu-dia',el).addEventListener('change',e=>{TU.dia=e.target.value;TU.data=null;tecRender();tecCargar();});
