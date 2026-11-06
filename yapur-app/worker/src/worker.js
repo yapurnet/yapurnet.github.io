@@ -363,14 +363,13 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const fechaLarga = t => { const [y, m, d] = ymd(t).split('-').map(Number); return d + ' de ' + MESES[m - 1] + ' de ' + y; };
 const fmtDocAR = s => { const d = String(s || '').replace(/\D/g, ''); if (d.length === 11) return d.slice(0, 2) + '-' + d.slice(2, 10) + '-' + d.slice(10); return d.length === 7 || d.length === 8 ? d.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : d; };
 const horaAR = t => { const d = new Date(t - 3 * 3600e3).toISOString(); return d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) + ' ' + d.slice(11, 16); };
-/* Texto de arranque: sale de los contratos de fibra y de antena de YAPUR.NET, unidos en uno. Mientras diga «BORRADOR» o tenga «[COMPLETAR…]» no se puede marcar como definitivo ni lo pueden firmar los clientes:
-   el administrador lo lee, lo ajusta y borra la primera línea. */
-const CONTRATO_TXT_DEF = `BORRADOR PARA REVISAR: este texto reemplaza al provisorio y sale de tus contratos de fibra y de antena, unidos en uno solo. Leelo completo, ajustá lo que quieras y borrá esta línea antes de marcarlo como definitivo.
-
-CONTRATO DE COMODATO Y PRESTACIÓN DE SERVICIO N° {{numero}}
+/* Texto de arranque: sale de los contratos de fibra y de antena de YAPUR.NET, unidos en uno, y viene como DEFINITIVO (el administrador pidió dejarlo así).
+   Mientras no se guarde otro, los técnicos ya pueden hacer firmar con este. Si el administrador guarda un texto que diga «BORRADOR» o tenga «[COMPLETAR…]»,
+   no se puede marcar como definitivo ni lo pueden firmar los clientes. */
+const CONTRATO_TXT_DEF = `CONTRATO DE COMODATO Y PRESTACIÓN DE SERVICIO N° {{numero}}
 
 I. DEFINICIONES PREVIAS.
-1. Las presentes condiciones regulan expresamente las relaciones surgidas entre {{empresa}}, CUIT {{empresa_cuit}}, con domicilio en {{empresa_domicilio}}, representada por {{representante}}, en lo sucesivo YAPUR.NET, y el usuario del servicio de acceso a la red INTERNET a través de la modalidad tecnológica {{tecnologia}}, en adelante EL CLIENTE: {{titular}}, DNI/CUIT {{dni}}, con domicilio de instalación en {{domicilio}}, teléfono {{telefono}}, cliente N° {{cliente_n}}.
+1. Las presentes condiciones regulan expresamente las relaciones surgidas entre {{empresa}}, con domicilio en {{empresa_domicilio}}, representada por {{representante}}, en lo sucesivo YAPUR.NET, y el usuario del servicio de acceso a la red INTERNET a través de la modalidad tecnológica {{tecnologia}}, en adelante EL CLIENTE: {{titular}}, DNI/CUIT {{dni}}, con domicilio de instalación en {{domicilio}}, teléfono {{telefono}}, cliente N° {{cliente_n}}.
 2. La suscripción de este Contrato por parte del CLIENTE supone la aceptación expresa de todas las condiciones aquí previstas. Se firma en {{lugar}}, a {{fecha}}.
 
 II. CLIENTE.
@@ -1399,7 +1398,7 @@ export class YapurDB extends DurableObject {
   contratoTpl() {
     const r = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
     let t = null; try { t = r ? JSON.parse(r.v) : null; } catch (e) { t = null; }
-    if (!isPlain(t)) t = { texto: CONTRATO_TXT_DEF, ver: 1, final: false };
+    if (!isPlain(t)) t = { texto: CONTRATO_TXT_DEF, ver: 1, final: true };
     /* datos de la empresa que figuraban en los contratos en papel; el CUIT lo completa el administrador */
     t.empresa = Object.assign({ razon: 'YAPUR MAURO MIGUEL', cuit: '', domicilio: 'Av. Gral. Belgrano N° 500, Barrio Polo Norte, Añatuya, Santiago del Estero', rep: 'Mauro Miguel Yapur', lugar: 'Añatuya, Santiago del Estero' }, isPlain(t.empresa) ? t.empresa : {});
     return t;
@@ -1422,7 +1421,9 @@ export class YapurDB extends DurableObject {
     const final = b.final === true;
     if (final) {
       if (/BORRADOR|\[COMPLETAR/i.test(texto)) throw httpErr(400, 'Todavía dice «BORRADOR» o tiene partes «[COMPLETAR…]». Corregilo antes de marcarlo como definitivo.');
-      for (const [k, n] of [['razon', 'el nombre o razón social'], ['cuit', 'el CUIT'], ['domicilio', 'el domicilio'], ['rep', 'quién representa a la empresa']]) if (!empresa[k]) throw httpErr(400, 'Para marcarlo como definitivo completá ' + n + ' de la empresa.');
+      /* se exigen los datos de la empresa que el texto usa (el contrato en papel no llevaba el CUIT: si el texto no lo pide, no hace falta) */
+      for (const [k, v, n] of [['razon', 'empresa', 'el nombre o razón social'], ['cuit', 'empresa_cuit', 'el CUIT'], ['domicilio', 'empresa_domicilio', 'el domicilio'], ['rep', 'representante', 'quién representa a la empresa']])
+        if (!empresa[k] && new RegExp('\\{\\{\\s*' + v + '\\s*\\}\\}').test(texto)) throw httpErr(400, 'Para marcarlo como definitivo completá ' + n + ' de la empresa.');
     }
     const old = this.contratoTpl();
     if (old.texto === texto && !!old.final === final && same(old.empresa, empresa)) return this.contratoPlantillaVer(u);

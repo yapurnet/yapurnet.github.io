@@ -382,7 +382,7 @@ async function openContratoPlantilla(done){
       sug.addEventListener('click',()=>{
         if(!armado){armado=true;sug.textContent='Tocá otra vez: reemplaza el texto de arriba (no se guarda hasta «Guardar»)';return;}
         armado=false;sug.textContent=rotulo;
-        ta.value=t.sugerido;$('#ctpl-fin',el).checked=false;ta.scrollTop=0;toast('Texto sugerido cargado: leelo, ajustalo y guardalo');
+        ta.value=t.sugerido;$('#ctpl-fin',el).checked=!/BORRADOR|\[COMPLETAR/i.test(t.sugerido);ta.scrollTop=0;toast('Texto sugerido cargado: se guarda cuando toques «Guardar»');
       });
     }
     $('#ctpl-vars',el).addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;const ins='{{'+b.dataset.v+'}}',s=ta.selectionStart,f=ta.selectionEnd;ta.value=ta.value.slice(0,s)+ins+ta.value.slice(f);ta.focus();ta.selectionStart=ta.selectionEnd=s+ins.length;});
