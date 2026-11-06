@@ -248,6 +248,7 @@ button.pelo:hover{border-color:var(--accent-line)}
 .pnode:focus{outline:2px solid var(--accent);outline-offset:2px}
 .pnode.olt rect{fill:var(--accent-soft);stroke:var(--accent)}
 .pnode.nap rect{fill:var(--ok-soft);stroke:var(--ok)}
+.pnode.nap.apagada rect{fill:var(--surface-2);stroke:var(--muted)}
 .pnode.empalme rect{fill:var(--info-soft);stroke:var(--info)}
 .pnode-t{fill:var(--ink);font-size:12px;font-weight:700}
 .pnode-s{fill:var(--muted);font-size:10px;font-weight:500}
