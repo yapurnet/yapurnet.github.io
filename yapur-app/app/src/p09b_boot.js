@@ -42,13 +42,14 @@ function allowedTabs(){
 }
 function renderTabs(){
   const open=[...S.ordenes.values()].filter(ORD_OPEN).length;
-  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}</button>`).join('');
+  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}${k==='tecnicos'&&TAL.sin.length?`<span class="count bad" title="Técnicos sin señal en horario">${TAL.sin.length}</span>`:''}</button>`).join('');
   if(html!==tabsHtml){tabsHtml=html;$('#tabs').innerHTML=html;}
 }
 function showTab(t){
   const tabs=allowedTabs();if(!tabs.length)return;
   if(!tabs.some(x=>x[0]===t))t=tabs[0][0];
   S.tab=t;lsSet('tab',t);tabsHtml='';renderTabs();
+  if(typeof tecAlertaBarra==='function')tecAlertaBarra();
   const v=$('#view');v.innerHTML='';VIEWS[t].mount(v);
   window.scrollTo(0,0);
 }
@@ -249,6 +250,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   S.ready=true;refreshAll();updateNetBar();
   dispRefresh();
   ubicInit().then(jornadaInit,jornadaInit);
+  tecAlertaInit();
 })();
 
 startUpdateWatch();

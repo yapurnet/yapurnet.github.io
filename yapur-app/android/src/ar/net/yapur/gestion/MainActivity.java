@@ -680,6 +680,18 @@ public class MainActivity extends Activity {
             return arrancarUbicacion(token, -1, -1, null);
         }
 
+        /* El latido (ubicación prendida, permiso y batería, sin posiciones) arranca recién cuando la página confirma que el técnico ya vio el aviso.
+           Devuelve «si» (también sirve para saber que este APK sabe mandar latidos: los anteriores no tienen este método). */
+        @JavascriptInterface
+        public String activarLatido(boolean si) {
+            try {
+                getSharedPreferences(UbicacionService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(UbicacionService.P_LATIDO, si).apply();
+                return "si";
+            } catch (Throwable t) {
+                return "error";
+            }
+        }
+
         /* «si» / «no»: si la app tiene el permiso de ubicación «todo el tiempo» (sin él, con la app cerrada puede no poder leer el GPS) */
         @JavascriptInterface
         public String ubicacionSiempre() {
