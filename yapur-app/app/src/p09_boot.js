@@ -18,6 +18,7 @@ VIEWS.resumen={
     const max=Math.max(1,...meses.map(m=>porMes[m]||0));
     const open=[...S.ordenes.values()].filter(ORD_OPEN);
     const urg=open.filter(o=>o.prioridad==='urgente').length;
+    const ins=can('ordenesTodas')&&S.loaded.ordenes?instResumen():null;
     debtors.sort((a,b)=>b.b.deuda-a.b.deuda);
     const cd=cortesData();
     const steps=[['Crear los planes de velocidad',S.planes.size>0,'planes'],['Crear los perfiles del equipo',S.ajustes.perfiles.length>0,'ajustes'],['Cargar o importar los clientes',S.clientes.size>0,'clientes']];
@@ -29,7 +30,8 @@ VIEWS.resumen={
       <div class="kpi bad"><span class="n">${fmtMoney(deuda)}</span><span class="l">Deuda vencida · ${morosos} ${morosos===1?'cliente':'clientes'}</span></div>
       ${dantN&&can('caja')?`<div class="kpi tap" data-go="cobranzas" data-sub="dant" role="button" tabindex="0"><span class="n">${fmtMoney(dant)}</span><span class="l">Deuda anterior · ${dantN} ${dantN===1?'cliente':'clientes'}</span></div>`:''}
       <div class="kpi"><span class="n">${fmtMoney(ingreso)}</span><span class="l">Facturación mensual de activos</span></div>
-      <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div></div>
+      <div class="kpi"><span class="n">${open.length}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div>
+      ${ins?`<div class="kpi tap" data-go="instalaciones" role="button" tabindex="0"><span class="n">${ins.mes}</span><span class="l">Instalaciones en ${esc(monthLabel(cur))} · hoy ${ins.hoy}</span></div>`:''}</div>
     <div class="card"><div class="head-row"><h3>Cortes y promesas</h3>${can('caja')?'<button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Ver lista</button>':''}</div>
       <div class="kpis three"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
       <div class="list" style="margin-top:8px">${calendarHTML()}</div></div>

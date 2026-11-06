@@ -110,6 +110,17 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .bar i{display:block;width:100%;max-width:56px;background:var(--accent);border-radius:6px 6px 2px 2px;min-height:2px}
 .bar.now i{background:var(--accent)} .bar:not(.now) i{background:var(--accent-line)}
 .bar span{font-size:11px;color:var(--muted)} .bar b{font-size:11px;font-variant-numeric:tabular-nums}
+/* instalaciones: gráfico de barras que se toca para elegir el período, y renglón de cada día */
+.bars.tight{gap:4px}
+.bars.tight .bar{padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer;border-radius:6px}
+.bars.tight .bar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bars.tight .bar span{font-size:10px;line-height:1.15;text-align:center}
+.bars.tight .bar b{font-size:10px}
+.bars.tight .bar.now span{color:var(--ink);font-weight:700}
+.in-nav{display:flex;align-items:center;gap:8px}
+.in-nav .tt{flex:1;min-width:0;text-align:center;display:flex;flex-direction:column}
+.in-nav .tt b{font-family:var(--f-display);font-size:17px;overflow-wrap:anywhere}
+.in-day{margin:6px 2px 0;font-size:13px;font-weight:700;color:var(--muted)}
 tr.tap{cursor:pointer}tr.tap:hover td{background:rgba(127,127,127,.08)}tr.tap:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
 table{border-collapse:collapse;width:100%;font-size:14px}

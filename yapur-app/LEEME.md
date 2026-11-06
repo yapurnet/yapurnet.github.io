@@ -65,6 +65,16 @@ La pestaña **Red** (la ven los técnicos y la oficina; el administrador siempre
 - **Permisos:** el permiso nuevo **«Cargar y editar la red»** se activa por perfil en Ajustes → Usuarios (viene encendido para técnicos y oficina). Quien no lo tiene igual ve las cajas en la ficha del cliente, pero no puede cambiarlas. **Eliminar** un punto solo lo puede quien edita clientes, y el servidor no deja borrar una caja con clientes conectados (hay que pasarlos antes a otra) ni una botella de la que sale otra caja.
 - Los datos entran en las copias de seguridad como cualquier otro, y la lista queda guardada en el celular para consultarla sin señal. Se necesita el APK 2.2 o posterior para el GPS (el mismo que ya se usa para las casas); **no hace falta un APK nuevo**.
 
+## Instalaciones por día, semana y mes
+
+Pestaña **Instalaciones** (la ven el administrador y la oficina; el técnico no, porque no ve las órdenes de todos). Arriba se elige **Día**, **Semana** (de lunes a domingo) o **Mes**; con `‹` y `›` se va al período anterior o siguiente, «Volver a hoy» regresa, y el gráfico de barras (14 días, 8 semanas o 12 meses) se toca para saltar a cualquier período. Abajo muestra:
+
+- **Instaladas**, las del **período anterior** (con la diferencia en una frase) y las que quedaron **sin hacer** (órdenes de instalación programadas en ese período que siguen abiertas).
+- **Por técnico**: cuántas hizo cada uno (y «Sin técnico» si no había uno asignado).
+- La **lista de clientes** instalados, con la hora; con un renglón por día en semana y mes. Tocar un renglón abre la ficha del cliente. Las que se cerraron sin cobrar llevan «Sin cobrar» (y un aviso arriba) hasta que se cobran.
+
+Una instalación cuenta **el día en que se cerró su orden** (no el día para el que estaba programada). Si un cliente pagó la instalación pero no tiene ninguna orden de instalación cerrada (la cargó la oficina a mano), también cuenta, el día de su primer cobro, y se marca «Sin orden». Las órdenes canceladas y las abiertas no cuentan. En el **Resumen** hay un recuadro «Instalaciones en <mes> · hoy N» que lleva a esta pestaña.
+
 ## Cobros del técnico y cierre de caja por cobrador
 
 Si un técnico cobra la instalación, una reinstalación (mudanza) o un reclamo, lo carga en la app y entra a la caja del día con su nombre:
