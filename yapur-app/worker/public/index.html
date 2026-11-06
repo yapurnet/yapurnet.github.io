@@ -437,13 +437,14 @@ const PERMS=[
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo'],
   ['ping','Probar la conexión de un cliente (ping)','Un router de la empresa hace el ping a la IP del cliente y dice si responde. Solo prueba clientes con la IP cargada en su ficha.','Clientes'],
   ['verPlan','Ver el plan contratado de cada cliente','Apagado: el servidor no le manda el plan de los clientes ni la lista de planes, y no puede copiar la cola de MikroTik.','Clientes'],
+  ['elegirPlan','Elegir el plan de un abonado por instalar','Al instalar, indica qué plan quiere el cliente nuevo. Recibe la lista de planes (sin precios) y el plan solo de los abonados «por instalar»: el de los clientes ya instalados sigue oculto. La oficina lo revisa antes de activar el servicio.','Clientes'],
   ['comodato','Cargar los equipos en comodato y hacer firmar el contrato','Lista de equipos prestados a cada cliente y contrato firmado con el dedo en el celular. Ve el estado de los contratos de sus clientes, pero no el DNI del titular.','Clientes'],
   ['contratosGestion','Revisar, aprobar y borrar contratos de comodato','Aprobar un cambio de titularidad (y archivar el contrato anterior), rechazar, mandar a la papelera y restaurar, y ver el registro de cada contrato con el DNI.','Clientes']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,comodato:true,contratosGestion:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,comodato:true,contratosGestion:true}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,elegirPlan:true,comodato:true,contratosGestion:false},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,elegirPlan:true,comodato:true,contratosGestion:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */
@@ -1094,7 +1095,11 @@ const ESTADO_CLS={activo:'ok',suspendido:'bad',pendiente:'info',baja:''};
 const planName=id=>{const p=S.planes.get(id);return p?p.nombre:'Sin plan';};
 const planSpeed=p=>p?`${p.bajada}/${p.subida} Mbps`:'';
 /* el plan del cliente tal como lo puede ver esta persona: el técnico no lo ve (el servidor tampoco se lo manda) */
-const planVis=c=>can('verPlan')?S.planes.get(c.planId):null;
+/* quien puede elegir el plan de un abonado nuevo (el técnico) ve el plan solo mientras el cliente está «por instalar» */
+const verPlanDe=c=>can('verPlan')||(can('elegirPlan')&&!!c&&c.estado==='pendiente');
+const planVis=c=>verPlanDe(c)?S.planes.get(c.planId):null;
+/* el técnico indica qué plan quiere un abonado por instalar (la oficina lo revisa y activa el servicio) */
+const puedePlan=c=>!!c&&!can('editarClientes')&&can('elegirPlan')&&c.estado==='pendiente';
 function clientHay(c){
   const hv=S.pv+'.'+S.rv,h=cuentaHead(c),hn=h&&h!==c?h.nombre:'';
   if(!c._hay||c._hayV!==hv||c._hayH!==hn){c._hay=norm([c.codigo,c.nombre,hn,can('dni')?c.dni:'',can('dni')?docDigits(c.dni):'',can('telefono')?c.tel:'',can('telefono')?c.tel2:'',c.dir,c.loc,c.usuario,c.ip,c.nodo,c.equipo,c.nap?redName(c.nap):''].join(' '));c._hayV=hv;c._hayH=hn;}
@@ -1130,7 +1135,7 @@ function clientRow(c){
     <div><div class="t">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</div>
     <div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div>
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
-    <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length||!can('verPlan')?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
+    <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length||!verPlanDe(c)?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
     ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${ctChip(c)}${billChip(c)}</div></button>`;
 }
@@ -1287,12 +1292,12 @@ function openClient(id){
     ${deudaAntBlock(c)}
     ${cuentaBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI / CUIT / CUIL',esc(c.dni)):''}
-      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):'')}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
+      ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):(puedePlan(c)?'<span class="muted">Todavía sin elegir</span>':''))}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
       ${kv('Alta',esc(dmy(c.alta)))}${can('cobrar')||can('caja')?kv('Ciclo de cobro','Ciclo '+cicloOf(c)+': '+esc(cicloTxt(cicloOf(c)))):''}${kv('Notas',esc(c.notas))}</dl>
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(c)}${can('ubicacion')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(c)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
     ${pingBlock(c)}
     ${comodatoBlock(c)}
-    <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&!porInstalar(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&!porInstalar(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl&&can('verPlan')?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div>${o.estado==='cancelada'?`<div class="s muted">${esc(cancelTxt(o))}</div>`:''}</div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
@@ -1551,6 +1556,36 @@ const opt=(v,l,sel)=>`<option value="${esc(v)}"${sel?' selected':''}>${esc(l)}</
 /* los cambios de un cliente solo pueden regir después de que empezó su situación actual (si no, se reescribiría el pasado) */
 const cfVigMin=c=>{const hp=c&&Array.isArray(c.hp)?c.hp:[];return hp.length?addMonths(hp[hp.length-1].h,1):'';};
 const sameExtras=(a,b)=>JSON.stringify([...(a||[])].sort())===JSON.stringify([...(b||[])].sort());
+/* los nodos o torres que ya figuran en algún cliente, para elegirlos de una lista en vez de escribirlos (el mismo nodo escrito de dos maneras cuenta como uno) */
+function nodosConocidos(){
+  const m=new Map();
+  for(const c of S.clientes.values()){
+    const n=String(c.nodo||'').trim();if(!n)continue;
+    const k=norm(n),e=m.get(k)||{};e[n]=(e[n]||0)+1;m.set(k,e);
+  }
+  return [...m.values()].map(e=>Object.entries(e).sort((a,b)=>b[1]-a[1])[0][0]).sort((a,b)=>norm(a).localeCompare(norm(b),'es',{numeric:true}));
+}
+const NODO_OTRO='__otro';
+/* «Nodo o torre»: una lista para elegir, con «Otro» para escribir uno nuevo. El valor queda en el campo de texto #<pre>-nodo (visible solo con «Otro») */
+function nodoFieldHTML(c,pre){
+  const cur=String(c.nodo||'').trim(),lista=nodosConocidos(),conocido=cur&&lista.find(n=>norm(n)===norm(cur));
+  const sel=cur?(conocido||NODO_OTRO):(lista.length?'':NODO_OTRO);
+  return `<div class="field"><label for="${pre}-nodo-sel">Nodo o torre</label>
+    <select id="${pre}-nodo-sel"><option value="">Sin definir</option>${lista.map(n=>opt(n,n,n===sel)).join('')}<option value="${NODO_OTRO}"${sel===NODO_OTRO?' selected':''}>Otro (escribirlo)…</option></select>
+    <input id="${pre}-nodo" autocomplete="off" placeholder="Nombre del nodo o torre" value="${esc(cur)}"${sel===NODO_OTRO?'':' hidden'} style="margin-top:6px"></div>`;
+}
+function bindNodoField(el,pre){
+  const s=$('#'+pre+'-nodo-sel',el),t=$('#'+pre+'-nodo',el);if(!s||!t)return;
+  s.addEventListener('change',()=>{
+    if(s.value===NODO_OTRO){t.hidden=false;t.value='';t.focus();}
+    else{t.hidden=true;t.value=s.value;}
+  });
+}
+/* «Plan que quiere el cliente» para el técnico: nombre y velocidad, sin precios */
+function planPedidoHTML(c,pre){
+  const pls=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||norm(a.nombre).localeCompare(norm(b.nombre)));
+  return F('Plan que quiere el cliente',pre+'-plan',`<select id="${pre}-plan"><option value="">Todavía no eligió</option>${pls.map(p=>opt(p.id,p.nombre+' · '+planSpeed(p),p.id===c.planId)).join('')}</select>`,'Lo revisa la oficina antes de activar el servicio.');
+}
 function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
@@ -1583,8 +1618,9 @@ function openClientForm(id){
       ${full&&old?`<div class="notice info" id="cf-vig" hidden><div class="field"><label for="cf-vig-mes">Los cambios de plan, precio o servicios rigen desde</label><input id="cf-vig-mes" type="month" max="${curMonth()}" value="${curMonth()}"${cfVigMin(old)?` min="${cfVigMin(old)}"`:''}></div>
         <div class="hint">Los meses anteriores quedan como estaban: lo que ya pagó no se vuelve deuda.</div>
         <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses</span></label></div>`:''}
+      ${puedePlan(old)?planPedidoHTML(c,'cf'):''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
-      <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${F('Nodo o torre','cf-nodo',`<input id="cf-nodo" value="${esc(c.nodo||'')}">`)}</div>
+      <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${nodoFieldHTML(c,'cf')}</div>
       ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
@@ -1599,6 +1635,7 @@ function openClientForm(id){
       ${old?'<div class="hint">¿Tiene otras conexiones a su nombre (sucursales, otro local)? Se juntan desde su ficha, con el botón «Cuenta unificada»: se cobran juntas y sale un solo recibo.</div>':''}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
+    bindNodoField(el,'cf');
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const scChk=$('#cf-sc',el);if(scChk){const sync=()=>{$('#cf-sc-box',el).hidden=!scChk.checked;const w=$('#cf-sc-warn',el);if(w)w.hidden=!scChk.checked;};scChk.addEventListener('change',sync);sync();}
@@ -1645,6 +1682,7 @@ function openClientForm(id){
         if($('#cf-tel',el))Object.assign(patch,{tel:v('cf-tel'),tel2:v('cf-tel2')});   /* sin el permiso de teléfono el campo no está: guardar no puede borrarlo */
         if(v('cf-dni'))patch.dni=fmtDoc(v('cf-dni'));
       }
+      if(puedePlan(old)&&$('#cf-plan',el))patch.planId=v('cf-plan')||null;   /* el técnico indica el plan de un abonado por instalar (el servidor no lo deja en otro caso) */
       if(full){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
         if(!v('cf-dir'))return toast('Falta el domicilio','bad');
@@ -4339,12 +4377,14 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
+    ${c&&o.tipo==='instalacion'&&(puedePlan(c)||can('ubicacion'))?`<div class="fgroup"><div class="legend">Servicio del abonado</div>${puedePlan(c)?planPedidoHTML(c,'ff'):''}${can('ubicacion')?nodoFieldHTML(c,'ff'):''}</div>`:''}
     ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):(!can('cobrar')&&!can('cobrarCampo')&&['instalacion','falla','visita'].includes(o.tipo)?'<div class="notice info">Tu perfil no registra cobros: si cobraste este trabajo, avisale a la oficina cuánto para que lo cargue.</div>':'')}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
     const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
+    bindNodoField(el,'ff');
     const ckc=$('#ff-cobro',el);
     let dv=null;   /* el reparto en 2 medios: si está activo, el medio que cuenta para el comprobante es el del reparto */
     const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>(dv&&dv.metodo())||$('#ff-met',el).value):null;
@@ -4379,6 +4419,9 @@ function openFinishOrder(o){
         const cp={};
         if(!g.empty&&c)Object.assign(cp,{lat:g.lat,lng:g.lng});
         if(nf&&c&&(nf.nap!==(c.nap||null)||nf.puerto!==(c.napPuerto||null)))Object.assign(cp,{nap:nf.nap,napPuerto:nf.puerto});
+        const plIn=$('#ff-plan',el),ndIn=$('#ff-nodo',el);
+        if(c&&plIn&&puedePlan(c)&&(plIn.value||null)!==(c.planId||null))cp.planId=plIn.value||null;   /* el plan que eligió el cliente */
+        if(c&&ndIn&&ndIn.value.trim()!==String(c.nodo||'').trim())cp.nodo=ndIn.value.trim();
         const ck=$('#ff-est',el);
         if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
@@ -6250,7 +6293,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='5d0152ec96';
+const BUILD='28397c3e32';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

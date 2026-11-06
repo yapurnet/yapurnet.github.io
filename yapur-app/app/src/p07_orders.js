@@ -115,12 +115,14 @@ function openFinishOrder(o){
   const html=`<form class="form" id="fform" novalidate>${F('Qué se hizo','ff-res','<textarea id="ff-res" placeholder="Se instaló ONU, señal -19 dBm, cliente conforme."></textarea>')}
     ${c&&!hasGeo(c)?`<div class="notice">Este cliente no tiene ubicación. Si estás en el domicilio, cargala ahora.</div>${geoFieldHTML(c)}`:''}
     ${c&&o.tipo==='instalacion'&&can('red')?`<div class="fgroup"><div class="legend">Caja NAP de la que sale</div>${napFieldHTML(c)}</div>`:''}
+    ${c&&o.tipo==='instalacion'&&(puedePlan(c)||can('ubicacion'))?`<div class="fgroup"><div class="legend">Servicio del abonado</div>${puedePlan(c)?planPedidoHTML(c,'ff'):''}${can('ubicacion')?nodoFieldHTML(c,'ff'):''}</div>`:''}
     ${puedeCobrarOrden(c,o)?cobroOrdenHTML(o,c):(!can('cobrar')&&!can('cobrarCampo')&&['instalacion','falla','visita'].includes(o.tipo)?'<div class="notice info">Tu perfil no registra cobros: si cobraste este trabajo, avisale a la oficina cuánto para que lo cargue.</div>':'')}
     ${sug?`<label class="per"><input id="ff-est" type="checkbox" checked><span class="grow">${sug[1]}</span></label>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Marcar como hecha</button></div></form>`;
   openModal({title:'Terminar orden',html,onMount(el){
     const read=c&&!hasGeo(c)?bindGeoField(el):null;
     const readNap=c&&o.tipo==='instalacion'&&can('red')?bindNapField(el,c.id):null;
+    bindNodoField(el,'ff');
     const ckc=$('#ff-cobro',el);
     let dv=null;   /* el reparto en 2 medios: si está activo, el medio que cuenta para el comprobante es el del reparto */
     const comp=ckc&&soloCampo()?mountComp(el,'ff',()=>(dv&&dv.metodo())||$('#ff-met',el).value):null;
@@ -155,6 +157,9 @@ function openFinishOrder(o){
         const cp={};
         if(!g.empty&&c)Object.assign(cp,{lat:g.lat,lng:g.lng});
         if(nf&&c&&(nf.nap!==(c.nap||null)||nf.puerto!==(c.napPuerto||null)))Object.assign(cp,{nap:nf.nap,napPuerto:nf.puerto});
+        const plIn=$('#ff-plan',el),ndIn=$('#ff-nodo',el);
+        if(c&&plIn&&puedePlan(c)&&(plIn.value||null)!==(c.planId||null))cp.planId=plIn.value||null;   /* el plan que eligió el cliente */
+        if(c&&ndIn&&ndIn.value.trim()!==String(c.nodo||'').trim())cp.nodo=ndIn.value.trim();
         const ck=$('#ff-est',el);
         if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
