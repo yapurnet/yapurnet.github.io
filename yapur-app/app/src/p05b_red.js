@@ -626,7 +626,7 @@ function openRedGeo(id){
    una copia de cada punto de la rama (mismo tipo, puertos, relación del splitter, pelos del empalme) con un nombre
    nuevo (el prefijo elegido + el nombre original), colgada de un padre nuevo. La copia no trae ubicación, referencia,
    notas, fibra, PON vivos ni «qué hay que hacer»: son datos de ese punto físico en particular, no de la estructura. */
-function prepararClon(raizId,nuevoPadreId,prefijo){
+function prepararClon(raizId,nuevoPadreId,prefijo,buscar,reemplazar){
   const raiz=S.red.get(raizId);if(!raiz)return {ok:false,msg:'No se encontró ese punto de la red'};
   const visitado=new Set([raiz.id]);
   const arbol=redArbol(raiz,visitado);
@@ -640,7 +640,9 @@ function prepararClon(raizId,nuevoPadreId,prefijo){
     if(dup)return;
     const old=nodo.p,nid=idMap.get(old.id),obj={};
     CAMPOS.forEach(k=>{if(old[k]!==undefined)obj[k]=old[k];});
-    obj.nombre=prefijo+' '+old.nombre;
+    let nombre=old.nombre;
+    if(buscar)nombre=nombre.split(buscar).join(reemplazar||'');
+    obj.nombre=prefijo?prefijo+' '+nombre:nombre;
     const set=usados.get(obj.tipo)||new Set();usados.set(obj.tipo,set);
     if(set.has(norm(obj.nombre))){dup=obj.nombre;return;}
     set.add(norm(obj.nombre));
@@ -657,7 +659,7 @@ function prepararClon(raizId,nuevoPadreId,prefijo){
     items[nid]=obj;
     nodo.hijos.forEach(h=>construir(h.nodo,nid));
   })(arbol,nuevoPadreId);
-  if(dup)return {ok:false,msg:'Ya hay un punto llamado «'+dup+'»: probá con otro prefijo.'};
+  if(dup)return {ok:false,msg:'Ya hay un punto llamado «'+dup+'»: probá con otro prefijo o cambiá el buscar/reemplazar.'};
   return {ok:true,items,count:Object.keys(items).length,nuevaRaiz:idMap.get(raiz.id)};
 }
 function openRedClonar(id){
@@ -668,15 +670,19 @@ function openRedClonar(id){
   const html=`<p>Crea una copia de <b>${esc(p.nombre)}</b> y de todo lo que cuelga de ella (splitters, botellas y cajas), con la misma estructura. La copia no trae ubicación, referencia, notas, fibra, PON vivos ni «qué hay que hacer»: eso es de cada punto físico y hay que cargarlo de nuevo.</p>
     <form class="form" id="cl-form" novalidate>
     ${F('De dónde sale la copia','cl-padre',`<select id="cl-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo))).join('')}</select>`,'La OLT, la botella o el splitter del que va a salir esta copia.')}
-    ${F('Prefijo para los nombres de la copia *','cl-prefijo',`<input id="cl-prefijo" maxlength="30" autocomplete="off" placeholder="Ej.: PON 2">`,'Se agrega adelante del nombre de cada punto copiado, para no repetir nombres.')}
+    ${F('Prefijo para los nombres de la copia','cl-prefijo',`<input id="cl-prefijo" maxlength="30" autocomplete="off" placeholder="Ej.: PON 2">`,'Se agrega adelante del nombre de cada punto copiado, para no repetir nombres.')}
+    <div class="grid2">${F('Buscar en los nombres','cl-buscar',`<input id="cl-buscar" maxlength="60" autocomplete="off" placeholder="Ej.: pon 41">`,'Opcional: texto a cambiar en cada nombre copiado.')}
+    ${F('Reemplazar por','cl-reemplazar',`<input id="cl-reemplazar" maxlength="60" autocomplete="off" placeholder="Ej.: pon 42">`,'Con qué se reemplaza lo que pusiste en «Buscar».')}</div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Clonar</button></div></form>`;
   openModal({title:'Clonar con todo lo que cuelga',html,onMount(el){
     $('#cl-form',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const prefijo=$('#cl-prefijo',el).value.trim();
-      if(!prefijo)return toast('Poné un prefijo para los nombres de la copia','bad');
+      const buscar=$('#cl-buscar',el).value.trim();
+      const reemplazar=$('#cl-reemplazar',el).value.trim();
+      if(!prefijo&&!buscar)return toast('Poné un prefijo o un buscar/reemplazar para los nombres de la copia','bad');
       const nuevoPadre=$('#cl-padre',el).value||null;
-      const r=prepararClon(p.id,nuevoPadre,prefijo);
+      const r=prepararClon(p.id,nuevoPadre,prefijo,buscar,reemplazar);
       if(!r.ok)return toast(r.msg,'bad');
       if(!await askConfirm('Se van a crear '+r.count+' puntos nuevos, copia de «'+p.nombre+'» y de todo lo que cuelga de ella. ¿Confirmás?','Clonar '+r.count+' puntos'))return;
       try{

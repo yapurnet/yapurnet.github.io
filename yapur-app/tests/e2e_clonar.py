@@ -48,6 +48,13 @@ async def main():
     red({'s1': {'salidas': {2: {'e': 'conectado', 'a': 'n2', 'n': ''}}, 'mod': 3}})
     red({'s2': {'tipo': 'splitter', 'nombre': 'SPL-SUB', 'padre': 's1', 'rel': 2, 'creado': 1, 'mod': 1}})
 
+    # rama aparte, pensada para probar «buscar y reemplazar»: todos los nombres contienen «PON1»
+    red({'e9': {'tipo': 'empalme', 'nombre': 'BOTELLA PON1 TEST', 'padre': None, 'hilos': 4, 'xtubo': 12, 'creado': 1, 'mod': 1}})
+    red({'s9': {'tipo': 'splitter', 'nombre': 'SPLIT PON1 TEST', 'padre': 'e9', 'rel': 2, 'creado': 1, 'mod': 1}})
+    red({'e9': {'pelos': {1: {'e': 'empalmado', 'p': 1, 'a': 's9', 'n': ''}}, 'mod': 2}})
+    red({'n9': {'tipo': 'nap', 'nombre': 'CAJA PON1 TEST', 'padre': 's9', 'puertos': 8, 'creado': 1, 'mod': 1}})
+    red({'s9': {'salidas': {1: {'e': 'conectado', 'a': 'n9', 'n': ''}}, 'mod': 2}})
+
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         ctx = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, accept_downloads=True)
@@ -127,11 +134,47 @@ async def main():
         await pg.click('.sheet [data-close]')
 
         # 5) el plano dibuja la rama original y la copia sin errores (redArbol compartido entre plano y clonar):
-        #    6 originales (OLT, BE-PON1, SPL-PON1, SPL-SUB, NAP-A, NAP-B) + 5 de la copia = 11
+        #    6 originales (OLT, BE-PON1, SPL-PON1, SPL-SUB, NAP-A, NAP-B) + 5 de la copia + 3 de la rama de prueba de buscar/reemplazar = 14
         await pg.click('#rd-plano')
         await pg.wait_for_selector('.plano-wrap svg', timeout=8000)
         nnodes = await pg.locator('.pnode').count()
-        check('el plano dibuja los 11 puntos (6 originales + 5 de la copia)', nnodes == 11, nnodes)
+        check('el plano dibuja los 14 puntos (6 originales + 5 de la copia + 3 de la rama de prueba)', nnodes == 14, nnodes)
+        await pg.click('.sheet [data-close]')
+
+        # 6) clonar con «buscar y reemplazar» solo (sin prefijo): todos los nombres de la rama contienen «PON1»
+        await abrir('BOTELLA PON1 TEST')
+        await pg.click('.sheet button:has-text("Clonar con todo lo que cuelga")')
+        await pg.wait_for_selector('#cl-form', timeout=6000)
+        await pg.fill('#cl-buscar', 'PON1')
+        await pg.fill('#cl-reemplazar', 'PON7')
+        await pg.click('#cl-form button[type=submit]')
+        await pg.wait_for_selector('.sheet:has-text("Confirmar")', timeout=6000)
+        check('buscar/reemplazar sin prefijo: pide confirmar 3 puntos', '3 puntos' in await pg.inner_text('.sheet'))
+        await pg.click('.sheet button:has-text("Clonar 3 puntos")')
+        await pg.wait_for_selector('.toast:has-text("3 puntos creados")', timeout=6000)
+        await pg.wait_for_selector('.sheet-body h2', timeout=6000)
+        h2b = (await pg.inner_text('.sheet-body h2')).strip()
+        check('el reemplazo cambia «PON1» por «PON7» en el nombre, sin agregar prefijo', h2b == 'BOTELLA PON7 TEST', h2b)
+        sheetb = await pg.inner_text('.sheet')
+        check('cuelga el splitter con el reemplazo (no el original)', 'SPLIT PON7 TEST' in sheetb and 'PON1' not in sheetb)
+
+        # entrar al splitter clonado y revisar que la caja también se reemplazó
+        await pg.click('[data-red]:has-text("SPLIT PON7 TEST")')
+        await pg.wait_for_selector('.sheet-body h2', timeout=6000)
+        sheetb2 = await pg.inner_text('.sheet')
+        check('la caja clonada también tiene el reemplazo, no el original', 'CAJA PON7 TEST' in sheetb2 and 'PON1' not in sheetb2)
+        await pg.click('.sheet [data-close]')
+
+        # 7) repetir el mismo buscar/reemplazar: los nombres resultantes chocan con los que ya creó el paso anterior
+        await abrir('BOTELLA PON1 TEST')
+        await pg.click('.sheet button:has-text("Clonar con todo lo que cuelga")')
+        await pg.wait_for_selector('#cl-form', timeout=6000)
+        await pg.fill('#cl-buscar', 'PON1')
+        await pg.fill('#cl-reemplazar', 'PON7')
+        antes3 = await pg.evaluate('S.red.size')
+        await pg.click('#cl-form button[type=submit]')
+        await pg.wait_for_selector('.toast:has-text("Ya hay un punto llamado")', timeout=5000)
+        check('buscar/reemplazar repetido: avisa y no crea nada', await pg.evaluate('S.red.size') == antes3)
         await pg.click('.sheet [data-close]')
 
         check('sin errores de consola ni del navegador', len(ERR) == 0, ERR[:5])
