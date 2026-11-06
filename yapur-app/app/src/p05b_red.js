@@ -146,7 +146,7 @@ VIEWS.red={
     el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="rd-q" type="search" placeholder="Buscar caja o empalme por nombre o referencia" autocomplete="off" aria-label="Buscar en la red" value="${esc(RED.q)}"></div>
       <div class="line"><button class="btn primary" type="button" id="rd-new-nap">Nueva caja NAP</button><button class="btn" type="button" id="rd-new-split">Nuevo splitter</button><button class="btn" type="button" id="rd-new-emp">Nueva botella de empalme</button><button class="btn" type="button" id="rd-new-olt">Nueva OLT</button></div>
       <div class="seg" id="rd-seg"></div>
-      <div class="line"><button class="btn small" type="button" id="rd-near">Ordenar por cercanía (GPS)</button><button class="btn small ghost" type="button" id="rd-name" hidden>Ordenar por nombre</button><button class="btn small ghost" type="button" id="rd-csv">Descargar lista</button></div>
+      <div class="line"><button class="btn small" type="button" id="rd-near">Ordenar por cercanía (GPS)</button><button class="btn small ghost" type="button" id="rd-name" hidden>Ordenar por nombre</button><button class="btn small ghost" type="button" id="rd-csv">Descargar lista</button>${can('redPlano')?'<button class="btn small ghost" type="button" id="rd-plano">Ver plano de la red</button>':''}</div>
       <div class="hint" id="rd-near-st"></div></div><div id="rd-count" class="hint"></div><div class="list" id="rd-list"></div>`;
     $('#rd-q',el).addEventListener('input',e=>{RED.q=e.target.value;RED.limit=60;this.update();});
     $('#rd-new-nap',el).addEventListener('click',()=>openRedForm(null,'nap'));
@@ -155,6 +155,7 @@ VIEWS.red={
     $('#rd-new-olt',el).addEventListener('click',()=>openRedForm(null,'olt'));
     $('#rd-seg',el).addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;RED.tipo=b.dataset.f;RED.limit=60;this.update();});
     $('#rd-csv',el).addEventListener('click',exportRed);
+    const plano=$('#rd-plano',el);if(plano)plano.addEventListener('click',openRedPlano);
     $('#rd-name',el).addEventListener('click',()=>{RED.sort='nombre';$('#rd-near-st').textContent='';this.update();});
     const near=$('#rd-near',el),st=$('#rd-near-st',el);
     near.addEventListener('click',()=>{

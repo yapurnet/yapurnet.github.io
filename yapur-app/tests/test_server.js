@@ -264,6 +264,14 @@ async function openSSE(token) {
     r = await call('GET', '/api/sync', undefined, T);
     t('red: aun sin permiso de escribir, el técnico ve la red (la usa para llegar)', r.s === 200 && r.j.cols.red && r.j.cols.red[0] && r.j.cols.red[0].data.items.e1.nombre === 'BE-01', r.j && Object.keys(r.j.cols || {}));
     r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false } }, A);
+
+    /* ---- redPlano: el plano de la red es un permiso aparte del de cargar y editar la red ---- */
+    r = await call('GET', '/api/users', undefined, A);
+    let ofiU = r.j.users.find(u => u.id === OFI_ID), tecU = r.j.users.find(u => u.id === TEC_ID);
+    t('redPlano: una oficina nueva lo tiene activado por defecto', ofiU && ofiU.perms.redPlano === true, ofiU);
+    t('redPlano: un técnico nuevo lo tiene apagado por defecto (aunque ya tenga el permiso de red)', tecU && tecU.perms.redPlano === false && tecU.perms.red === true, tecU);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false, redPlano: true } }, A);
+    t('redPlano: el administrador se lo puede activar a un técnico puntual', r.s === 200 && r.j.user.perms.redPlano === true, r);
     r = await call('GET', '/api/backup', undefined, A);
     t('red: la copia de seguridad incluye la red', r.s === 200 && r.j.docs.some(d => d.coll === 'red' && d.data.items.e1), r.j && Object.keys(r.j));
 
