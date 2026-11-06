@@ -316,12 +316,16 @@ function openCobro(clientId,con1,pre){
     ${campo?compHTML('cb'):''}
     ${F('Monto recibido','cb-monto','<input id="cb-monto" type="text" inputmode="decimal" autocomplete="off">')}
     <div class="hint" id="cb-sum"></div>
+    ${dividirHTML('cb')}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="cb-go">Registrar cobro</button></div>`;
   openModal({title:'Cobrar',html,onMount(el){
     let con=con0,manual=false;
     const bd=$('#cb-deuda',el);if(bd)bd.addEventListener('click',()=>{closeModal();openPagarDeuda(c.id);});
-    const comp=campo?mountComp(el,'cb',()=>$('#cb-met',el).value):null;
+    let dv=null;   /* el reparto en 2 medios (se arma más abajo): si está activo, el medio que cuenta para el comprobante es el del reparto */
+    const comp=campo?mountComp(el,'cb',()=>(dv&&dv.metodo())||$('#cb-met',el).value):null;
     if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
+    dv=mountDividir(el,'cb',{ocultar:()=>[$('#cb-met',el).closest('.field'),$('#cb-monto',el).closest('.field')],total:()=>campo?precioFijo(con):null,onChange:()=>{if(comp)comp.sync();}});
+    dv.habilitar(con!=='mensualidad'&&con!=='deuda_anterior');
     const ord=new Map(grp.map((m,i)=>[m.id,i]));
     const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({cid:i.dataset.cid||c.id,per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per)||((ord.get(a.cid)||0)-(ord.get(b.cid)||0)));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
@@ -347,7 +351,8 @@ function openCobro(clientId,con1,pre){
     $('#cb-con',el).addEventListener('click',e=>{const x=e.target.closest('[data-con]');if(!x)return;con=x.dataset.con;manual=false;
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
-      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';precio();sum();});
+      $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';precio();sum();
+      dv.habilitar(con!=='mensualidad'&&con!=='deuda_anterior');dv.reiniciar();});
     $('#cb-mens',el).addEventListener('change',()=>{manual=false;sum();});
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
     if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
@@ -358,9 +363,10 @@ function openCobro(clientId,con1,pre){
       if(pre.monto)$('#cb-monto',el).value=pre.monto;if(pre.nota)$('#cb-nota-o',el).value=pre.nota;sum();
     }
     $('#cb-go',el).addEventListener('click',async()=>{
-      const monto=campo&&precioFijo(con)?precioFijo(con):num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
+      const rp=dv.activo()?dv.leer():null;if(rp&&rp.error)return toast(rp.error,'bad');   /* cobro repartido entre 2 medios */
+      const monto=rp?rp.total:campo&&precioFijo(con)?precioFijo(con):num($('#cb-monto',el).value);if(!monto||monto<=0)return toast('Ingresá el monto recibido','bad');
       const sinFoto=comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');
-      const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
+      const fecha=campo?todayStr():($('#cb-fecha',el).value||todayStr()),metodo=rp?rp.medios[0].metodo:$('#cb-met',el).value,recibo=newRecibo(fecha),hora=nowTime();
       const base={c:c.id,metodo,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||''};
       if(comp&&comp.id())base.comp=comp.id();
       const items={};
@@ -369,6 +375,9 @@ function openCobro(clientId,con1,pre){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
         allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
+      }else if(rp){
+        /* un registro por medio, mismo recibo; la foto del comprobante va solo en el de la transferencia */
+        rp.medios.forEach((m,i)=>{const it=Object.assign({concepto:con,per:null,nota:$('#cb-nota-o',el).value.trim()},base,{metodo:m.metodo,monto:m.monto});if(!COMP_METODOS.includes(m.metodo))delete it.comp;items[newId()+i.toString(36)]=it;});
       }else items[newId()]=Object.assign({concepto:con,per:null,monto,nota:$('#cb-nota-o',el).value.trim()},base);
       const go=$('#cb-go',el);go.disabled=true;
       /* una cuenta con varios servicios guarda todo el recibo en un solo bloque (el de la cuenta principal): se graba entero o no se graba */
@@ -578,13 +587,71 @@ async function verComprobante(id,img,st){
     img.src=URL.createObjectURL(await r.blob());img.hidden=false;st.textContent='';
   }catch(e){st.textContent=(e&&e.message)||'No se pudo abrir el comprobante.';}
 }
+/* ===== cobro repartido entre 2 medios de pago =====
+   Una instalación de 65.000 puede pagarse 50.000 por transferencia y 15.000 en efectivo: queda un solo recibo con un registro por medio (igual que «Pagar deuda»).
+   Si el concepto tiene precio fijo, lo que se escribe en un medio completa solo el otro; los dos tienen que sumar justo ese precio (el servidor también lo exige). */
+const DV_OTRO={efectivo:'transferencia',transferencia:'efectivo',mercadopago:'efectivo',otro:'efectivo'};
+const dvFm=v=>{const r=Math.round(v*100)/100;return r>0?String(r).replace('.',','):'';};   /* 15000,5: así lo lee num() */
+function dividirHTML(px){
+  const ops=k=>Object.entries(METODOS).map(([v,t])=>opt(v,t,v===k)).join('');
+  return `<div class="actions start" id="${px}-dv-box"><button class="btn small" type="button" id="${px}-dv-on">Cobrar con 2 medios de pago</button></div>
+    <div class="fgroup" id="${px}-dv" hidden><div class="legend">Cobro en 2 medios de pago</div>
+      <div class="pd-row" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><select id="${px}-dv-m1" aria-label="Primer medio de pago">${ops('transferencia')}</select><input id="${px}-dv-a1" type="text" inputmode="decimal" autocomplete="off" aria-label="Monto del primer medio"></div>
+      <div class="pd-row" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><select id="${px}-dv-m2" aria-label="Segundo medio de pago">${ops('efectivo')}</select><input id="${px}-dv-a2" type="text" inputmode="decimal" autocomplete="off" aria-label="Monto del segundo medio"></div>
+      <div class="hint" id="${px}-dv-st"></div>
+      <div class="actions start"><button class="btn small ghost" type="button" id="${px}-dv-off">Cobrar con un solo medio</button></div></div>`;
+}
+/* ocultar: los campos que se reemplazan mientras está activo (el medio y el monto de siempre) · total(): el precio fijo del concepto, o null si el monto es libre */
+function mountDividir(el,px,{ocultar,total,onChange}){
+  const box=$('#'+px+'-dv-box',el),g=$('#'+px+'-dv',el),m1=$('#'+px+'-dv-m1',el),m2=$('#'+px+'-dv-m2',el),a1=$('#'+px+'-dv-a1',el),a2=$('#'+px+'-dv-a2',el),st=$('#'+px+'-dv-st',el);
+  let on=false,habilitado=true;
+  const cents=v=>Math.round((num(v)||0)*100);
+  const estado=()=>{
+    const t=total(),x=cents(a1.value),y=cents(a2.value),mal=(t?!(x>0&&y>0&&x+y===Math.round(t*100)):!(x>0&&y>0));
+    if(m1.value===m2.value)return {error:'Elegí dos medios de pago distintos.'};
+    if(!x||!y)return {error:t?`Escribí cuánto va en cada medio: tienen que sumar ${fmtMoney(t)}.`:'Escribí cuánto va en cada medio.'};
+    if(mal)return {error:`Los dos montos tienen que sumar ${fmtMoney(t)}: ahora suman ${fmtMoney((x+y)/100)}.`};
+    return {medios:[{metodo:m1.value,monto:x/100},{metodo:m2.value,monto:y/100}],total:(x+y)/100};
+  };
+  const pintar=()=>{const r=estado();st.className='hint'+(r.error?' bad':' ok');st.textContent=r.error||`${METODOS[m1.value]} ${fmtMoney(r.medios[0].monto)} + ${METODOS[m2.value]} ${fmtMoney(r.medios[1].monto)} = ${fmtMoney(r.total)}`;if(onChange)onChange();};
+  /* el otro monto completa lo que falta del precio fijo */
+  const completar=(de,para)=>{const t=total();if(!t)return;const r=Math.round(t*100)-cents(de.value);para.value=r>0?dvFm(r/100):'';};
+  a1.addEventListener('input',()=>{completar(a1,a2);pintar();});
+  a2.addEventListener('input',()=>{completar(a2,a1);pintar();});
+  m1.addEventListener('change',()=>{if(m2.value===m1.value)m2.value=DV_OTRO[m1.value];pintar();});
+  m2.addEventListener('change',()=>{if(m1.value===m2.value)m1.value=DV_OTRO[m2.value];pintar();});
+  const poner=v=>{on=v;g.hidden=!v;box.hidden=v||!habilitado;ocultar().forEach(x=>{x.hidden=v;});if(onChange)onChange();};
+  $('#'+px+'-dv-on',el).addEventListener('click',()=>{
+    /* arranca con el medio que ya había elegido arriba; los montos los escribe quien cobra */
+    const pm=$('#'+px+'-met',el);if(pm&&METODOS[pm.value]){m1.value=pm.value;m2.value=DV_OTRO[pm.value];}
+    a1.value='';a2.value='';poner(true);pintar();a1.focus();
+  });
+  $('#'+px+'-dv-off',el).addEventListener('click',()=>poner(false));
+  return {
+    activo:()=>on,
+    /* los medios con su monto, o el texto de lo que falta */
+    leer:()=>estado(),
+    /* cambió el concepto o el precio: se vuelven a escribir los montos */
+    reiniciar:()=>{a1.value='';a2.value='';if(on)pintar();},
+    /* mensualidad y deuda anterior no se reparten acá (para eso está «Pagar deuda») */
+    habilitar:v=>{habilitado=!!v;if(!habilitado&&on)poner(false);box.hidden=on||!habilitado;},
+    /* el medio que decide si hace falta la foto del comprobante: si alguno de los dos es transferencia, la pide */
+    metodo:()=>on?(m1.value==='transferencia'||m2.value==='transferencia'?'transferencia':m1.value):null
+  };
+}
 /* cobro que no es mensualidad (instalación, reinstalación, reclamo, otro): lo usan «Cobrar» y el cierre de una orden */
 async function cobrarOtro(c,o){
   const fecha=o.fecha||todayStr(),recibo=newRecibo(fecha),id=newId(),doc=payShard(fecha,c.id);
-  const item={c:c.id,metodo:o.metodo||'efectivo',fecha,hora:nowTime(),recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||'',concepto:o.concepto,per:null,monto:o.monto,nota:o.nota||''};
-  if(o.comp)item.comp=o.comp;
-  await putMany('pagos',doc,{[id]:item});
-  S.pagos.set(id,Object.assign({},item,{id,_doc:doc}));rebuildDerived();dataChanged('pagos');
+  const hora=nowTime(),base={c:c.id,fecha,hora,recibo,por:S.uid||null,porNombre:(S.me&&S.me.nombre)||'',concepto:o.concepto,per:null,nota:o.nota||''};
+  /* repartido entre varios medios: un registro por medio, todos con el mismo recibo; la foto del comprobante va en el de la transferencia */
+  const lista=o.medios&&o.medios.length>1?o.medios:[{metodo:o.metodo||'efectivo',monto:o.monto}],items={};
+  lista.forEach((m,i)=>{
+    const it=Object.assign({},base,{metodo:m.metodo,monto:m.monto});
+    if(o.comp&&(lista.length===1||COMP_METODOS.includes(m.metodo)))it.comp=o.comp;
+    items[i?id+i.toString(36):id]=it;
+  });
+  await putMany('pagos',doc,items);
+  Object.keys(items).forEach(k=>S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc})));rebuildDerived();dataChanged('pagos');
   return recibo;
 }
 /* recibos de los técnicos que no llegaron a salir por WhatsApp: se ven y se reintentan desde acá */

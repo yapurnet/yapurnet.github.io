@@ -112,6 +112,14 @@ async function configurado() {
     r = await call('GET', '/api/doc/pagos/' + PG, undefined, O);
     t('la oficina ve el cobro del técnico con su aviso de WhatsApp', r.s === 200 && r.j.data.items[c.id].porNombre === 'Pedro' && r.j.data.items[c.id].wa.e === 'enviado', r.j.data && r.j.data.items[c.id]);
 
+    /* --- un cobro repartido entre 2 medios (un recibo, dos registros) sale en un solo aviso, por el total --- */
+    mk.clear();
+    r = await call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { wdv1: { c: 'ana', concepto: 'otro', monto: 40000, fecha: HOY, hora: '10:10', recibo: 'RWdvX', metodo: 'efectivo' }, wdv2: { c: 'ana', concepto: 'otro', monto: 25000, fecha: HOY, hora: '10:10', recibo: 'RWdvX', metodo: 'mercadopago' } } } }, T);
+    wa = await waDe(A, 'wdv2', x => x.e === 'enviado'); const wa1 = await waDe(A, 'wdv1', x => x.e === 'enviado');
+    t('varios medios: un recibo con 2 medios sale en un solo aviso por WhatsApp', r.s === 200 && wa && wa1 && mk.reqs.length === 1, [r.s, mk.reqs.length]);
+    const psd = (((((mk.reqs[0] || {}).body || {}).template || {}).components || [])[0] || {}).parameters || [];
+    t('varios medios: el aviso lleva el total de los dos medios y un solo número de recibo', psd.length === 5 && psd[1].text === '$ 65.000' && psd[3].text === 'RWdvX', psd);
+
     /* --- datos del cliente --- */
     mk.clear();
     c = await cobro(T, 'sin');
