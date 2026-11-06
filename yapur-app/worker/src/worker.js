@@ -471,6 +471,18 @@ function ubicHuecosDia(tss, t0, tr, ahora, esHoy) {
   }
   return out;
 }
+/* ----- corte manual del GPS de un técnico (la oficina lo corta a la hora en que ve que se fue) -----
+   Los tramos del día quedan recortados en esa hora. Las horas son enteras porque el APK las lee con getInt: el fin se redondea para arriba
+   y el servidor descarta igual todo lo que llegue desde el corte. Un tramo que empezaba en el corte o después desaparece; siempre queda el primero. */
+function ubicTramosCorte(tr, t0, corte) {
+  if (!corte) return tr;
+  const out = [];
+  for (const t of tr) {
+    if (corte <= t0 + t[0] * 3600e3) continue;
+    out.push([t[0], Math.min(t[1], Math.ceil((corte - t0) / 3600e3))]);
+  }
+  return out.length ? out : tr;
+}
 /* la primera vez que, en un día cortado, el celular aparece en la base después de que empezó la tarde (y ya había ingresado a la mañana) */
 const jornadaRetoma = (tr, t0, f, ts) => tr.length === 2 && !f.ingreso2 && ts >= t0 + tr[1][0] * 3600e3 && f.ingreso < t0 + tr[1][0] * 3600e3;
 /* qué se muestra de la jornada de un técnico en un día. v = fila ya «vista» (o null); o = { dia, hoy, ahora, tr, base, laborable, tol } */
@@ -581,6 +593,7 @@ export class YapurDB extends DurableObject {
     this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
     this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
     this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
     this.loadUsers();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
@@ -1726,9 +1739,52 @@ export class YapurDB extends DurableObject {
   }
   ubicDentro(ts, tr) { return ubicEnTramos(tr, arTime(ts).min); }
   ubicAcepto(uid) { return !!this.q1('SELECT 1 x FROM meta WHERE k=?', 'ubicok:' + uid); }
+  /* a qué hora (ms) la oficina le cortó el GPS a un técnico en un día; null si no se lo cortó */
+  ubicCorteDe(uid, dia) {
+    const r = this.q1('SELECT v FROM meta WHERE k=?', 'ubiccorte:' + uid + ':' + dia), t = r ? Number(r.v) : 0;
+    return t > 0 ? t : null;
+  }
   ubicEstado(u) {
-    const ahora = Date.now(), fecha = arTime(ahora).fecha, h = this.ubicDia(fecha);
-    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: h.desde, hasta: h.hasta, tramos: h.tramos, modo: h.modo, dentro: this.ubicDentro(ahora, h.tramos), dias: UBIC_DIAS };
+    const ahora = Date.now(), fecha = arTime(ahora).fecha, h = this.ubicDia(fecha), corte = u.role === 'tecnico' ? this.ubicCorteDe(u.id, fecha) : null;
+    const tramos = ubicTramosCorte(h.tramos, arDayStart(fecha), corte);
+    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, modo: h.modo, dentro: !(corte && ahora >= corte) && this.ubicDentro(ahora, tramos), corte, dias: UBIC_DIAS };
+  }
+  /* la oficina corta el GPS de un técnico desde una hora de hoy (por defecto, ahora): desde ahí no se guarda nada más, se borra lo que ya había guardado
+     desde esa hora y esa hora queda como el fin de su jornada. Sirve cuando el regreso a la base no se detectó solo. «Reanudar» lo deshace hacia adelante. */
+  ubicCortar(admin, b) {
+    const t = this.USERS.get(String(b.uid || ''));
+    if (!t || t.role !== 'tecnico') throw httpErr(404, 'No se encontró ese técnico.');
+    const ahora = Date.now(), dia = arTime(ahora).fecha, t0 = arDayStart(dia), tr = this.ubicDia(dia).tramos;
+    let ts = b.ts == null || b.ts === '' ? ahora : Number(b.ts);
+    if (!Number.isFinite(ts)) throw httpErr(400, 'La hora del corte no es válida.');
+    ts = Math.round(ts);
+    if (ts > ahora + 60e3) throw httpErr(400, 'Esa hora todavía no llegó: elegí la hora a la que se fue, o una anterior.');
+    ts = Math.min(ts, ahora);
+    if (ts <= t0 + tr[0][0] * 3600e3) throw httpErr(400, 'Esa hora es anterior al comienzo de su horario de hoy (' + tr[0][0] + ':00).');
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubiccorte:' + t.id + ':' + dia, String(ts));
+    const borrados = (this.q1('SELECT COUNT(*) n FROM ubic WHERE uid=? AND ts>=?', t.id, ts) || {}).n || 0;
+    if (borrados) this.sql.exec('DELETE FROM ubic WHERE uid=? AND ts>=?', t.id, ts);
+    /* su jornada de hoy termina en el corte (salvo que la oficina ya haya cargado las horas a mano: eso manda) */
+    let jornada = 'sin_jornada';
+    const f = this.jornadaFilaHoras(t.id, dia);
+    if (f && f.adj) jornada = 'corregida_a_mano';
+    else if (f && f.ingreso >= ts) { this.sql.exec('DELETE FROM jornada WHERE uid=? AND dia=?', t.id, dia); jornada = 'sin_jornada'; }
+    else if (f) {
+      const ev = (Array.isArray(f.ev) ? f.ev : []).filter(e => Array.isArray(e) && e[0] < ts);
+      ev.push([ts, 1]);
+      this.sql.exec('UPDATE jornada SET regreso=?, en_base=1, ult=?, ev=?, ingreso2=? WHERE uid=? AND dia=?', ts, ts, JSON.stringify(ev.slice(-40)), f.ingreso2 && f.ingreso2 < ts ? f.ingreso2 : null, t.id, dia);
+      jornada = 'cerrada';
+    }
+    for (const s of this.conexiones()) if (s.uid === t.id) this.sse(s, 'ubic', { corte: ts });
+    return { ok: true, uid: t.id, dia, corte: ts, borrados, jornada };
+  }
+  ubicReanudar(admin, b) {
+    const t = this.USERS.get(String(b.uid || ''));
+    if (!t || t.role !== 'tecnico') throw httpErr(404, 'No se encontró ese técnico.');
+    const dia = arTime(Date.now()).fecha;
+    this.sql.exec('DELETE FROM meta WHERE k=?', 'ubiccorte:' + t.id + ':' + dia);
+    for (const s of this.conexiones()) if (s.uid === t.id) this.sse(s, 'ubic', { corte: null });
+    return { ok: true, uid: t.id, dia, corte: null };
   }
   ubicGuardar(u, b) {
     if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos comparten su ubicación.');
@@ -1737,19 +1793,27 @@ export class YapurDB extends DurableObject {
     const pts = (Array.isArray(b.pts) ? b.pts : [b]).filter(isPlain).slice(0, 30);
     pts.forEach(x => { const t = Number(x.ts); x._ts = isFinite(t) && t <= now + 60e3 && t >= now - 15 * 60e3 ? t : now; });
     pts.sort((x, y) => x._ts - y._ts);
-    let n = 0, fuera = 0;
+    let n = 0, fuera = 0, cortados = 0;
+    const cortes = {};   // día → hora del corte de la oficina (o null)
     for (const x of pts) {
       const lat = Number(x.lat), lng = Number(x.lng);
       if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) continue;
-      if (!this.ubicDentro(x._ts, ubicTramosDe(pl, arTime(x._ts).fecha))) { fuera++; continue; }
+      const dia = arTime(x._ts).fecha;
+      if (!(dia in cortes)) cortes[dia] = this.ubicCorteDe(u.id, dia);
+      if (cortes[dia] && x._ts >= cortes[dia]) { cortados++; continue; }   // la oficina le cortó el GPS: lo que llegue desde esa hora se descarta
+      if (!this.ubicDentro(x._ts, ubicTramosDe(pl, dia))) { fuera++; continue; }
       if (this.q1('SELECT 1 x FROM ubic WHERE uid=? AND ts>? AND ts<?', u.id, x._ts - UBIC_MIN_MS, x._ts + UBIC_MIN_MS)) continue;   // ya hay uno a menos de 20 s (también sirve para los puntos que llegan tarde)
       const acc = Number(x.acc);
       this.sql.exec('INSERT OR REPLACE INTO ubic(uid,ts,lat,lng,acc) VALUES(?,?,?,?,?)', u.id, x._ts, Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6, isFinite(acc) && acc >= 0 ? Math.min(Math.round(acc), 99999) : null);
       n++;
       this.jornadaAuto(u, x._ts, lat, lng, Number(x.acc));
     }
-    if (Math.random() < 0.01) { this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5); this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(now - JORNADA_DIAS * 864e5).fecha); }
-    return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, desde: h.desde, hasta: h.hasta, tramos: h.tramos };
+    if (Math.random() < 0.01) {
+      this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5); this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(now - JORNADA_DIAS * 864e5).fecha);
+      this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(now - JORNADA_DIAS * 864e5).fecha);
+    }
+    const hoy = arTime(now).fecha, corteHoy = hoy in cortes ? cortes[hoy] : this.ubicCorteDe(u.id, hoy), tramos = ubicTramosCorte(h.tramos, arDayStart(hoy), corteHoy);
+    return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
   }
   ubicLista(dia) {
     const pl = this.ubicPlan(), ahora = Date.now(), hoy = arTime(ahora).fecha;
@@ -1764,14 +1828,16 @@ export class YapurDB extends DurableObject {
       const todos = this.q('SELECT ts,lat,lng FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts', u.id, t0, t1);
       const paso = Math.max(1, Math.ceil(todos.length / 240));
       const ruta = todos.filter((_, i) => i % paso === 0 || i === todos.length - 1).map(r => [r.ts, r.lat, r.lng]);
-      const acepto = this.ubicAcepto(u.id);
-      /* estado (solo hoy): sin_aceptar · fuera_horario · sin_datos (no mandó nada) · en_linea (≤10 min) · sin_senal */
+      const acepto = this.ubicAcepto(u.id), corte = this.ubicCorteDe(u.id, dia);
+      /* estado (solo hoy): sin_aceptar · cortado (la oficina le cortó el GPS) · fuera_horario · sin_datos (no mandó nada) · en_linea (≤10 min) · sin_senal */
       let estado = 'historico';
       if (!acepto) estado = 'sin_aceptar';
+      else if (esHoy && corte) estado = 'cortado';
       else if (esHoy) { const ult = ultima && ultima.ts >= iniTr ? ultima : null; estado = !dentro ? 'fuera_horario' : !ult ? 'sin_datos' : ahora - ult.ts <= UBIC_HUECO_MS ? 'en_linea' : 'sin_senal'; }
-      const huecos = acepto ? ubicHuecosDia(todos.map(r => r.ts), t0, h.tramos, ahora, esHoy) : [];
+      /* con corte, lo que pasó desde esa hora no es «sin señal»: se mira el día como si «ahora» fuera el corte */
+      const huecos = !acepto ? [] : corte ? ubicHuecosDia(todos.map(r => r.ts), t0, h.tramos, corte, true).map(g => ({ desde: g.desde, hasta: g.hasta, ...(g.inicio ? { inicio: true } : {}) })) : ubicHuecosDia(todos.map(r => r.ts), t0, h.tramos, ahora, esHoy);
       const sinSenalMin = Math.round(huecos.reduce((s, g) => s + (g.hasta - g.desde), 0) / 60000);
-      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin, jornada: this.jornadaDia(u, dia, hoy, ahora, jc, laborable, h.tramos) };
+      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, corte, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin, jornada: this.jornadaDia(u, dia, hoy, ahora, jc, laborable, h.tramos) };
     });
     return { dia, hoy, ahora, horario: { desde: h.desde, hasta: h.hasta, tramos: h.tramos, modo: h.modo }, plan: pl, dias: UBIC_DIAS, tecnicos, jornada: { base: jc.base, radio: jc.radio, tol: jc.tol, dias: jc.dias } };
   }
@@ -1809,7 +1875,7 @@ export class YapurDB extends DurableObject {
   jornadaEstado(u) {
     const ahora = Date.now(), dia = arTime(ahora).fecha, c = this.jornadaBase();
     const horas = u.role === 'tecnico' ? this.jornadaResumen(u, '', 7).tecnicos[0] : null;
-    return { aplica: u.role === 'tecnico', horas: horas ? { semana: horas.total, desde: horas.dias[0].dia, dias: horas.dias.map(x => ({ dia: x.dia, min: x.min, estado: x.estado })) } : null, enterado: this.jornadaEnterado(u.id), dia, ahora, horario: (h => ({ desde: h.desde, hasta: h.hasta, tramos: h.tramos }))(this.ubicDia(dia)), hayBase: !!c.base, fila: this.jornadaVista(this.jornadaFila(u.id, dia)) };
+    return { aplica: u.role === 'tecnico', horas: horas ? { semana: horas.total, desde: horas.dias[0].dia, dias: horas.dias.map(x => ({ dia: x.dia, min: x.min, estado: x.estado })) } : null, enterado: this.jornadaEnterado(u.id), dia, ahora, horario: (h => ({ desde: h.desde, hasta: h.hasta, tramos: h.tramos }))(this.ubicDia(dia)), hayBase: !!c.base, corte: u.role === 'tecnico' ? this.ubicCorteDe(u.id, dia) : null, fila: this.jornadaVista(this.jornadaFila(u.id, dia)) };
   }
   jornadaSoloTecnico(u) { if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos registran su jornada.'); }
   /* se llama con cada posición guardada, en orden */
@@ -1846,8 +1912,9 @@ export class YapurDB extends DurableObject {
   jornadaDia(u, dia, hoy, ahora, jc, laborable, tr) {
     const v = this.jornadaVista(this.jornadaFila(u.id, dia));
     const e = jornadaEstadoDia(v, { dia, hoy, ahora, tr, base: !!jc.base, laborable, tol: jc.tol });
-    const hs = this.jornadaHorasDia(u.id, dia, hoy, ahora, tr);
-    return Object.assign(e, { horasMin: hs ? hs.min : null, horasEstado: hs ? hs.estado : null, cortado: tr.length === 2, enterado: this.jornadaEnterado(u.id), ingreso: v ? v.ingreso : null, origen: v ? v.origen : null, dist: v ? v.dist : null, regreso: v ? v.regreso : null, enBase: v ? v.enBase : false });
+    const hs = this.jornadaHorasDia(u.id, dia, hoy, ahora, tr), corte = this.ubicCorteDe(u.id, dia);
+    if (corte && v) { e.estado = 'termino'; e.sinRetomar = false; }   // la oficina le cortó el GPS: el día terminó ahí, no queda nada por esperar
+    return Object.assign(e, { corte, horasMin: hs ? hs.min : null, horasEstado: hs ? hs.estado : null, cortado: tr.length === 2, enterado: this.jornadaEnterado(u.id), ingreso: v ? v.ingreso : null, origen: v ? v.origen : null, dist: v ? v.dist : null, regreso: v ? v.regreso : null, enBase: v ? v.enBase : false });
   }
 
   /* ----- horas trabajadas ----- */
@@ -2035,6 +2102,8 @@ export class YapurDB extends DurableObject {
       return send(200, this.ubicEstado(a.user));
     }
     if (p === '/api/ubicacion' && m === 'POST') return send(200, this.ubicGuardar((await this.needAuth(request)).user, readBody(raw, 2e5)));
+    if (p === '/api/ubicacion/cortar' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.ubicCortar(a.user, readBody(raw, 1e3))); }
+    if (p === '/api/ubicacion/reanudar' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.ubicReanudar(a.user, readBody(raw, 1e3))); }
     if (p === '/api/ubicaciones' && m === 'GET') {
       const a = await this.needAuth(request);
       if (!effPerms(a.user).verTecnicos) throw httpErr(403, 'No tenés permiso para ver la ubicación de los técnicos.');
