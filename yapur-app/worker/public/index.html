@@ -1800,10 +1800,16 @@ function comodatoBind(el,c){
 }
 
 /* ----- cargar o editar los equipos prestados ----- */
+/* Los equipos con los que arranca la lista de un cliente sin equipos cargados.
+   Antena: siempre es el mismo modelo, así que ya viene puesto. Fibra: la ONU cambia de un cliente a otro, se escribe en cada uno. */
+function cmInicial(c){
+  const f=(t,d)=>({t,d,s:'',n:1,e:'nuevo',o:''});
+  return c&&c.tec==='wireless'?[f('Antena','CPE Ubiquiti LiteBeam Gen2'),f('Fuente o adaptador','Inyector de corriente PoE')]:[f('ONU',''),f('Fuente o adaptador','Fuente de corriente de la ONU')];
+}
 function openComodatoEditor(id){
   const c=S.clientes.get(id);if(!c)return;
   let rows=cmLimpio(c.comodato);
-  if(!rows.length)rows=[{t:'ONU',d:'',s:'',n:1,e:'nuevo',o:''}];
+  if(!rows.length)rows=cmInicial(c);
   const vig=ctVig(id);
   const rowHtml=(r,i)=>`<div class="card flat cm-row" data-i="${i}">
     <div class="grid2">${F('Tipo','cm-t'+i,`<select id="cm-t${i}">${CM_TIPOS.map(t=>`<option${t===r.t?' selected':''}>${esc(t)}</option>`).join('')}</select>`)}${F('Cantidad','cm-n'+i,`<input id="cm-n${i}" type="number" min="1" max="99" inputmode="numeric" value="${r.n}">`)}</div>
@@ -2079,6 +2085,7 @@ async function openContratoPlantilla(done){
   openModal({title:'Texto del contrato de comodato',wide:true,html:`<form class="form" id="ctpl" novalidate>
     <div class="hint">Escribí o pegá el contrato. Donde va un dato del cliente o de la empresa, tocá el nombre de abajo para insertarlo en el lugar del cursor: se reemplaza solo al firmar. El texto se muestra tal cual lo escribas (sin formato).</div>
     <div class="tags" id="ctpl-vars">${t.vars.map(v=>`<button type="button" class="chip info" data-v="${esc(v)}">{{${esc(v)}}}</button>`).join('')}</div>
+    ${t.sugerido&&t.sugerido!==t.texto?'<div class="actions start"><button class="btn small" type="button" id="ctpl-sug">Cargar el texto sugerido (fibra y antena)</button></div>':''}
     <textarea id="ctpl-txt" rows="16" spellcheck="true" style="font-family:Georgia,serif;font-size:14px;line-height:1.5">${esc(t.texto)}</textarea>
     <fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Datos de la empresa para el contrato</legend>
     <div class="grid2">${F('Nombre o razón social','ctpl-raz',`<input id="ctpl-raz" value="${esc(em.razon||'')}" maxlength="100" autocomplete="off">`)}${F('CUIT','ctpl-cuit',`<input id="ctpl-cuit" value="${esc(em.cuit||'')}" maxlength="30" autocomplete="off">`)}</div>
@@ -2088,6 +2095,17 @@ async function openContratoPlantilla(done){
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`,
   onMount(el){
     const ta=$('#ctpl-txt',el);
+    const sug=$('#ctpl-sug',el);
+    /* el texto que viene con el sistema: reemplaza lo que está escrito (hay que tocar dos veces, para no pisarlo sin querer) y no se guarda hasta tocar «Guardar».
+       No se usa askConfirm porque abre otra ventana encima y cierra esta */
+    if(sug){
+      const rotulo=sug.textContent;let armado=false;
+      sug.addEventListener('click',()=>{
+        if(!armado){armado=true;sug.textContent='Tocá otra vez: reemplaza el texto de arriba (no se guarda hasta «Guardar»)';return;}
+        armado=false;sug.textContent=rotulo;
+        ta.value=t.sugerido;$('#ctpl-fin',el).checked=false;ta.scrollTop=0;toast('Texto sugerido cargado: leelo, ajustalo y guardalo');
+      });
+    }
     $('#ctpl-vars',el).addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(!b)return;const ins='{{'+b.dataset.v+'}}',s=ta.selectionStart,f=ta.selectionEnd;ta.value=ta.value.slice(0,s)+ins+ta.value.slice(f);ta.focus();ta.selectionStart=ta.selectionEnd=s+ins.length;});
     $('#ctpl',el).addEventListener('submit',async e=>{
       e.preventDefault();const btn=$('button[type=submit]',el);btn.disabled=true;
@@ -6025,7 +6043,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='c93f521abb';
+const BUILD='64d107a192';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
