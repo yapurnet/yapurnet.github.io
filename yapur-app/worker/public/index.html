@@ -66,6 +66,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .tab:hover{color:var(--ink)}
 .tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
 .tab .count{margin-left:6px;font-size:12px;background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:99px}
+.tab .count.bad{background:var(--bad);color:#fff}
 .wrap{width:100%;max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
 
 /* ---------- botones y chips ---------- */
@@ -206,6 +207,8 @@ button.chip[hidden],.netbar[hidden],.devbar[hidden]{display:none}
 .jrbar[hidden]{display:none}
 .jrbar b{font-weight:700}
 .jrbar.warn{background:var(--warn-soft);color:var(--warn)}
+.jrbar.bad{background:var(--bad-soft);color:var(--bad)}
+.jrbar .jr-btns{display:flex;gap:6px;flex-wrap:wrap}
 .jrbar.quiet{background:var(--surface-2);color:var(--muted)}
 .jrbar .btn{flex:none}
 .jrbar{flex-wrap:wrap}
@@ -347,6 +350,8 @@ button.pelo:hover{border-color:var(--accent-line)}
 </header>
 <div id="netBar" class="netbar" hidden></div>
 <button id="devBar" class="netbar devbar" type="button" hidden></button>
+<div id="latBar" class="jrbar warn" role="status" hidden></div>
+<div id="tecBar" class="jrbar bad" role="status" hidden></div>
 <div id="jrBar" class="jrbar" role="status" hidden></div>
 <nav class="tabs" id="tabs" role="tablist" aria-label="Secciones"></nav>
 <main id="view" class="wrap"><div class="empty"><b>Cargando…</b><span>Conectando con el servidor.</span></div></main>
@@ -4664,7 +4669,7 @@ const ubNativo=()=>{const b=window.YapurApp;return b&&typeof b.startLocationSiem
 const ubSiempreOk=()=>{try{return localStorage.getItem('yapur_ub_siempre')==='1';}catch(e){return UB.sOk;}};
 const ubSiempreMarcar=()=>{UB.sOk=true;try{localStorage.setItem('yapur_ub_siempre','1');}catch(e){}};
 /* lo que ve el técnico del aviso: lo común, y qué cambia en el APK con el servicio siempre activo */
-const ubAvisoLista=(st,nat)=>`<ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li>${nat
+const ubAvisoLista=(st,nat)=>`<ul class="plain"><li>Fuera de ese horario no se toma ni se guarda nada.</li><li>Solo la ven el administrador y quien él habilite.</li><li>Se borra a los ${st.dias} días.</li><li>Dentro del horario la oficina también ve si la ubicación o la app están apagadas y cuánta batería te queda, para saber por qué dejó de llegar tu ubicación. Esto tampoco se toma fuera del horario.</li>${nat
   ?'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app» y, cuando te lo pida de nuevo, <b>«Permitir todo el tiempo»</b>: es lo que deja que se anote tu jornada con la app cerrada.</li><li>Android obliga a dejar una notificación mientras se comparte la ubicación: es la más discreta que existe (sin sonido, sin ícono arriba y abajo de todo en el panel).</li><li>El celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta.</li><li>Si cerrás sesión, se corta todo.</li>'
   :'<li>El celular te va a pedir el permiso de ubicación: elegí «Mientras se usa la app».</li><li>En la app instalada Android obliga a dejar una notificación mientras se comparte: es la más discreta que existe (sin sonido, sin ícono arriba y abajo de todo en el panel).</li><li>En la app instalada, el celular te va a preguntar si la dejás «sin restricción de batería»: aceptá, así no se corta cuando apagás la pantalla.</li>'}</ul>`;
 /* para quien ya había aceptado el aviso de antes («con la app abierta»): ahora se comparte también con la app cerrada, y eso se avisa aparte */
@@ -4697,6 +4702,41 @@ function ubicSiemprePermiso(nat){
   if(ult===hoy)return;
   UB.bgPedido=true;try{localStorage.setItem('yapur_ub_bgpedido',hoy);}catch(e){}
   ubicSiempreExplicar();
+}
+
+/* ----- latido, lado del técnico: si la ubicación o la app están apagadas y cuánta batería queda, solo dentro del horario -----
+   No lleva ninguna posición. En el APK nuevo lo manda el servicio (también con la app cerrada); en el navegador o en un APK anterior, la página mientras está abierta.
+   Empieza recién cuando el técnico tocó «Entendido» en el cartel que lo explica (si aceptó el aviso después de esta versión, ya lo leyó dentro del aviso). */
+const LAT={ts:0,busy:false,ok:false};
+const latKey=()=>'yapur_ub_lat_'+(S.me&&S.me.id||'');
+const latVisto=()=>{try{return localStorage.getItem(latKey())==='1';}catch(e){return LAT.ok;}};
+const latMarcar=()=>{LAT.ok=true;try{localStorage.setItem(latKey(),'1');}catch(e){}};
+const latNativoNuevo=()=>{const b=window.YapurApp;return b&&typeof b.activarLatido==='function'?b:null;};
+const latNativoActivar=si=>{const b=latNativoNuevo();if(b){try{b.activarLatido(!!si);}catch(e){}}};
+async function latBateria(){try{if(navigator.getBattery){const b=await navigator.getBattery();const n=Math.round(b.level*100);return n>=0&&n<=100?n:null;}}catch(e){}return null;}
+async function latPermiso(){
+  if(UB.denied)return 0;
+  try{if(navigator.permissions&&navigator.permissions.query){const r=await navigator.permissions.query({name:'geolocation'});if(r.state==='denied')return 0;if(r.state==='granted')return 1;}}catch(e){}
+  return null;   /* no se sabe: no se dice nada */
+}
+async function ubicLatido(){
+  if(!LAT.ok||LAT.busy||!NET.online||!UB.st||!UB.st.acepto||!ubDentro())return;
+  if(UB.nat&&latNativoNuevo())return;   /* el servicio del APK nuevo manda el suyo */
+  if(Date.now()-LAT.ts<50e3)return;
+  LAT.busy=true;LAT.ts=Date.now();
+  try{
+    const body={via:'web'},p=await latPermiso(),bat=await latBateria();
+    if(p!==null)body.perm=p;if(bat!==null)body.bat=bat;
+    await NET.api('POST','/api/ubicacion/latido',body,{noKick:true,timeout:15000});
+  }catch(e){/* sin conexión o sin aceptar: se reintenta en el próximo minuto */}
+  LAT.busy=false;
+}
+function latBarra(){
+  const bar=$('#latBar');if(!bar)return;
+  if(LAT.ok||!UB.st||!UB.st.aplica||!UB.st.acepto||S.realRole!=='tecnico'||S.preview){bar.hidden=true;return;}
+  bar.innerHTML=`<span>Desde esta versión, <b>de ${esc(trTxt(stTramos(UB.st)))} h</b> la oficina también ve si la <b>ubicación o la app están apagadas</b> y cuánta <b>batería</b> te queda, para saber por qué dejó de llegar tu ubicación. No lleva ninguna posición y no se toma nada fuera del horario.</span><button class="btn small" type="button" id="lat-ok">Entendido</button>`;
+  bar.hidden=false;
+  $('#lat-ok',bar).addEventListener('click',()=>{latMarcar();latNativoActivar(true);bar.hidden=true;ubicLatido();});
 }
 
 /* ----- lado del técnico ----- */
@@ -4746,7 +4786,7 @@ function ubicWatch(){
     if(UB.queue.length>60)UB.queue.shift();
     ubicFlush();
   },e=>{
-    if(e&&e.code===1){UB.denied=true;if(UB.watch!=null)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;toast('Activá el permiso de ubicación de la app para compartirla con la oficina','bad');ubicChip();}
+    if(e&&e.code===1){UB.denied=true;if(UB.watch!=null)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;toast('Activá el permiso de ubicación de la app para compartirla con la oficina','bad');ubicChip();LAT.ts=0;ubicLatido();}
   },{enableHighAccuracy:true,maximumAge:20000,timeout:60000});
 }
 function ubicStop(){
@@ -4770,6 +4810,7 @@ function ubicActualizar(){
   if(typeof jornadaCargar==='function')jornadaCargar();
 }
 function ubicLoop(){
+  ubicLatido();
   if(!UB.st||!UB.st.acepto||UB.denied&&!UB.nat){ubicChip();return;}
   const b=window.YapurApp,tr=stTramos(UB.st),nat=ubNativo();
   if(nat&&ubSiempreOk()){
@@ -4808,16 +4849,21 @@ async function ubicInit(){
   UB.started=true;
   try{UB.st=await NET.api('GET','/api/ubicacion/estado',undefined,{noKick:true,timeout:15000});}catch(e){UB.started=false;return;}
   if(!UB.st.aplica)return;
+  let recien=false;
   if(!UB.st.acepto){
     if(UB.asked)return;UB.asked=true;
     if(!await ubicAviso(UB.st))return;
     try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});}catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo más tarde.','bad');return;}
     if(ubNativo())ubSiempreMarcar();   /* el aviso de recién ya decía que se comparte también con la app cerrada */
+    recien=true;
   }else if(ubNativo()&&!ubSiempreOk()&&!UB.asked){
     /* aceptó el aviso de antes («con la app abierta»): lo nuevo se avisa aparte y, si no quiere, sigue como antes */
     UB.asked=true;
     if(await ubicSiempreAviso(UB.st))ubSiempreMarcar();
   }
+  if(recien){latMarcar();latNativoActivar(true);}   /* el aviso que aceptó recién ya lo explicaba */
+  else if(latVisto()){LAT.ok=true;latNativoActivar(true);}
+  else{latNativoActivar(false);latBarra();}   /* ya había aceptado antes: se lo explica un cartel y el latido arranca cuando toca «Entendido» */
   UB.stTs=Date.now();
   NET.on('ubic',ubicActualizar);
   ubicLoop();
@@ -4931,8 +4977,21 @@ function tecAvisoUrl(t){
   const txt=t.estado==='sin_datos'
     ?`Hola ${nom}, la oficina todavía no recibe tu ubicación de hoy. Abrí la app YAPUR Gestión y dejala abierta, por favor.`
     :`Hola ${nom}, la oficina no recibe tu ubicación desde las ${hhmm(t.ultima.ts)}. Abrí la app YAPUR Gestión y fijate que el celular tenga datos y la ubicación activada.`;
-  return waUrl(t.tel,txt);
+  const mt=t.motivo&&t.motivo.tipo;
+  const extra=mt==='ubicacion_apagada'?' Veo que tenés la ubicación del celular apagada: prendela, por favor.':mt==='sin_permiso'?' Veo que la app no tiene permiso de ubicación: dáselo en Ajustes del celular (Aplicaciones > YAPUR Gestión > Permisos > Ubicación).':mt==='bateria'?' Veo que el celular se quedó sin batería: cargalo y abrí la app.':'';
+  return waUrl(t.tel,txt+extra);
 }
+/* por qué dejaron de llegar posiciones, según lo que dijo el propio celular (latido): se dice lo que se sabe y lo que no */
+function motTxt(m){
+  if(!m)return '';
+  const h=hhmm(m.desde);
+  if(m.tipo==='ubicacion_apagada')return `Tiene la <b>ubicación del celular apagada</b> desde las ${h}.`;
+  if(m.tipo==='sin_permiso')return `La app <b>no tiene permiso de ubicación</b> desde las ${h}.`;
+  if(m.tipo==='sin_posicion')return `La app responde (último aviso a las ${h}) y la ubicación está prendida, pero <b>el celular no da posiciones</b>: puede estar en un lugar cerrado o con mala señal de GPS.`;
+  if(m.tipo==='bateria')return `La app dejó de responder a las ${h} con la <b>batería en ${esc(String(m.bat))} %</b>: lo más probable es que el celular se haya apagado por falta de batería.`;
+  return `La app <b>dejó de responder a las ${h}</b> (cerrada, celular sin datos o apagado)${hasNum(m.bat)?' · batería '+esc(String(m.bat))+' %':''}. Con esto no se puede saber cuál de esas fue.`;
+}
+const motCorto=m=>!m?'':m.tipo==='ubicacion_apagada'?'ubicación apagada':m.tipo==='sin_permiso'?'app sin permiso':m.tipo==='sin_posicion'?'el celular no da posiciones':m.tipo==='bateria'?'sin batería':'app sin responder';
 const tecProblema=t=>t.estado==='sin_senal'||t.estado==='sin_datos';
 const tecSinIngreso=(t,d)=>d.dia===d.hoy&&!!t.jornada&&t.jornada.estado==='sin_ingreso';
 const tecSinRetomar=(t,d)=>d.dia===d.hoy&&!!t.jornada&&!!t.jornada.sinRetomar;
@@ -4967,12 +5026,16 @@ function tecCard(t,d){
   else if(e==='fuera_horario')chip=`<span class="chip quiet">Fuera de horario${u?' · visto '+esc(haceTxt(u.ts)):''}</span>`;
   else if(e==='cortado')chip=`<span class="chip warn">GPS cortado a las ${esc(hhmmAR(t.corte))}</span>`;
   else chip=u?'<span class="chip quiet">'+t.puntos+' '+(t.puntos===1?'punto':'puntos')+(t.corte?' · cortado '+esc(hhmmAR(t.corte)):'')+'</span>':'<span class="chip quiet">Sin ubicación ese día</span>';
-  const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(e==='sin_datos'?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
+  const rb=(d.jornada&&d.jornada.radio)||40,dBase=u&&hasNum(u.dist)?(u.dist<=rb?' · en la base':' · a '+fmtDist(u.dist)+' de la base'):'';
+  const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${dBase}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(e==='sin_datos'?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
   const hu=t.huecos||[];
   const huHTML=hu.length?`<details class="small tec-hu"><summary>Sin señal ${esc(durTxt(t.sinSenalMin))} en ${hu.length} ${hu.length===1?'tramo':'tramos'}</summary><ul class="plain">${hu.map(g=>`<li>${hhmm(g.desde)} a ${hhmm(g.hasta)} · ${durTxt((g.hasta-g.desde)/60000)}${g.inicio?' (antes de su primera posición)':''}${g.sigue?' (sigue sin señal)':''}</li>`).join('')}</ul></details>`:'';
+  const motHTML=t.motivo?`<div class="small tec-mot"><b>Motivo probable:</b> ${motTxt(t.motivo)}</div>`:'';
+  const ap=t.apagados||[];
+  const apHTML=ap.length?`<details class="small tec-hu"><summary>Ubicación apagada o sin permiso ${esc(durTxt(t.apagadoMin))} en ${ap.length} ${ap.length===1?'tramo':'tramos'}</summary><ul class="plain">${ap.map(g=>`<li>${hhmm(g.desde)} a ${g.hasta==null?'ahora':hhmm(g.hasta)} · ${g.tipo==='permiso'?'la app sin permiso de ubicación':'ubicación del celular apagada'}${g.hasta!=null&&g.hasta>g.desde?' · '+durTxt((g.hasta-g.desde)/60000):''}</li>`).join('')}</ul></details>`:'';
   const ruta=rutaUrl(t.ruta),aviso=tecProblema(t)&&t.tel&&can('telefono');
   return `<article class="card tcard"><div class="head-row"><h3 style="overflow-wrap:anywhere">${esc(t.nombre)}</h3>${chip}</div>
-    ${jornadaTec(t,d)}${detalle?`<div class="small muted">${esc(detalle)}</div>`:''}${huHTML}
+    ${jornadaTec(t,d)}${detalle?`<div class="small muted">${esc(detalle)}</div>`:''}${motHTML}${huHTML}${apHTML}
     <div class="actions start">${aviso?`<a class="btn small primary" href="${tecAvisoUrl(t)}" target="_blank" rel="noopener">Avisarle por WhatsApp</a>`:''}${u?`<a class="btn small${aviso?'':' primary'}" href="${mapaUrl(u.lat,u.lng)}" target="_blank" rel="noopener">Ver en el mapa</a>`:''}${ruta?`<a class="btn small" href="${ruta}" target="_blank" rel="noopener">Recorrido del día</a>`:''}${!aviso&&t.tel&&can('telefono')?`<a class="btn small ghost" href="${waUrl(t.tel,'')}" target="_blank" rel="noopener">WhatsApp</a>`:''}${esHoy&&isAdmin()&&t.acepto?(t.corte?`<button class="btn small" type="button" data-gps-reanudar="${esc(t.id)}">Reanudar GPS</button>`:`<button class="btn small ghost" type="button" data-gps-cortar="${esc(t.id)}">Cortar GPS</button>`):''}</div></article>`;
 }
 function tecRender(){
@@ -4986,7 +5049,7 @@ function tecRender(){
   const atn=t=>tecProblema(t)||tecSinIngreso(t,d)||tecSinRetomar(t,d);
   const list=[...d.tecnicos].sort((a,b)=>(atn(b)-atn(a))||((b.ultima?b.ultima.ts:0)-(a.ultima?a.ultima.ts:0))||a.nombre.localeCompare(b.nombre));
   const sin=list.filter(tecProblema);
-  const banner=sin.length?`<div class="notice" role="status" id="tu-alerta" style="margin-bottom:12px"><b>${sin.length===1?'1 técnico sin señal':sin.length+' técnicos sin señal'}:</b> ${sin.map(t=>esc(t.nombre)+(t.ultima?' ('+esc(haceTxt(t.ultima.ts))+')':' (no mandó nada hoy)')).join(', ')}.</div>`:'';
+  const banner=sin.length?`<div class="notice" role="status" id="tu-alerta" style="margin-bottom:12px"><b>${sin.length===1?'1 técnico sin señal':sin.length+' técnicos sin señal'}:</b> ${sin.map(t=>esc(t.nombre)+(t.ultima?' ('+esc(haceTxt(t.ultima.ts))+')':' (no mandó nada hoy)')+(t.motivo?' · '+esc(motCorto(t.motivo)):'')).join(', ')}.</div>`:'';
   const sinIng=list.filter(t=>tecSinIngreso(t,d));
   const bannerIng=sinIng.length?`<div class="notice bad" role="status" id="tu-ingreso" style="margin-bottom:12px"><b>Sin ingreso hoy:</b> ${sinIng.map(t=>esc(t.nombre)).join(', ')}.</div>`:'';
   const sinRet=list.filter(t=>tecSinRetomar(t,d));
@@ -5002,6 +5065,43 @@ async function tecCargar(){
   catch(e){TU.err=e&&e.message||'No se pudo cargar la ubicación de los técnicos.';}
   TU.busy=false;tecRender();
 }
+/* ----- alerta para quien ve a los técnicos: contador en la pestaña y barra arriba cuando alguien lleva 15 min o más sin señal dentro del horario -----
+   Se consulta cada minuto con la app abierta (y cada 10 fuera de horario, cuando no hay nada que avisar). Es solo una pregunta liviana: no baja ninguna posición. */
+const TAL={sin:[],umbral:15,busy:false,avisados:{},started:false,fuera:false,ts:0,oculta:{k:'',hasta:0}};
+async function tecAlertaCargar(){
+  if(TAL.busy||!can('verTecnicos')||!NET.token||document.hidden)return;
+  if(TAL.fuera&&Date.now()-TAL.ts<600e3)return;
+  TAL.busy=true;
+  try{
+    const r=await NET.api('GET','/api/ubicaciones/alerta',undefined,{noKick:true,timeout:15000});
+    TAL.ts=Date.now();TAL.umbral=r.umbral;TAL.fuera=!r.dentro;TAL.sin=r.dentro?r.sin:[];
+    const ids=new Set(TAL.sin.map(x=>x.id));
+    Object.keys(TAL.avisados).forEach(k=>{if(!ids.has(k))delete TAL.avisados[k];});   /* volvió: si se vuelve a cortar, se avisa otra vez */
+    const nuevos=TAL.sin.filter(x=>!TAL.avisados[x.id]);
+    if(nuevos.length){
+      nuevos.forEach(x=>{TAL.avisados[x.id]=1;});
+      toast(nuevos.length===1?nuevos[0].nombre+' lleva '+durTxt(nuevos[0].min)+' sin señal':nuevos.length+' técnicos llevan más de '+TAL.umbral+' min sin señal','bad');
+      try{if(navigator.vibrate)navigator.vibrate([200,100,200]);}catch(e){}
+    }
+  }catch(e){/* sin conexión: queda lo último que se supo */}
+  TAL.busy=false;tecAlertaBarra();renderTabs();
+}
+function tecAlertaBarra(){
+  const bar=$('#tecBar');if(!bar)return;
+  const key=TAL.sin.map(x=>x.id).sort().join(',');
+  if(!can('verTecnicos')||S.gate||!TAL.sin.length||S.tab==='tecnicos'||(TAL.oculta.k===key&&Date.now()<TAL.oculta.hasta)){bar.hidden=true;return;}
+  bar.innerHTML=`<span><b>${TAL.sin.length===1?'1 técnico':TAL.sin.length+' técnicos'} sin señal en horario:</b> ${TAL.sin.map(x=>esc(x.nombre)+' ('+esc(durTxt(x.min))+(x.motivo?' · '+esc(motCorto(x.motivo)):'')+')').join(', ')}.</span><span class="jr-btns"><button class="btn small ghost" type="button" id="tb-ocultar">Ocultar 30 min</button><button class="btn small" type="button" id="tb-ver">Ver técnicos</button></span>`;
+  bar.hidden=false;
+  $('#tb-ver',bar).addEventListener('click',()=>showTab('tecnicos'));
+  $('#tb-ocultar',bar).addEventListener('click',()=>{TAL.oculta={k:key,hasta:Date.now()+30*60e3};tecAlertaBarra();});
+}
+function tecAlertaInit(){
+  if(TAL.started||!can('verTecnicos'))return;TAL.started=true;
+  tecAlertaCargar();
+  setInterval(tecAlertaCargar,60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)tecAlertaCargar();});
+}
+
 /* Horario de la ubicación y de la jornada: de corrido (un tramo) o cortado (mañana y tarde, con siesta), qué días es cada uno y días puntuales */
 const HZ_DIAS=[[1,'Lunes'],[2,'Martes'],[3,'Miércoles'],[4,'Jueves'],[5,'Viernes'],[6,'Sábado'],[0,'Domingo']];
 function planDe(){
@@ -6293,7 +6393,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='28397c3e32';
+const BUILD='6ac85d00a5';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -6389,13 +6489,14 @@ function allowedTabs(){
 }
 function renderTabs(){
   const open=[...S.ordenes.values()].filter(ORD_OPEN).length;
-  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}</button>`).join('');
+  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}${k==='tecnicos'&&TAL.sin.length?`<span class="count bad" title="Técnicos sin señal en horario">${TAL.sin.length}</span>`:''}</button>`).join('');
   if(html!==tabsHtml){tabsHtml=html;$('#tabs').innerHTML=html;}
 }
 function showTab(t){
   const tabs=allowedTabs();if(!tabs.length)return;
   if(!tabs.some(x=>x[0]===t))t=tabs[0][0];
   S.tab=t;lsSet('tab',t);tabsHtml='';renderTabs();
+  if(typeof tecAlertaBarra==='function')tecAlertaBarra();
   const v=$('#view');v.innerHTML='';VIEWS[t].mount(v);
   window.scrollTo(0,0);
 }
@@ -6596,6 +6697,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   S.ready=true;refreshAll();updateNetBar();
   dispRefresh();
   ubicInit().then(jornadaInit,jornadaInit);
+  tecAlertaInit();
 })();
 
 startUpdateWatch();

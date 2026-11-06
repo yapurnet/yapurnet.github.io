@@ -12,6 +12,7 @@
 .tab:hover{color:var(--ink)}
 .tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
 .tab .count{margin-left:6px;font-size:12px;background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:99px}
+.tab .count.bad{background:var(--bad);color:#fff}
 .wrap{width:100%;max-width:980px;margin:0 auto;padding-block:18px;display:flex;flex-direction:column;gap:16px}
 
 /* ---------- botones y chips ---------- */
@@ -152,6 +153,8 @@ button.chip[hidden],.netbar[hidden],.devbar[hidden]{display:none}
 .jrbar[hidden]{display:none}
 .jrbar b{font-weight:700}
 .jrbar.warn{background:var(--warn-soft);color:var(--warn)}
+.jrbar.bad{background:var(--bad-soft);color:var(--bad)}
+.jrbar .jr-btns{display:flex;gap:6px;flex-wrap:wrap}
 .jrbar.quiet{background:var(--surface-2);color:var(--muted)}
 .jrbar .btn{flex:none}
 .jrbar{flex-wrap:wrap}

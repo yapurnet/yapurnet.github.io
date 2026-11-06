@@ -119,12 +119,57 @@ const ar = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOS
       r = await call('GET', '/api/ubicaciones', undefined, A);
       let lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
       t('sin aceptar el aviso: estado «sin_aceptar» y ningún tramo', lu && lu.estado === 'sin_aceptar' && lu.huecos.length === 0 && lu.sinSenalMin === 0, lu);
+      r = await call('POST', '/api/ubicacion/latido', { gps: 1, red: 1, perm: 1, bat: 50, via: 'apk' }, L);
+      t('latido: sin aceptar el aviso, el servidor lo rechaza (409)', r.s === 409 && r.j.code === 'sin_aceptar', r);
+      r = await call('POST', '/api/ubicacion/latido', { gps: 1 }, A);
+      t('latido: el administrador no manda latidos (403)', r.s === 403, r);
+      r = await call('POST', '/api/ubicacion/latido', { gps: 1 });
+      t('latido: sin sesión, rechazado', r.s === 401, r);
       await call('POST', '/api/ubicacion/acepto', {}, L);
       r = await call('GET', '/api/ubicaciones', undefined, A);
       lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
       t('aceptó pero no mandó nada: «sin_datos», sin inventar tramos', lu.estado === 'sin_datos' && lu.huecos.length === 0 && lu.sinSenalMin === 0, lu);
       const ped2 = r.j.tecnicos.find(x => x.nombre === 'Pedro'), jua2 = r.j.tecnicos.find(x => x.nombre === 'Juan');
       t('los que mandaron hace un rato figuran «en_linea»', ped2.estado === 'en_linea' && jua2.estado === 'en_linea', [ped2.estado, jua2.estado]);
+
+      /* ----- latido: por qué está «sin señal» ----- */
+      t('sin latidos no se inventa un motivo (APK viejo o app nunca abierta)', lu.motivo === null && lu.latido === null && lu.apagados.length === 0, [lu.motivo, lu.latido]);
+      r = await call('GET', '/api/ubicaciones/alerta', undefined, P);
+      t('alerta: un técnico no la puede pedir (403)', r.s === 403, r);
+      r = await call('GET', '/api/ubicaciones/alerta', undefined, A);
+      const minHoy = ar(Date.now()).h * 60 + new Date(Date.now() - 3 * 3600e3).getUTCMinutes();
+      t('alerta: el administrador la pide; umbral de 15 min', r.s === 200 && r.j.umbral === 15 && r.j.dentro === true && Array.isArray(r.j.sin), r);
+      if (minHoy >= 20) {
+        const al = r.j.sin.find(x => x.nombre === 'Luis');
+        t('alerta: Luis aceptó y no mandó nada en lo que va del horario (≥ 15 min): figura «sin_datos» y sin motivo', !!al && al.estado === 'sin_datos' && al.min >= 15 && al.motivo === null, r.j.sin);
+        t('alerta: los que mandaron recién no figuran', !r.j.sin.some(x => x.nombre === 'Pedro' || x.nombre === 'Juan'), r.j.sin);
+      } else t('(salteado: recién pasó la medianoche, todavía no hay 15 min de horario)', true);
+      r = await call('POST', '/api/ubicacion/latido', { perm: 0, via: 'web', bat: 61 }, L);
+      t('latido: la página avisa que la app no tiene permiso', r.s === 200 && r.j.guardado === true, r);
+      r = await call('GET', '/api/ubicaciones', undefined, A);
+      lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
+      t('motivo: sin permiso de ubicación, con la hora desde la que está así', lu.motivo && lu.motivo.tipo === 'sin_permiso' && lu.motivo.desde <= Date.now() && lu.motivo.desde > Date.now() - 60e3, lu.motivo);
+      t('el tramo sin permiso queda anotado y «sigue» (hasta = null)', lu.apagados.length === 1 && lu.apagados[0].tipo === 'permiso' && lu.apagados[0].hasta === null, lu.apagados);
+      t('se ve la batería y por dónde llegó el latido, y nada más', lu.latido && lu.latido.bat === 61 && lu.latido.via === 'web' && Object.keys(lu.latido).sort().join() === 'bat,ts,via', lu.latido);
+      r = await call('POST', '/api/ubicacion/latido', { perm: 1, via: 'web' }, L);
+      r = await call('GET', '/api/ubicaciones', undefined, A);
+      lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
+      t('al volver el permiso, el tramo se cierra y la batería anterior se conserva (la página no la informó)', lu.apagados.length === 1 && lu.apagados[0].hasta > 0 && lu.latido.bat === 61 && lu.motivo && lu.motivo.tipo === 'sin_posicion', [lu.apagados, lu.latido, lu.motivo]);
+      r = await call('POST', '/api/ubicacion/latido', { gps: 0, red: 0, perm: 1, bat: 40, via: 'apk' }, L);
+      r = await call('GET', '/api/ubicaciones', undefined, A);
+      lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
+      t('el APK avisa que apagó la ubicación (GPS y red): motivo y un segundo tramo', lu.motivo && lu.motivo.tipo === 'ubicacion_apagada' && lu.apagados.length === 2 && lu.apagados[1].tipo === 'ubicacion' && lu.apagados[1].hasta === null && lu.apagadoMin >= 0, [lu.motivo, lu.apagados]);
+      r = await call('POST', '/api/ubicacion/latido', { perm: 1, via: 'web', bat: 'mucha' }, L);
+      r = await call('GET', '/api/ubicaciones', undefined, A);
+      lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
+      t('la página, que no sabe del GPS, no «prende» una ubicación que el APK dijo apagada; y una batería inválida se ignora', lu.motivo && lu.motivo.tipo === 'ubicacion_apagada' && lu.latido.bat === 40, [lu.motivo, lu.latido]);
+      r = await call('POST', '/api/ubicacion/latido', { gps: 1, red: 1, perm: 1, bat: 40, via: 'apk' }, L);
+      r = await call('GET', '/api/ubicaciones/alerta', undefined, A);
+      if (minHoy >= 20) { const al = r.j.sin.find(x => x.nombre === 'Luis'); t('alerta: con la ubicación prendida otra vez el motivo pasa a «sin_posicion»', !!al && al.motivo && al.motivo.tipo === 'sin_posicion', r.j.sin); }
+      r = await call('POST', '/api/ubicacion/latido', { gps: 'x', red: {}, perm: [], bat: 1e9, via: '<script>' }, L);
+      r = await call('GET', '/api/ubicaciones', undefined, A);
+      lu = r.j.tecnicos.find(x => x.nombre === 'Luis');
+      t('datos basura en el latido no rompen nada ni se guardan', r.s === 200 && lu.latido.via === 'web' && lu.latido.bat === 40, lu.latido);
 
       const base = Date.now(), p1 = base - 14 * 60e3, p2 = base - 13 * 60e3;
       if (ar(p1).fecha !== ar(base).fecha) t('(salteado: recién pasó la medianoche, los puntos caerían en otro día)', true);
@@ -167,6 +212,18 @@ const ar = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOS
       t('si el día sigue abierto, el último tramo lleva «sigue»', h2.length === 1 && h2[0].sigue === true && h2[0].desde === hh(8, 5) && h2[0].hasta === hh(9), h2);
       t('los puntos fuera de la ventana se ignoran', ubicHuecos([hh(6), hh(21)], ws, we, false).length === 1 && ubicHuecos([hh(6), hh(21)], ws, we, false)[0].desde === ws, ubicHuecos([hh(6), hh(21)], ws, we, false));
       t('una ventana que todavía no empezó no tiene tramos', ubicHuecos([hh(9)], ws, ws, true).length === 0);
+      /* motivo del «sin señal» (función pura) */
+      const motivoDe = new Function(src.slice(src.indexOf('const UBIC_HUECO_MS'), src.indexOf('const arTime')) + '; return ubicMotivoDe;')();
+      const ahora9 = hh(12), ini = hh(8);
+      t('motivo: si no está sin señal no hay motivo', motivoDe({ ts: ahora9 }, 'en_linea', ahora9, ini, []) === null && motivoDe({ ts: ahora9 }, 'fuera_horario', ahora9, ini, []) === null);
+      t('motivo: sin latidos, o con uno de antes de este tramo, no se inventa nada', motivoDe(null, 'sin_senal', ahora9, ini, []) === null && motivoDe({ ts: ini - 1 }, 'sin_senal', ahora9, ini, []) === null);
+      t('motivo: latido reciente con la ubicación apagada → «ubicacion_apagada» desde que se apagó', JSON.stringify(motivoDe({ ts: ahora9 - 60e3, off: 'ubicacion' }, 'sin_senal', ahora9, ini, [{ d: hh(11, 20), t: 'ubicacion', u: ahora9 - 60e3 }])) === JSON.stringify({ tipo: 'ubicacion_apagada', desde: hh(11, 20) }));
+      t('motivo: latido reciente sin permiso → «sin_permiso»', motivoDe({ ts: ahora9 - 120e3, off: 'permiso' }, 'sin_senal', ahora9, ini, []).tipo === 'sin_permiso');
+      t('motivo: latido reciente y todo prendido → «sin_posicion»', motivoDe({ ts: ahora9 - 30e3, off: null }, 'sin_senal', ahora9, ini, []).tipo === 'sin_posicion');
+      t('motivo: el latido más reciente es de hace más de 3 min → «sin_app», con la hora del último', (m => m.tipo === 'sin_app' && m.desde === ahora9 - 4 * 60e3 && m.bat === 70)(motivoDe({ ts: ahora9 - 4 * 60e3, off: null, bat: 70 }, 'sin_senal', ahora9, ini, [])));
+      t('motivo: justo 3 min todavía es reciente; 3 min y 1 s ya no', motivoDe({ ts: ahora9 - 180e3, off: null }, 'sin_senal', ahora9, ini, []).tipo === 'sin_posicion' && motivoDe({ ts: ahora9 - 180e3 - 1000, off: null }, 'sin_senal', ahora9, ini, []).tipo === 'sin_app');
+      t('motivo: app que dejó de responder con la batería en 5 % o menos → «bateria»', motivoDe({ ts: ahora9 - 600e3, bat: 5 }, 'sin_senal', ahora9, ini, []).tipo === 'bateria' && motivoDe({ ts: ahora9 - 600e3, bat: 6 }, 'sin_senal', ahora9, ini, []).tipo === 'sin_app');
+      t('motivo: también para «sin_datos» (nunca mandó una posición)', motivoDe({ ts: ahora9 - 30e3, off: 'ubicacion' }, 'sin_datos', ahora9, ini, []).tipo === 'ubicacion_apagada');
     }
 
     /* un técnico dado de baja deja de aparecer */

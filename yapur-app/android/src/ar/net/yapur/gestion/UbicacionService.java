@@ -1,5 +1,6 @@
 package ar.net.yapur.gestion;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -7,10 +8,13 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -62,6 +66,7 @@ public class UbicacionService extends Service implements LocationListener {
     static final String P_ACTIVO = "ub_activo";
     static final String P_TOKEN = "ub_token";
     static final String P_TRAMOS = "ub_tramos";
+    static final String P_LATIDO = "ub_latido";   // la página ya le mostró al técnico el aviso del latido: recién ahí el servicio lo manda
     /* Android no deja que una app cambie la importancia de un canal ya creado (solo el usuario puede), así que la notificación
        silenciosa va en canales NUEVOS. «ubicacion» (el viejo, con ícono en la barra) se borra en cuanto el servicio deja de usarlo. */
     private static final String CANAL_VIEJO = "ubicacion";
@@ -97,6 +102,7 @@ public class UbicacionService extends Service implements LocationListener {
     private boolean enviando = false;
     private int mostrado = SIN_PLAN;       // qué notificación está a la vista
     private boolean sinGps = false;
+    private boolean latiendo = false;
     private int rechazos = 0;              // respuestas 403 seguidas (un 403 suelto, de la red o de Cloudflare, no debe apagar el servicio)
 
     private final Runnable ciclo = new Runnable() {
@@ -117,6 +123,7 @@ public class UbicacionService extends Service implements LocationListener {
             }
             mostrarEstado();
             if (!pausado) enviar();
+            if (dentro) latido();
             programarAlarma();
             main.postDelayed(this, dentro ? CADA_MS : esperaMs());
         }
@@ -393,8 +400,9 @@ public class UbicacionService extends Service implements LocationListener {
     }
 
     @Override public void onStatusChanged(String p, int s, Bundle e) { }
-    @Override public void onProviderEnabled(String p) { }
-    @Override public void onProviderDisabled(String p) { }
+    /* prender o apagar la ubicación del celular se avisa enseguida (no hay que esperar al próximo latido) */
+    @Override public void onProviderEnabled(String p) { if (running && dentroDeHorario()) latido(); }
+    @Override public void onProviderDisabled(String p) { if (running && dentroDeHorario()) latido(); }
 
     /* ---------- envío al servidor (siempre HTTPS: Config.SERVER_URL lo exige el build) ---------- */
 
@@ -434,6 +442,62 @@ public class UbicacionService extends Service implements LocationListener {
                         } else {
                             rechazado(rc);   // la sesión ya no vale, no es técnico o no aceptó el aviso: no se insiste
                         }
+                    }
+                });
+            }
+        });
+    }
+
+    /* ---------- latido: lo que el celular dice de sí mismo ----------
+       Una vez por minuto, solo dentro del horario y solo si el técnico ya vio el aviso: si la ubicación (GPS o red) está prendida, si la app tiene
+       el permiso y cuánta batería queda. No lleva ninguna posición. Así, cuando dejan de llegar posiciones, la oficina sabe si fue porque se apagó la
+       ubicación, se sacó el permiso o la app directamente dejó de responder (cerrada, sin datos, apagado o sin batería). */
+    private void latido() {
+        if (latiendo || net == null || main == null || token.length() == 0) return;
+        if (!getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(P_LATIDO, false)) return;
+        boolean gps = false, red = false, perm = false;
+        try { gps = lm != null && lm.isProviderEnabled(LocationManager.GPS_PROVIDER); } catch (Throwable t) { /* sin dato: cuenta como apagado */ }
+        try { red = lm != null && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER); } catch (Throwable t) { /* sin dato: cuenta como apagado */ }
+        try {
+            perm = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable t) { /* sin dato: no se informa */ }
+        int bat = -1;
+        try {
+            Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (b != null) {
+                int l = b.getIntExtra(BatteryManager.EXTRA_LEVEL, -1), e = b.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                if (l >= 0 && e > 0) bat = Math.round(100f * l / e);
+            }
+        } catch (Throwable t) { /* sin dato de batería */ }
+        final String cuerpo = "{\"gps\":" + (gps ? 1 : 0) + ",\"red\":" + (red ? 1 : 0) + ",\"perm\":" + (perm ? 1 : 0)
+            + (bat >= 0 && bat <= 100 ? ",\"bat\":" + bat : "") + ",\"via\":\"apk\"}";
+        final String tk = token;
+        latiendo = true;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                int code = -1;
+                try {
+                    HttpURLConnection c = (HttpURLConnection) new URL(Config.SERVER_URL + "/api/ubicacion/latido").openConnection();
+                    c.setRequestMethod("POST");
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(20000);
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Content-Type", "application/json");
+                    c.setRequestProperty("Authorization", "Bearer " + tk);
+                    OutputStream os = c.getOutputStream();
+                    os.write(cuerpo.getBytes(Charset.forName("UTF-8")));
+                    os.close();
+                    code = c.getResponseCode();
+                    c.disconnect();
+                } catch (Throwable t) { code = -1; }
+                final int rc = code;
+                main.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        latiendo = false;
+                        if (rc != 200 && rc != -1) rechazado(rc);   // sesión vencida o sin aceptar el aviso: igual que con las posiciones
                     }
                 });
             }

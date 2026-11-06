@@ -510,6 +510,8 @@ const distM = (a1, o1, a2, o2) => {
   return Math.round(2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h))));
 };
 const UBIC_HUECO_MS = 10 * 60e3;     // más de 10 minutos sin recibir nada = «sin señal»
+const UBIC_LAT_MS = 3 * 60e3;        // el celular manda un «latido» por minuto: 3 minutos sin latido = la app dejó de responder
+const UBIC_ALERTA_MIN = 15;          // minutos sin señal, en horario, a partir de los cuales la oficina ve la alerta
 /* Tramos sin señal dentro de la ventana [ws, we]: el celular manda un punto por minuto, así que un silencio largo es
    un celular apagado, sin datos o con la app cerrada. `tss` viene ordenado. Sin ningún punto no se inventa un hueco
    (puede ser un día libre). El primer tramo (desde que arranca el horario) lleva `inicio`; el último, `sigue` si la ventana aún está abierta. */
@@ -524,6 +526,19 @@ function ubicHuecos(tss, ws, we, abierta) {
   }
   if (we - prev > UBIC_HUECO_MS) out.push(abierta ? { desde: prev, hasta: we, sigue: true } : { desde: prev, hasta: we });
   return out;
+}
+/* por qué un técnico está «sin señal» (solo si lo está): lo que se puede afirmar y lo que no. `lat` es su último latido; `apag`, los tramos de hoy
+   con la ubicación apagada. Sin latidos en este tramo del día (APK viejo o app que nunca se abrió) no hay con qué decirlo: null. */
+function ubicMotivoDe(lat, estado, ahora, iniTr, apag) {
+  if (estado !== 'sin_senal' && estado !== 'sin_datos') return null;
+  if (!lat || !(lat.ts >= iniTr)) return null;
+  const ab = apag && apag.length && apag[apag.length - 1].h == null ? apag[apag.length - 1] : null;
+  if (ahora - lat.ts <= UBIC_LAT_MS) {
+    if (lat.off === 'ubicacion') return { tipo: 'ubicacion_apagada', desde: ab ? ab.d : lat.ts };
+    if (lat.off === 'permiso') return { tipo: 'sin_permiso', desde: ab ? ab.d : lat.ts };
+    return { tipo: 'sin_posicion', desde: lat.ts };   // la app responde y la ubicación está prendida, pero el celular no da posiciones
+  }
+  return { tipo: lat.bat != null && lat.bat <= 5 ? 'bateria' : 'sin_app', desde: lat.ts, bat: lat.bat == null ? null : lat.bat };   // la app dejó de responder a esa hora
 }
 const arTime = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
 const arDayStart = fecha => Date.parse(fecha + 'T00:00:00-03:00');
@@ -671,6 +686,7 @@ export class YapurDB extends DurableObject {
     this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
     this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
     this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubicev:%' AND substr(k,-10)<?", arTime(Date.now() - UBIC_DIAS * 864e5).fecha);
     this.loadUsers();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
@@ -1905,9 +1921,64 @@ export class YapurDB extends DurableObject {
     if (Math.random() < 0.01) {
       this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5); this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(now - JORNADA_DIAS * 864e5).fecha);
       this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(now - JORNADA_DIAS * 864e5).fecha);
+      this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubicev:%' AND substr(k,-10)<?", arTime(now - UBIC_DIAS * 864e5).fecha);
     }
     const hoy = arTime(now).fecha, corteHoy = hoy in cortes ? cortes[hoy] : this.ubicCorteDe(u.id, hoy), tramos = ubicTramosCorte(h.tramos, arDayStart(hoy), corteHoy);
     return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
+  }
+  /* ----- latido: lo que el celular dice de sí mismo, sin posición ni nada fuera de horario -----
+     Cada minuto, dentro del horario, la app (o el servicio del APK) manda si la ubicación está prendida, si la app tiene permiso y cuánta batería queda.
+     Sirve para que, cuando un técnico queda «sin señal», se sepa si apagó la ubicación, le sacó el permiso a la app o la app directamente dejó de responder
+     (cerrada, sin datos, celular apagado o sin batería). El servidor lo guarda solo si llega dentro del horario y no tiene más que el último valor y los
+     tramos en que la ubicación estuvo apagada (a qué hora y por cuánto): se borra a los 14 días, igual que las posiciones. */
+  ubicLatidoDe(uid) {
+    const r = this.q1('SELECT v FROM meta WHERE k=?', 'ubiclat:' + uid);
+    try { const j = r && JSON.parse(r.v); return isPlain(j) && Number.isFinite(j.ts) ? j : null; } catch (e) { return null; }
+  }
+  ubicApagadosDe(uid, dia) {
+    const r = this.q1('SELECT v FROM meta WHERE k=?', 'ubicev:' + uid + ':' + dia);
+    try { const j = r && JSON.parse(r.v); return Array.isArray(j) ? j.filter(x => isPlain(x) && Number.isFinite(x.d)) : []; } catch (e) { return []; }
+  }
+  ubicLatido(u, b) {
+    if (u.role !== 'tecnico') throw httpErr(403, 'Solo los técnicos comparten su ubicación.');
+    if (!this.ubicAcepto(u.id)) throw httpErr(409, 'Primero hay que aceptar el aviso de ubicación.', 'sin_aceptar');
+    const now = Date.now(), dia = arTime(now).fecha, corte = this.ubicCorteDe(u.id, dia), tr = ubicTramosCorte(this.ubicDia(dia).tramos, arDayStart(dia), corte);
+    if ((corte && now >= corte) || !this.ubicDentro(now, tr)) return { ok: true, guardado: false };   // fuera de horario no se toma nada
+    b = isPlain(b) ? b : {};
+    const flag = v => v === 1 || v === true ? 1 : v === 0 || v === false ? 0 : null;
+    const ant = this.ubicLatidoDe(u.id), pv = ant && ant.ts >= arDayStart(dia) ? ant : null;
+    /* lo que esta vez no vino (la página, por ejemplo, no sabe si el GPS está prendido) conserva lo último que se sabía de hoy */
+    const mg = { gps: flag(b.gps), red: flag(b.red), perm: flag(b.perm), bat: Number.isInteger(b.bat) && b.bat >= 0 && b.bat <= 100 ? b.bat : null };
+    for (const k of Object.keys(mg)) if (mg[k] === null && pv && pv[k] != null) mg[k] = pv[k];
+    const off = mg.perm === 0 ? 'permiso' : mg.gps === 0 && mg.red === 0 ? 'ubicacion' : null;
+    const evK = 'ubicev:' + u.id + ':' + dia, ev = this.ubicApagadosDe(u.id, dia), ab = ev.length && ev[ev.length - 1].h == null ? ev[ev.length - 1] : null;
+    let cambio = false;
+    if (off && !ab) { ev.push({ d: now, t: off, u: now }); cambio = true; }
+    else if (off && ab && ab.t !== off) { ab.h = now; ev.push({ d: now, t: off, u: now }); cambio = true; }
+    else if (off && ab && now - (ab.u || ab.d) > 4 * 60e3) { ab.u = now; cambio = true; }
+    else if (!off && ab) { ab.h = now; cambio = true; }
+    if (cambio) this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', evK, JSON.stringify(ev.slice(-30)));
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubiclat:' + u.id, JSON.stringify({ ts: now, ...mg, via: b.via === 'apk' ? 'apk' : 'web', off }));
+    return { ok: true, guardado: true };
+  }
+  ubicMotivo(lat, estado, ahora, iniTr, apag) { return ubicMotivoDe(lat, estado, ahora, iniTr, apag); }
+  /* lo liviano que consulta la oficina cada minuto: quién lleva ≥15 min sin señal en este momento */
+  ubicAlerta() {
+    const pl = this.ubicPlan(), ahora = Date.now(), hoy = arTime(ahora).fecha, trHoy = ubicTramosDe(pl, hoy), dentro = this.ubicDentro(ahora, trHoy);
+    const out = { ahora, dentro, umbral: UBIC_ALERTA_MIN, sin: [] };
+    if (!dentro) return out;
+    const t0 = arDayStart(hoy), minAhora = arTime(ahora).min / 60, trAct = trHoy.find(t => minAhora >= t[0] && minAhora < t[1]), iniTr = trAct ? t0 + trAct[0] * 3600e3 : t0;
+    for (const u of this.USERS.values()) {
+      if (u.role !== 'tecnico' || !u.activo || !this.ubicAcepto(u.id)) continue;
+      const corte = this.ubicCorteDe(u.id, hoy);
+      if (corte && ahora >= corte) continue;
+      const ult = this.q1('SELECT ts FROM ubic WHERE uid=? AND ts>=? ORDER BY ts DESC LIMIT 1', u.id, iniTr), ref = ult ? ult.ts : iniTr, min = Math.floor((ahora - ref) / 60000);
+      if (min < UBIC_ALERTA_MIN) continue;
+      const estado = ult ? 'sin_senal' : 'sin_datos', motivo = this.ubicMotivo(this.ubicLatidoDe(u.id), estado, ahora, iniTr, this.ubicApagadosDe(u.id, hoy));
+      out.sin.push({ id: u.id, nombre: u.nombre, min, desde: ult ? ult.ts : null, estado, motivo });
+    }
+    out.sin.sort((a, b) => b.min - a.min);
+    return out;
   }
   ubicLista(dia) {
     const pl = this.ubicPlan(), ahora = Date.now(), hoy = arTime(ahora).fecha;
@@ -1931,7 +2002,13 @@ export class YapurDB extends DurableObject {
       /* con corte, lo que pasó desde esa hora no es «sin señal»: se mira el día como si «ahora» fuera el corte */
       const huecos = !acepto ? [] : corte ? ubicHuecosDia(todos.map(r => r.ts), t0, h.tramos, corte, true).map(g => ({ desde: g.desde, hasta: g.hasta, ...(g.inicio ? { inicio: true } : {}) })) : ubicHuecosDia(todos.map(r => r.ts), t0, h.tramos, ahora, esHoy);
       const sinSenalMin = Math.round(huecos.reduce((s, g) => s + (g.hasta - g.desde), 0) / 60000);
-      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, corte, ultima, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin, jornada: this.jornadaDia(u, dia, hoy, ahora, jc, laborable, h.tramos) };
+      /* qué dijo el celular de sí mismo: tramos con la ubicación apagada o sin permiso, y (si hoy está sin señal) el motivo probable */
+      const lat = esHoy ? this.ubicLatidoDe(u.id) : null, ev = acepto ? this.ubicApagadosDe(u.id, dia) : [];
+      const apagados = ev.map(x => ({ desde: x.d, hasta: x.h != null ? x.h : (esHoy && lat && ahora - lat.ts <= UBIC_LAT_MS && lat.off === x.t ? null : (x.u || x.d)), tipo: x.t }));
+      const apagadoMin = Math.round(apagados.reduce((s, g) => s + ((g.hasta == null ? ahora : g.hasta) - g.desde), 0) / 60000);
+      const motivo = esHoy && acepto ? this.ubicMotivo(lat, estado, ahora, iniTr, ev) : null;
+      const ultimaV = ultima && jc.base ? { ...ultima, dist: distM(ultima.lat, ultima.lng, jc.base.lat, jc.base.lng) } : ultima;
+      return { id: u.id, nombre: u.nombre, tel: u.tel || '', acepto, estado, corte, ultima: ultimaV, puntos: todos.length, ruta, huecos: huecos.slice(-40), sinSenalMin, motivo, latido: lat ? { ts: lat.ts, bat: lat.bat, via: lat.via } : null, apagados, apagadoMin, jornada: this.jornadaDia(u, dia, hoy, ahora, jc, laborable, h.tramos) };
     });
     return { dia, hoy, ahora, horario: { desde: h.desde, hasta: h.hasta, tramos: h.tramos, modo: h.modo }, plan: pl, dias: UBIC_DIAS, tecnicos, jornada: { base: jc.base, radio: jc.radio, tol: jc.tol, dias: jc.dias } };
   }
@@ -2196,8 +2273,14 @@ export class YapurDB extends DurableObject {
       return send(200, this.ubicEstado(a.user));
     }
     if (p === '/api/ubicacion' && m === 'POST') return send(200, this.ubicGuardar((await this.needAuth(request)).user, readBody(raw, 2e5)));
+    if (p === '/api/ubicacion/latido' && m === 'POST') return send(200, this.ubicLatido((await this.needAuth(request)).user, readBody(raw, 2e3)));
     if (p === '/api/ubicacion/cortar' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.ubicCortar(a.user, readBody(raw, 1e3))); }
     if (p === '/api/ubicacion/reanudar' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.ubicReanudar(a.user, readBody(raw, 1e3))); }
+    if (p === '/api/ubicaciones/alerta' && m === 'GET') {
+      const a = await this.needAuth(request);
+      if (!effPerms(a.user).verTecnicos) throw httpErr(403, 'No tenés permiso para ver la ubicación de los técnicos.');
+      return send(200, this.ubicAlerta());
+    }
     if (p === '/api/ubicaciones' && m === 'GET') {
       const a = await this.needAuth(request);
       if (!effPerms(a.user).verTecnicos) throw httpErr(403, 'No tenés permiso para ver la ubicación de los técnicos.');
