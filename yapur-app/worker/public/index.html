@@ -2357,7 +2357,7 @@ function portsSectionHTML(p,m){
   const resumen=n?`Quedan <b>${n}</b> ${n===1?'puerto libre':'puertos libres'}.`:'<b>Caja llena</b>: no queda ningún puerto libre.';
   const aviso=m.sin.length?` Hay ${m.sin.length} ${m.sin.length===1?'cliente':'clientes'} sin puerto válido cargado: alguno de los lugares libres puede estar usado.`:'';
   const rev=[...m.sin.map(c=>[c,c.napPuerto?'El puerto '+c.napPuerto+' no existe en esta caja':'Sin puerto cargado']),...m.dup.flatMap(([k,l])=>l.map(c=>[c,'Puerto '+k+' repetido']))];
-  return `<div><h3>Puertos</h3><div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${resumen}${aviso}</div>${canMoverNap()?'<div class="hint">Tocá un puerto <b>libre</b> para elegir qué cliente está conectado ahí, o uno <b>ocupado</b> para ver de quién es, cambiarlo de puerto o sacarlo.</div>':''}${portGridHTML(p,m)}
+  return `<div><h3>Puertos</h3><div class="hint ${n?'ok':'bad'}" style="margin-bottom:8px">${resumen}${aviso}</div>${canMoverNap()?'<div class="hint">Tocá un puerto <b>libre</b> para elegir al cliente que está conectado ahí (uno por instalar o uno ya instalado), o uno <b>ocupado</b> para ver de quién es, cambiarlo de puerto o sacarlo.</div>':''}${portGridHTML(p,m)}
     ${rev.length?`<h3 style="margin-top:14px">Para revisar</h3><div class="list" style="margin-top:8px">${rev.map(([c,why])=>`<button class="item" type="button" data-cl="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(why)}${callePuerto(c)?' · '+esc(callePuerto(c)):''}</div></div></button>`).join('')}</div>`:''}</div>`;
 }
 /* mover un cliente de caja o de puerto: el puerto de origen queda libre y el de destino ocupado en una sola escritura (el puerto vive en el propio cliente) */
@@ -2514,19 +2514,51 @@ async function sacarDeCaja(cid,napId){
     toast('Listo: el puerto'+(c.napPuerto?' '+c.napPuerto:'')+' quedó libre');openRed(napId);
   }catch(err){dbError(err);}
 }
-/* un puerto libre: se busca por nombre o calle al cliente que está conectado ahí y se lo carga en ese puerto (un técnico busca con 3 letras como mínimo y ve pocos resultados: no es una lista de todos los clientes) */
-function openAsignarPuerto(napId,port,q0){
+/* un puerto libre: se elige al cliente que está conectado ahí. Sin escribir nada se ofrecen dos listas, «Por instalar» (los abonados nuevos) y «Ya instalados» (los que todavía no tienen caja), con los más cercanos a la caja primero;
+   escribiendo se busca entre todos por nombre o calle (un técnico busca con 3 letras como mínimo y ve pocos resultados: no es una lista de todos los clientes) */
+function openAsignarPuerto(napId,port,q0,tab0){
   const p=S.red.get(napId);if(!p)return;
   if(!canMoverNap())return toast('Tu perfil no puede cargar clientes en una caja','bad');
-  const todos=can('clientesTodos'),min=todos?2:3,lim=todos?30:8;
+  const todos=can('clientesTodos'),min=todos?2:3,lim=todos?30:8,limYa=todos?15:8;
+  const vis=todos?null:visibleSet();   /* un técnico ve «Por instalar» solo con los abonados de sus órdenes */
+  const m=napMap(p),sinPto=new Set(m.sin.map(c=>c.id)),geo=hasGeo(p);
+  const dist=c=>geo&&hasGeo(c)?distM(p,c):null;
+  const puesto=c=>c.nap===napId&&!sinPto.has(c.id);              /* ya ocupa un puerto de esta caja: se ve en el dibujo */
+  const enCaja=c=>!!(c.nap&&S.red.has(c.nap));
+  const abierta=new Set();for(const o of S.ordenes.values())if(o.tipo==='instalacion'&&ORD_OPEN(o))abierta.add(o.clientId);
+  const nombre=(a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true});
+  /* primero los de esta caja que no tienen puerto, después los más cercanos, al final los que no tienen ubicación */
+  const cerca=(a,b,conOrden)=>{
+    const sa=sinPto.has(a.id),sb=sinPto.has(b.id);if(sa!==sb)return sa?-1:1;
+    if(conOrden){const oa=abierta.has(a.id),ob=abierta.has(b.id);if(oa!==ob)return oa?-1:1;}   /* en «Por instalar», los que tienen una instalación abierta antes */
+    const da=dist(a),db=dist(b);if(da!==null&&db!==null&&da!==db)return da-db;if((da===null)!==(db===null))return da===null?1:-1;
+    return nombre(a,b);
+  };
+  const nuevos=[...S.clientes.values()].filter(c=>c.estado==='pendiente'&&!puesto(c)&&(!enCaja(c)||sinPto.has(c.id))&&(!vis||vis.has(c.id))).sort((a,b)=>cerca(a,b,true));
+  const ya=[...S.clientes.values()].filter(c=>c.estado!=='pendiente'&&c.estado!=='baja'&&!puesto(c)&&(!enCaja(c)||sinPto.has(c.id))).sort(cerca);
+  let tab=tab0||(nuevos.length?'nuevo':'ya');
   const html=`<p>¿Qué cliente está conectado en el <b>puerto ${port}</b> de <b>${esc(p.nombre)}</b>?</p>
-    <input class="search" id="as-q" type="search" placeholder="Nombre o calle del cliente" autocomplete="off" aria-label="Buscar cliente por nombre o calle" value="${esc(q0||'')}">
+    <div class="seg" id="as-seg" role="group" aria-label="Qué clientes mostrar"><button type="button" data-t="nuevo">Por instalar (${nuevos.length})</button><button type="button" data-t="ya">Ya instalados${todos?' ('+ya.length+')':''}</button></div>
+    <input class="search" id="as-q" type="search" placeholder="Buscar por nombre o calle (entre todos)" autocomplete="off" aria-label="Buscar cliente por nombre o calle" value="${esc(q0||'')}" style="flex:none">
     <div class="hint" id="as-hint"></div><div class="list" id="as-list"></div>
     <div class="actions"><button class="btn ghost" type="button" id="as-back">Volver a la caja</button></div>`;
   openModal({title:'Puerto '+port+' · '+p.nombre,html,onMount(el){
-    const q=$('#as-q',el),hint=$('#as-hint',el),list=$('#as-list',el);
+    const q=$('#as-q',el),hint=$('#as-hint',el),list=$('#as-list',el),seg=$('#as-seg',el);
+    const fila=(c,buscando)=>{
+      const nm=c.nap&&redName(c.nap),d=dist(c),est=buscando&&c.estado==='pendiente'?estLabel(c):'';
+      return `<button class="item" type="button" data-as="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(callePuerto(c)||'Sin domicilio')}</div></div><div class="side">${d!==null?`<span class="chip info">a ${esc(fmtDist(d))}</span>`:''}${est?`<span class="chip warn">${esc(est)}</span>`:''}${nm?`<span class="chip">${esc(nm)}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:(buscando?'<span class="chip quiet">Sin caja</span>':'')}</div></button>`;
+    };
     const buscar=()=>{
       const parts=norm(q.value).trim().split(/\s+/).filter(Boolean),txt=parts.join('');
+      $$('button',seg).forEach(b=>b.setAttribute('aria-pressed',String(!txt&&b.dataset.t===tab)));
+      if(!txt){   /* sin escribir: las dos listas */
+        const l=tab==='nuevo'?nuevos:ya,mas=tab==='ya'&&l.length>limYa;
+        hint.className='hint';
+        hint.textContent=!l.length?(tab==='nuevo'?(todos?'No hay abonados por instalar.':'No tenés instalaciones pendientes.')+' Para elegir a otro, escribí su nombre.':'No hay clientes sin caja. Para uno que figura en otra caja, escribí su nombre.')
+          :(tab==='nuevo'?'Tocá al cliente que va en este puerto.':'Clientes que todavía no tienen caja'+(geo?', de la más cercana a esta caja en adelante.':'.'))+(mas?' Se muestran '+limYa+' de '+l.length+': si no está, escribí su nombre.':'');
+        list.innerHTML=(tab==='nuevo'?l.slice(0,lim):l.slice(0,limYa)).map(c=>fila(c,false)).join('');
+        return;
+      }
       if(txt.length<min){list.innerHTML='';hint.className='hint';hint.textContent='Escribí al menos '+min+' letras del nombre o de la calle.';return;}
       const out=[];
       for(const c of S.clientes.values()){
@@ -2534,13 +2566,11 @@ function openAsignarPuerto(napId,port,q0){
         const h=norm([c.nombre,c.dir,c.loc,c.codigo].join(' '));
         if(parts.every(x=>h.includes(x)))out.push(c);
       }
-      out.sort((a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true}));
+      out.sort(nombre);
       hint.className='hint';hint.textContent=out.length?(out.length>lim?'Hay más: escribí más letras para acotar.':''):'No hay ningún cliente con ese nombre. Si es nuevo, cargalo primero en Clientes.';
-      list.innerHTML=out.slice(0,lim).map(c=>{
-        const nm=c.nap&&redName(c.nap);
-        return `<button class="item" type="button" data-as="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(callePuerto(c)||'Sin domicilio')}</div></div><div class="side">${nm?`<span class="chip">${esc(nm)}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:'<span class="chip quiet">Sin caja</span>'}</div></button>`;
-      }).join('');
+      list.innerHTML=out.slice(0,lim).map(c=>fila(c,true)).join('');
     };
+    seg.addEventListener('click',e=>{const b=e.target.closest('[data-t]');if(!b)return;tab=b.dataset.t;q.value='';buscar();});
     q.addEventListener('input',buscar);buscar();
     $('#as-back',el).addEventListener('click',()=>openRed(napId));
     list.addEventListener('click',async e=>{
@@ -2548,9 +2578,9 @@ function openAsignarPuerto(napId,port,q0){
       const c=S.clientes.get(b.dataset.as);if(!c)return;
       const otro=napClients(napId).find(x=>x.id!==c.id&&parseInt(x.napPuerto,10)===port);
       if(otro)return toast('El puerto '+port+' acaba de ser ocupado por '+otro.nombre+'. Elegí otro.','bad');
-      const hoy=c.nap&&redName(c.nap);
+      const hoy=c.nap&&!(c.nap===napId&&sinPto.has(c.id))&&redName(c.nap);   /* el que figura en esta caja pero sin puerto no deja ningún lugar: no hay nada que confirmar */
       if(hoy&&!(c.nap===napId&&parseInt(c.napPuerto,10)===port)){
-        if(!await askConfirm(c.nombre+' figura hoy en '+hoy+(c.napPuerto?' · puerto '+c.napPuerto:'')+'. ¿Pasarlo al puerto '+port+' de '+p.nombre+'? El lugar que deja queda libre.','Pasarlo acá'))return openAsignarPuerto(napId,port,q.value);
+        if(!await askConfirm(c.nombre+' figura hoy en '+hoy+(c.napPuerto?' · puerto '+c.napPuerto:'')+'. ¿Pasarlo al puerto '+port+' de '+p.nombre+'? El lugar que deja queda libre.','Pasarlo acá'))return openAsignarPuerto(napId,port,q.value,tab);
       }
       try{
         await putItem('clientes',clientShard(c.id),c.id,{nap:napId,napPuerto:port,mod:Date.now()});
@@ -2558,7 +2588,7 @@ function openAsignarPuerto(napId,port,q0){
         toast(c.nombre+' · puerto '+port);openRed(napId);
       }catch(err){dbError(err);}
     });
-    q.focus();
+    if(q0)q.focus();
   }});
 }
 function openMoverNap(cid,volverA){
@@ -6219,7 +6249,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='bde8841a20';
+const BUILD='002af8daae';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
