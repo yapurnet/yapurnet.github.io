@@ -11,27 +11,16 @@ async function call(method, p, body, token, hdr) {
   let j = null; try { j = await r.json(); } catch (e) {}
   return { s: r.status, j };
 }
-async function openStream(token) {
-  const tk = (await call('POST', '/api/ticket', {}, token)).j.t;
-  const r = await fetch(BASE + '/api/stream?t=' + tk);
-  const events = [], rd = r.body.getReader(), dec = new TextDecoder();
-  let buf = '';
-  (async () => {
-    try {
-      for (;;) {
-        const { value, done } = await rd.read(); if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i;
-        while ((i = buf.indexOf('\n\n')) >= 0) {
-          const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-          const ev = /event: (\w+)/.exec(chunk), d = /data: (.*)/.exec(chunk);
-          if (ev && d) events.push({ ev: ev[1], data: JSON.parse(d[1]) });
-        }
-      }
-    } catch (e) {}
-    events.closed = true;
-  })();
-  return { events, status: r.status, close: () => rd.cancel().catch(() => {}) };
+/* conexión en vivo como la usa la app: WebSocket (el servidor se duerme mientras nadie hace nada). Devuelve los mensajes ya separados en {ev,data}. */
+async function openStream(token, ticket) {
+  const tk = ticket || (await call('POST', '/api/ticket', {}, token)).j.t;
+  const events = [];
+  const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/api/stream?t=' + tk);
+  let status = 0;
+  ws.addEventListener('message', m => { if (m.data === 'pong') { events.pong = (events.pong || 0) + 1; return; } try { const j = JSON.parse(m.data); events.push({ ev: j.e, data: j.d }); } catch (e) {} });
+  ws.addEventListener('close', () => { events.closed = true; });
+  await new Promise(res => { ws.addEventListener('open', () => { status = 200; res(); }); ws.addEventListener('error', () => res()); ws.addEventListener('close', () => res()); });
+  return { events, status, ws, close: () => { try { ws.close(); } catch (e) {} } };
 }
 const UA_APK = 'Mozilla/5.0 (Linux; Android 13; SM-A135M Build/TP1A.220624.014; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36 YapurApp/2.11';
 const UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';

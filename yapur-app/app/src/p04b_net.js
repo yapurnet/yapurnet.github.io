@@ -141,22 +141,48 @@ const NET=(function(){
     const wait=Math.min(20000,1500*Math.pow(1.6,retry++));
     retryT=setTimeout(()=>{retryT=null;connectStream();},wait);
   }
+  /* un mensaje en vivo del servidor (llega igual por WebSocket que por SSE) */
+  function onLive(name,m){
+    lastMsg=Date.now();
+    if(name==='hello'){retry=0;setOnline(true);if(started)fullSync().catch(()=>{});}
+    else if(name==='doc'){if(!m)return;if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);}
+    else if(name==='me'){try{me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}}
+    else if(name==='disp'||name==='contrato'){try{emit(name,m);}catch(e){}}
+    else if(name==='kick'){lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');}
+  }
+  /* WebSocket: el servidor se duerme mientras nadie hace nada (el plan gratis de Cloudflare limita el tiempo que está encendido).
+     Si el WebSocket no se puede abrir (una red que lo bloquea) se usa el SSE de antes. */
+  let wsFallos=0;
+  function connectWS(t){
+    let u;try{u=new URL(base+'/api/stream?t='+encodeURIComponent(t),location.href);u.protocol=u.protocol==='https:'?'wss:':'ws:';}catch(e){wsFallos=9;return false;}
+    let abrio=false;const w=new WebSocket(u.href);
+    es=w;lastMsg=Date.now();
+    w.onopen=()=>{abrio=true;};
+    w.onmessage=ev=>{lastMsg=Date.now();if(ev.data==='pong')return;let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(m&&m.e)onLive(m.e,m.d);};
+    w.onclose=()=>{if(es!==w)return;if(!abrio)wsFallos++;closeStream();setOnline(false);scheduleReconnect();};
+    w.onerror=()=>{};
+    /* el «ping» lo contesta Cloudflare sin despertar al servidor: sirve para mantener abierta la conexión y para notar si se cortó */
+    esTimer=setInterval(()=>{
+      if(es!==w)return;
+      if(Date.now()-lastMsg>75000){closeStream();setOnline(false);connectStream();return;}
+      try{if(w.readyState===1)w.send('ping');}catch(e){}
+    },25000);
+    return true;
+  }
   async function connectStream(){
     if(es||!token)return;
     let t;
     try{t=(await api('POST','/api/ticket',{},{timeout:10000})).t;}
     catch(e){setOnline(false);if(token)scheduleReconnect();return;}
     if(es||!token)return;
+    if(typeof WebSocket==='function'&&wsFallos<3&&connectWS(t))return;
     const s=new EventSource(base+'/api/stream?t='+encodeURIComponent(t));
     es=s;lastMsg=Date.now();
     const seen=()=>{lastMsg=Date.now();};
-    s.addEventListener('hello',()=>{seen();retry=0;setOnline(true);if(started)fullSync().catch(()=>{});});
+    s.addEventListener('hello',()=>onLive('hello'));
     s.addEventListener('ping',seen);
-    s.addEventListener('doc',ev=>{seen();let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(syncing)buffer.push(m);else applyDoc(m.coll,m.id,m.op,m.data,m.seq);});
-    s.addEventListener('me',ev=>{seen();try{const m=JSON.parse(ev.data);me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}});
-    s.addEventListener('disp',ev=>{seen();try{emit('disp',JSON.parse(ev.data));}catch(e){}});
-    s.addEventListener('contrato',ev=>{seen();try{emit('contrato',JSON.parse(ev.data));}catch(e){}});
-    s.addEventListener('kick',()=>{lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');});
+    for(const nm of ['doc','me','disp','contrato'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
+    s.addEventListener('kick',()=>onLive('kick'));
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);
   }

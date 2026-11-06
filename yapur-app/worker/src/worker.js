@@ -538,8 +538,10 @@ export class YapurDB extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.env = env;
-    this.streams = new Set();
+    this.streams = new Set();   /* solo las pantallas viejas por SSE; las nuevas son WebSocket que dejan dormir al servidor (conexiones()) */
     this.tickets = new Map();
+    /* el «ping» de cada pantalla lo contesta Cloudflare solo, sin despertar al servidor: así no se gasta tiempo encendido mientras nadie hace nada */
+    try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong')); } catch (e) { /* un entorno sin WebSocket: queda el SSE */ }
     this.fails = new Map();
     this.timer = null;
     this.snapState = null;
@@ -644,7 +646,7 @@ export class YapurDB extends DurableObject {
   }
   avisarAdmins() {
     const n = this.q1("SELECT COUNT(*) n FROM devices WHERE estado='pend'").n;
-    for (const s of [...this.streams]) { const u = this.USERS.get(s.uid); if (u && u.role === 'admin') this.sse(s, 'disp', { pend: n }); }
+    for (const s of this.conexiones()) { const u = this.USERS.get(s.uid); if (u && u.role === 'admin') this.sse(s, 'disp', { pend: n }); }
   }
   async authOf(request) {
     const m = /^Bearer\s+(\S+)$/.exec(request.headers.get('authorization') || '');
@@ -1105,15 +1107,26 @@ export class YapurDB extends DurableObject {
   }
 
   /* ----- tiempo real (SSE) ----- */
+  /* todas las pantallas conectadas: WebSocket (el servidor puede dormirse y despierta cuando hay algo que avisar) + las versiones viejas por SSE */
+  conexiones() {
+    const out = [];
+    try { for (const ws of this.ctx.getWebSockets()) { const a = ws.deserializeAttachment(); if (a && a.uid) out.push({ ws, uid: a.uid, dev: a.dev || null }); } } catch (e) { /* sin WebSocket */ }
+    for (const s of this.streams) out.push(s);
+    return out;
+  }
   sse(s, event, data) {
+    if (s.ws) { try { s.ws.send(JSON.stringify({ e: event, d: data })); } catch (e) { this.endStream(s); } return; }
     try {
       if (s.c.desiredSize !== null && s.c.desiredSize < -300) throw new Error('lento');
       s.c.enqueue(enc.encode('event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n'));
     } catch (e) { this.endStream(s); }
   }
-  endStream(s) { this.streams.delete(s); try { s.c.close(); } catch (e) { /* ya estaba cerrado */ } }
+  endStream(s) { if (s.ws) { try { s.ws.close(1000, 'fin'); } catch (e) { /* ya estaba cerrado */ } return; } this.streams.delete(s); try { s.c.close(); } catch (e) { /* ya estaba cerrado */ } }
+  webSocketMessage() { /* nada: el «ping» se contesta solo y el servidor no recibe órdenes por acá */ }
+  webSocketClose(ws, code) { try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'fin'); } catch (e) { /* ya estaba cerrado */ } }
+  webSocketError(ws) { try { ws.close(1011, 'error'); } catch (e) { /* ya estaba cerrado */ } }
   broadcastDoc(coll, id, op, data, seq) {
-    for (const s of [...this.streams]) {
+    for (const s of this.conexiones()) {
       const u = this.USERS.get(s.uid);
       if (!u || !u.activo) continue;
       const v = this.viewData(u, effPerms(u), coll, id, data);
@@ -1128,12 +1141,12 @@ export class YapurDB extends DurableObject {
   }
   pushMe(uid) {
     const u = this.USERS.get(uid);
-    for (const s of [...this.streams]) if (s.uid === uid) {
+    for (const s of this.conexiones()) if (s.uid === uid) {
       if (!u || !u.activo) { this.sse(s, 'kick', {}); this.endStream(s); } else this.sse(s, 'me', meOf(u));
     }
   }
-  kickDevice(dev) { for (const s of [...this.streams]) if (s.dev === dev) { this.sse(s, 'kick', {}); this.endStream(s); } }
-  kickUser(uid) { for (const s of [...this.streams]) if (s.uid === uid) { this.sse(s, 'kick', {}); this.endStream(s); } }
+  kickDevice(dev) { for (const s of this.conexiones()) if (s.dev === dev) { this.sse(s, 'kick', {}); this.endStream(s); } }
+  kickUser(uid) { for (const s of this.conexiones()) if (s.uid === uid) { this.sse(s, 'kick', {}); this.endStream(s); } }
   ensureTimer() {
     if (this.timer) return;
     this.timer = setInterval(() => {
@@ -1144,6 +1157,14 @@ export class YapurDB extends DurableObject {
       for (const s of [...this.streams]) this.sse(s, 'ping', 1);
       if (!this.streams.size) { clearInterval(this.timer); this.timer = null; }
     }, 20e3);
+  }
+  /* conexión en vivo por WebSocket «con hibernación»: mientras nadie hace nada el servidor se duerme y no gasta tiempo encendido (el plan gratis tiene un tope diario) */
+  openSocket(u, dev) {
+    const par = new WebSocketPair(), cli = par[0], srv = par[1];
+    this.ctx.acceptWebSocket(srv);
+    srv.serializeAttachment({ uid: u.id, dev: dev || null });
+    srv.send(JSON.stringify({ e: 'hello', d: { seq: this.SEQ } }));
+    return new Response(null, { status: 101, webSocket: cli });
   }
   openStream(u, dev) {
     const self = this;
@@ -1282,7 +1303,7 @@ export class YapurDB extends DurableObject {
       this.SEQ++;
     });
     this.loadUsers();
-    for (const s of [...this.streams]) { this.sse(s, 'kick', {}); this.endStream(s); }
+    for (const s of this.conexiones()) { this.sse(s, 'kick', {}); this.endStream(s); }
     return { docs: rows.length, usuarios: report };
   }
 
@@ -1355,7 +1376,7 @@ export class YapurDB extends DurableObject {
   broadcastContrato(id) {
     const r = this.q1('SELECT id,num,cid,estado,motivo,prev,prueba,ts,pornombre,eq,titular FROM contratos WHERE id=?', id);
     if (!r) return;
-    for (const s of [...this.streams]) {
+    for (const s of this.conexiones()) {
       const u = this.USERS.get(s.uid);
       if (!u || !u.activo) continue;
       const p = effPerms(u);
@@ -1975,8 +1996,12 @@ export class YapurDB extends DurableObject {
 
     if (p === '/api/ticket' && m === 'POST') {
       const a = await this.needAuth(request), t = b64u(rnd(24));
-      this.tickets.set(t, { uid: a.user.id, dev: a.dev, exp: Date.now() + 30e3 });
-      this.ensureTimer();
+      const ahora = Date.now();
+      for (const [k, v] of this.tickets) if (v.exp < ahora) this.tickets.delete(k);
+      for (const [k, f] of this.fails) if (f.until < ahora - 36e5) this.fails.delete(k);   /* la limpieza que antes hacía el reloj de 20 s, que mantenía despierto al servidor */
+      this.sql.exec('DELETE FROM fails WHERE t<?', ahora - 864e5);
+      this.tickets.set(t, { uid: a.user.id, dev: a.dev, exp: ahora + 30e3 });
+      if (this.streams.size) this.ensureTimer();
       return send(200, { t });
     }
     if (p === '/api/stream' && m === 'GET') {
@@ -1986,6 +2011,7 @@ export class YapurDB extends DurableObject {
       const u = this.USERS.get(tk.uid);
       if (!u || !u.activo) return send(401, { error: 'usuario', code: 'unauthenticated' });
       if (tk.dev) { const dv = this.q1('SELECT estado FROM devices WHERE id=?', tk.dev); if (!dv || dv.estado !== 'ok') return send(401, { error: 'dispositivo', code: 'unauthenticated' }); }
+      if ((request.headers.get('Upgrade') || '').toLowerCase() === 'websocket') return this.openSocket(u, tk.dev);
       return this.openStream(u, tk.dev);
     }
     if (p === '/api/comprobante' && m === 'POST') {
