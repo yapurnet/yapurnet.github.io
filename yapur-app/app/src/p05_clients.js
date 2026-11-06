@@ -193,6 +193,7 @@ function openClient(id){
       <div class="actions start">${can('editarClientes')||can('ubicacion')?`<button class="btn small" type="button" data-act="editar">${can('editarClientes')?'Editar':puedeCompletar(c)?'Cargar datos del abonado':'Editar datos técnicos'}</button>`:''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(c.nombre)}${c.codigo?` <span class="muted mono small">#${esc(c.codigo)}</span>`:''}</h2>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${b.sinCargo&&(can('cobrar')||can('caja')||can('precios'))?`<div class="notice info"><b>Servicio sin cargo${c.sinCargoMotivo&&isAdmin()?': '+esc(c.sinCargoMotivo):''}.</b> No genera deuda y nunca se corta por falta de pago.</div>`:''}
     ${bajaBlock(c)}
     ${deudaAntBlock(c)}
     ${cuentaBlock(c)}
@@ -501,12 +502,17 @@ function openClientForm(id){
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
       <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
+      ${isAdmin()?`<label class="per"><input id="cf-sc" type="checkbox"${c.sinCargo?' checked':''}><span class="grow"><b>Servicio sin cargo</b><br><span class="small muted">No paga ni genera deuda, figura «Al día» y nunca aparece para cortar. Para la casa del dueño, de la familia, etc.</span></span></label>
+      <div id="cf-sc-box"${c.sinCargo?'':' hidden'}>${F('Motivo (opcional)','cf-scm',`<input id="cf-scm" autocomplete="off" maxlength="80" placeholder="Casa de Mauro" value="${esc(c.sinCargoMotivo||'')}">`,'Solo lo ves vos.')}
+        ${old&&!old.sinCargo&&billing(old).deuda>0?`<div class="notice bad" id="cf-sc-warn" hidden>Hoy debe ${esc(fmtMoney(billing(old).deuda))}. Al marcarlo sin cargo, esa deuda deja de contarse.</div>`:''}
+        <div class="hint">Si más adelante le sacás la marca, empieza a cobrarse desde ese mes: los meses anteriores no se le cobran.</div></div>`:''}
       ${F('Notas','cf-notas',`<textarea id="cf-notas">${esc(c.notas||'')}</textarea>`)}
       ${old?'<div class="hint">¿Tiene otras conexiones a su nombre (sucursales, otro local)? Se juntan desde su ficha, con el botón «Cuenta unificada»: se cobran juntas y sale un solo recibo.</div>':''}</fieldset>`:''}
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
+    const scChk=$('#cf-sc',el);if(scChk){const sync=()=>{$('#cf-sc-box',el).hidden=!scChk.checked;const w=$('#cf-sc-warn',el);if(w)w.hidden=!scChk.checked;};scChk.addEventListener('change',sync);sync();}
     const docIn=$('#cf-dni',el),docH=$('#cf-dni-h',el);
     if(docIn&&docH){const dm0=docH.textContent,chk=()=>{const d=docDigits(docIn.value);docH.className='';docH.textContent=dm0;
       if(d.length===11){docH.className=cuitOk(docIn.value)?'ok':'bad';docH.textContent=cuitOk(docIn.value)?'CUIT o CUIL válido. Se guarda como '+fmtDoc(docIn.value)+'.':'El dígito verificador no coincide: revisá que no falte o sobre algún número.';}
@@ -571,6 +577,11 @@ function openClientForm(id){
           patch.deudaAnt=n>0||paid>0?{m:paid+n,det,f:(old&&old.deudaAnt&&old.deudaAnt.f)||todayStr()}:null;
         }
       }
+      if(full&&$('#cf-sc',el)){   /* «sin cargo»: al sacarle la marca se cobra desde este mes, no desde la alta (no se le inventan meses viejos) */
+        const sc=$('#cf-sc',el).checked;
+        patch.sinCargo=sc?true:null;patch.sinCargoMotivo=sc?(v('cf-scm')||''):null;
+        if(!sc&&old&&old.sinCargo&&patch.desde===(old.desde||todayStr().slice(0,7))&&patch.desde<todayStr().slice(0,7))patch.desde=todayStr().slice(0,7);
+      }
       if(patch.estado&&patch.estado!=='suspendido')patch.corteMora=null;
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
       if(old&&full&&billChanged()){
@@ -618,6 +629,7 @@ VIEWS.clientes={
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
     if(can('comodato')&&S.contratosOk)fs.push(['sincontrato','Sin contrato firmado']);
     if(can('contratosGestion')&&S.contratosOk)fs.push(['conrevision','Contrato en revisión']);
+    if((can('cobrar')||can('caja')||can('precios'))&&[...S.clientes.values()].some(x=>x.sinCargo&&x.estado!=='baja'))fs.push(['sincargo','Sin cargo']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     if(veServicios())serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
@@ -627,6 +639,7 @@ VIEWS.clientes={
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
       if(CL.estado==='sincontrato')return c.estado!=='baja'&&!ctVig(c.id)&&!ctRev(c.id);
       if(CL.estado==='conrevision')return !!ctRev(c.id);
+      if(CL.estado==='sincargo')return !!c.sinCargo&&c.estado!=='baja';
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
       if(CL.estado==='dant')return deudaAntRest(c)>0;

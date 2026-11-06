@@ -34,6 +34,24 @@ t('vencidos',b.vencidos===(curVenc?2:1)&&b.deuda===(curVenc?35000:15000),b);
 t('mes actual vence dia 10',b.periods[2].venc===curVenc,b.periods[2]);
 let bn=billing(c,true);t('con proximo mes suma un periodo',bn.periods.length===4&&bn.vencidos===b.vencidos,bn.periods.length);
 t('baja no factura',billing({id:'c2',estado:'baja',planId:'p1'}).periods.length===0);
+// «sin cargo» (la casa del dueño, de la familia): sigue activo, pero no se factura ni se corta
+{
+  const e={id:'sc1',estado:'activo',planId:'p1',desde:m1,dia:10,sinCargo:true,sinCargoMotivo:'Casa de Mauro'},n={id:'sc2',estado:'activo',planId:'p1',desde:m1,dia:10};
+  const perms0=S.perms;S.perms=Object.assign({},S.perms,{cobrar:true,caja:true,clientesTodos:true,editarClientes:true});
+  const be=billing(e);
+  t('sin cargo: no hay meses, ni deuda, ni vencidos (aunque no pagó nada)',be.periods.length===0&&be.vencidos===0&&be.deuda===0&&be.aplica===false&&be.sinCargo===true,be);
+  t('sin cargo: el mismo cliente sin la marca sí debe',billing(n).deuda>0&&billing(n).sinCargo===false,billing(n));
+  t('sin cargo: no figura para cortar y el control de cortes lo da por «ok»',cutState(e).k==='ok'&&cutState(n).k==='cortar',[cutState(e).k,cutState(n).k]);
+  t('sin cargo: no tiene deuda (no se cobra reconexión)',conDeuda(e)===false&&conDeuda(n)===true);
+  t('sin cargo: figura «Sin cargo · Al día»',billChip0(e).includes('Sin cargo · Al día')&&!billChip0(e).includes('Debe'),billChip0(e));
+  t('sin cargo: una baja con la marca no es «sin cargo»',billing({id:'sc3',estado:'baja',planId:'p1',sinCargo:true}).sinCargo===false);
+  t('sin cargo: suspendido por mora tampoco se corta',billing({id:'sc4',estado:'suspendido',planId:'p1',desde:m1,sinCargo:true}).sinCargo===true&&cutState({id:'sc4',estado:'suspendido',planId:'p1',desde:m1,sinCargo:true}).k==='ok');
+  S.clientes.set('sc1',e);S.clientes.set('sc2',n);S.billCache.clear();S.cutCache.clear();
+  const cd=cortesData();
+  t('sin cargo: «A cortar» trae al que debe y no al que no se factura',cd.cortar.some(x=>x.c.id==='sc2')&&!cd.cortar.some(x=>x.c.id==='sc1'),cd.cortar.map(x=>x.c.id));
+  t('sin cargo: no es moroso en el cobro (deudaDe en cero)',deudaDe(e).total===0&&deudaDe(n).total>0,[deudaDe(e).total,deudaDe(n).total]);
+  S.clientes.delete('sc1');S.clientes.delete('sc2');S.billCache.clear();S.cutCache.clear();S.perms=perms0;
+}
 // reconexión: solo se cobra si el cliente tiene deuda
 t('conDeuda: con un mes vencido sin pagar',conDeuda(c)===true);
 t('conDeuda: al día (ni siquiera empezó a pagar)',conDeuda({id:'c5',estado:'activo',planId:'p1',desde:addMonths(cur,1)})===false);

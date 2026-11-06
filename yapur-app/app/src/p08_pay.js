@@ -307,6 +307,7 @@ function openCobro(clientId,con1,pre){
   const html=`<div><div style="font-weight:700;font-size:17px;overflow-wrap:anywhere">${esc(head.nombre)}${head.codigo?` <span class="muted mono small">#${esc(head.codigo)}</span>`:''}${gm?' <span class="chip info">Cuenta unificada</span>':''}</div>
     <div class="small muted">${gm?`${grp.length} servicios${mens?` · ${fmtMoney(priceTot)} por mes · Ciclo ${cicloOf(c)}`:''}`:esc(servicioTxt(c))+(mens?` · ${fmtMoney(b.price)} por mes · Ciclo ${cicloOf(c)} ${billChip(c)}`:(estLabel(c)?` · ${esc(estLabel(c))}`:''))}</div></div>
     ${cl?`<div class="notice ${cl.cls}">${esc(cl.txt)}</div>`:''}
+    ${!campo&&c.sinCargo?`<div class="notice info"><b>Servicio sin cargo${c.sinCargoMotivo&&isAdmin()?': '+esc(c.sinCargoMotivo):''}.</b> No se le cobra mensualidad.</div>`:''}
     ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar todo o la deuda (escribir el monto, varios medios)</button></div>':''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${porInstalar(c)?'Es una instalación nueva: se cobra «Instalación». ':'«Instalación» es para un abonado nuevo; si un cliente ya instalado se mudó, cobrá «Reinstalación (mudanza)». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}

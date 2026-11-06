@@ -385,6 +385,23 @@ En **Ajustes → Importar clientes (CSV)** tildá **Actualizar el plan, los serv
 - Una fila sin plan ni servicios no toca a nadie. Lo que tenía cada cliente queda guardado hasta el mes anterior, así los meses viejos y la deuda anterior conservan su precio.
 - Antes de confirmar ves cuántos cambian, por plan.
 
+## Servicio sin cargo: tu casa, la de tus padres (no deben nada ni se cortan)
+
+Hay abonados que usan el servicio pero no pagan: la casa del dueño, la de la familia. Se marcan como **Servicio sin cargo** y el sistema los trata así:
+
+- **No generan deuda**: no tienen meses vencidos ni importe a pagar, aunque nunca hayan pagado nada. Figuran siempre como **«Sin cargo · Al día»**.
+- **No aparecen entre los morosos**, ni en «Con deuda», ni en el Resumen (deuda vencida); como no están en esas listas, tampoco tienen el botón de avisar la deuda por WhatsApp.
+- **No aparecen en «A cortar»**, ni en «Marcar suspendidos» ni en el script de MikroTik de la lista de cortes. Cuando se automatice el corte de los morosos, tiene que saltearse a todo cliente con la marca `sinCargo` (la pantalla «A cortar» ya lo hace).
+- Siguen contando como **clientes activos** (son clientes reales, con router y todo), pero **no suman a la facturación mensual** del Resumen. Se los encuentra con el filtro **«Sin cargo»** de la lista de clientes.
+- Al abrir «Cobrar» de uno de ellos, avisa que no se le cobra mensualidad.
+
+**Quién lo hace: solo el administrador.** En *Editar cliente → Facturación* aparece el casillero **Servicio sin cargo** (y un motivo opcional, por ejemplo «Casa de Mauro», que solo ve el administrador). La oficina y los técnicos no ven el casillero y el servidor rechaza el cambio aunque lo intenten por otro camino; la oficina sí ve que el cliente es «sin cargo» (para no perseguirlo por una deuda), pero no el motivo, y el técnico no ve nada de esto. La oficina puede seguir editando la ficha del cliente sin perder la marca.
+
+Dos cuidados al usarlo:
+
+1. **Marcar a un cliente que hoy debe**: el formulario avisa cuánto debe y que esa deuda deja de contarse. Si en realidad corresponde cobrársela, cobrala antes de marcarlo.
+2. **Sacarle la marca**: se vuelve a cobrar **desde ese mes** (el campo «Cobrar desde» pasa al mes actual), así no aparecen de golpe meses viejos como deuda. Si querés cobrar desde otro mes, cambialo en el mismo formulario.
+
 ## Empezar a cobrar de cero y «Deuda anterior»
 
 **Ajustes → Clientes y cobranzas → Empezar a cobrar de cero.** Elegís el mes desde el que se cobra (por defecto el siguiente) y la pantalla te cuenta cuántos clientes se mueven y cuánto suman las deudas. Al confirmar, todos los clientes activos y suspendidos pasan a «cobrar desde» ese mes: ninguno figura como moroso ni «A cortar» por meses anteriores.

@@ -271,7 +271,10 @@ function billing(c,withNext){
   const key=c.id+(withNext?'+':'');
   const hit=S.billCache.get(key);if(hit)return hit;
   const today=todayStr(),cur=today.slice(0,7);
-  const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:c.estado==='activo'||c.estado==='suspendido'};
+  /* «Sin cargo» (la casa del dueño, de sus padres…): sigue siendo cliente activo, pero no se le factura: sin meses, sin deuda, sin cortes y fuera de las listas de morosos.
+     Al sacarle la marca el servidor no inventa meses viejos: la ficha pasa «Cobrar desde» al mes en curso. */
+  const vivo=c.estado==='activo'||c.estado==='suspendido';
+  const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:vivo&&!c.sinCargo,sinCargo:vivo&&!!c.sinCargo};
   if(out.aplica){
     let from=c.desde||(c.alta?c.alta.slice(0,7):cur);
     const floor=addMonths(cur,-35);if(from<floor)from=floor;
@@ -331,7 +334,9 @@ function cutLine(c){
 const billChip=c=>{const d=deudaAntChip(c),b=billChip0(c);return (d?b.replace('>Al día<','>Mes al día<'):b)+d;};
 function billChip0(c){
   if(!(can('cobrar')||can('caja')))return '';
-  const s=cutState(c),b=s.b;if(!b.aplica)return '';
+  const s=cutState(c),b=s.b;
+  if(b.sinCargo)return '<span class="chip ok">Sin cargo · Al día</span>';
+  if(!b.aplica)return '';
   if(b.price<=0)return '<span class="chip warn">Sin precio</span>';
   if(s.k==='cortar')return `<span class="chip bad">A cortar · ${fmtMoney(b.deuda)}</span>`;
   if(s.k==='promesa')return `<span class="chip warn">Promesa hasta ${dm(s.hasta)}</span>`;

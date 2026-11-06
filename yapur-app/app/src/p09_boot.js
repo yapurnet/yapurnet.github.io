@@ -6,7 +6,7 @@ VIEWS.resumen={
     const today=todayStr(),cur=today.slice(0,7);
     let act=0,susp=0,ingreso=0,deuda=0,morosos=0,dant=0,dantN=0;const planCount=new Map(),svCount=new Map(),debtors=[];
     for(const c of S.clientes.values()){
-      if(c.estado==='activo'){act++;ingreso+=priceOf(c);if(c.planId)planCount.set(c.planId,(planCount.get(c.planId)||0)+1);extrasOf(c).forEach(s=>svCount.set(s.id,(svCount.get(s.id)||0)+1));}
+      if(c.estado==='activo'){act++;if(!c.sinCargo)ingreso+=priceOf(c);if(c.planId)planCount.set(c.planId,(planCount.get(c.planId)||0)+1);extrasOf(c).forEach(s=>svCount.set(s.id,(svCount.get(s.id)||0)+1));}
       else if(c.estado==='suspendido')susp++;
       const b=billing(c);if(b.vencidos>0){morosos++;deuda+=b.deuda;debtors.push({c,b});}
       const dr=deudaAntRest(c);if(dr>0){dant+=dr;dantN++;}

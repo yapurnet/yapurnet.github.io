@@ -189,6 +189,8 @@ function guard(u, p, coll, existing, patch, ctx) {
       if (!isPlain(nw)) return 'Formato inválido.';
       const malComodato = guardComodato(p, nw, prev);
       if (malComodato) return malComodato;
+      /* «Sin cargo» (no genera deuda ni se corta) lo marca solo el administrador: ni la oficina ni los técnicos, ni al dar de alta un cliente */
+      if (('sinCargo' in nw && !same(nw.sinCargo || null, prev && prev.sinCargo || null)) || ('sinCargoMotivo' in nw && !same(nw.sinCargoMotivo || null, prev && prev.sinCargoMotivo || null))) return 'Solo el administrador puede marcar un servicio sin cargo.';
       if (!prev) { if (!p.editarClientes) return 'Tu usuario no puede dar de alta clientes.'; continue; }
       if (p.editarClientes) continue;
       for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
@@ -820,6 +822,7 @@ export class YapurDB extends DurableObject {
       if (!p.comodato) drop.push('comodato');
       if (!p.precios && !p.cobrar && !p.caja) drop.push('deudaAnt');
       if (!p.dni) drop.push('dni');
+      drop.push('sinCargoMotivo');   /* el motivo («Casa de…») es del administrador: ni la oficina lo ve */
       /* los servicios adicionales (Multimedia, Multimedia Net…) son de facturación: el técnico no tiene que enterarse de cuáles tiene cada cliente */
       if (!(p.cobrar || p.caja || p.editarClientes || p.precios)) drop.push('extras');
       if (!p.telefono) drop.push('tel', 'tel2');
@@ -839,7 +842,7 @@ export class YapurDB extends DurableObject {
       if (!isPlain(it)) { items[id] = it; continue; }
       const c = Object.assign({}, it);
       if (c.estado === 'activo' || c.estado === 'suspendido') delete c.estado;
-      delete c.corteMora; delete c.reconectado; delete c.promesas;
+      delete c.corteMora; delete c.reconectado; delete c.promesas; delete c.sinCargo; delete c.sinCargoMotivo;
       items[id] = c;
     }
     return Object.assign({}, data, { items });
