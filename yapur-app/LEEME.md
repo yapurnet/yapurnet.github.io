@@ -76,6 +76,17 @@ Además de la caja NAP y la botella de empalme, la pestaña **Red** tiene un ter
 - **Buscarlos y exportarlos:** en la lista de Red hay un filtro **Splitters** (además de Cajas NAP y Botellas), que muestra la relación y cuántas salidas están en uso. El CSV de Red suma las columnas *relación splitter* y *salidas usadas*.
 - **Permisos:** usa el mismo permiso **«Cargar y editar la red»** de las cajas y botellas; no hay uno nuevo. Quien no lo tiene ve la ficha del splitter (para seguir el camino de la fibra) pero no puede tocar nada. No hace falta un APK nuevo.
 
+## Red: OLT (el origen de la fibra)
+
+El cuarto punto de la pestaña Red es la **OLT**: el equipo de donde sale la fibra, con la cantidad de puertos GPON que tenga (por ejemplo 8), para dejar marcado el origen de toda la red.
+
+- **Cargarla:** *Nuevo* → OLT → nombre (por ejemplo OLT-01) → **cantidad de puertos**: a diferencia del splitter (que tiene una relación fija: 1x2, 1x4…), la OLT se carga con el número de puertos que tenga el equipo, de 1 a 288. No tiene **«Sale de»**: es la raíz de la red, no sale de ningún otro punto.
+- **Los puertos:** igual que las salidas de un splitter, cada puerto tiene su **color** (el mismo código de 12 colores) y su estado: **libre**, **conectado**, **reservado** o **dañado**. Tocando un puerto se anota **a qué botella, splitter o caja va** y una nota; tampoco lleva PON, porque la OLT es la que entrega la señal, no la recibe.
+- **El plano completo:** de un puerto de la OLT sale, por lo general, una botella de empalme, que por su pelo lleva a un splitter y de ahí hacia las cajas, igual que ya se explica arriba. Y, como pidió Mauro: de la **botella principal** puede salir una **botella secundaria**, empalmada en la **segunda salida del primer splitter 1x2**, con su propio **splitter 1x4** para terminar de repartir lo que falta — «Sale de» y «Llega por» siguen el camino completo sin importar cuántas botellas y splitters se encadenen.
+- **Para revisar:** no se puede bajar la cantidad de puertos si alguno de los que quedarían afuera ya tiene datos cargados; primero hay que dejarlo libre. Tampoco se puede borrar una OLT de la que sale otro punto de la red: hay que desconectarlo antes.
+- **Buscarla y exportarla:** en la lista de Red hay un filtro **OLT** (junto a Cajas NAP, Botellas y Splitters), que muestra la cantidad de puertos y cuántos están en uso. El CSV de Red suma las columnas correspondientes.
+- **Permisos:** usa el mismo permiso **«Cargar y editar la red»**; no hay uno nuevo. Quien no lo tiene ve la ficha de la OLT pero no puede tocar nada. No hace falta un APK nuevo.
+
 ## Instalaciones por día, semana y mes
 
 Pestaña **Instalaciones** (la ven el administrador y la oficina; el técnico no, porque no ve las órdenes de todos). Arriba se elige **Día**, **Semana** (de lunes a domingo) o **Mes**; con `‹` y `›` se va al período anterior o siguiente, «Volver a hoy» regresa, y el gráfico de barras (14 días, 8 semanas o 12 meses) se toca para saltar a cualquier período. Abajo muestra:
