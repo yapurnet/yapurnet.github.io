@@ -1,5 +1,6 @@
 node_modules/
 .wrangler/
 tests/shots/
+tests/package-lock.json
 *.keystore
 *.apk
