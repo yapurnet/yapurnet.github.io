@@ -358,42 +358,91 @@ function guardComodato(p, nw, prev) {
 }
 const CONTRATO_ESTADOS = ['vigente', 'revision', 'archivado', 'rechazado', 'borrado'];
 const CONTRATO_MOTIVOS = { alta: 'Alta', titularidad: 'Cambio de titularidad', equipos: 'Cambio de equipos' };
-const CONTRATO_VARS = ['empresa', 'empresa_cuit', 'empresa_domicilio', 'representante', 'lugar', 'fecha', 'numero', 'titular', 'dni', 'domicilio', 'telefono', 'cliente_n', 'equipos'];
+const CONTRATO_VARS = ['empresa', 'empresa_cuit', 'empresa_domicilio', 'representante', 'lugar', 'fecha', 'numero', 'titular', 'dni', 'domicilio', 'telefono', 'cliente_n', 'tecnologia', 'equipos'];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const fechaLarga = t => { const [y, m, d] = ymd(t).split('-').map(Number); return d + ' de ' + MESES[m - 1] + ' de ' + y; };
 const fmtDocAR = s => { const d = String(s || '').replace(/\D/g, ''); if (d.length === 11) return d.slice(0, 2) + '-' + d.slice(2, 10) + '-' + d.slice(10); return d.length === 7 || d.length === 8 ? d.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : d; };
 const horaAR = t => { const d = new Date(t - 3 * 3600e3).toISOString(); return d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) + ' ' + d.slice(11, 16); };
-/* Texto provisorio: sirve para probar el circuito. Mientras diga «BORRADOR» o tenga «[COMPLETAR…]» no se puede marcar como definitivo ni lo pueden firmar los clientes. */
-const CONTRATO_TXT_DEF = `BORRADOR PARA REVISAR: este es un texto provisorio. Reemplazalo por el contrato definitivo y borrá esta línea.
+/* Texto de arranque: sale de los contratos de fibra y de antena de YAPUR.NET, unidos en uno. Mientras diga «BORRADOR» o tenga «[COMPLETAR…]» no se puede marcar como definitivo ni lo pueden firmar los clientes:
+   el administrador lo lee, lo ajusta y borra la primera línea. */
+const CONTRATO_TXT_DEF = `BORRADOR PARA REVISAR: este texto reemplaza al provisorio y sale de tus contratos de fibra y de antena, unidos en uno solo. Leelo completo, ajustá lo que quieras y borrá esta línea antes de marcarlo como definitivo.
 
-CONTRATO DE COMODATO DE EQUIPOS N° {{numero}}
+CONTRATO DE COMODATO Y PRESTACIÓN DE SERVICIO N° {{numero}}
 
-En {{lugar}}, a {{fecha}}, entre {{empresa}} (CUIT {{empresa_cuit}}), con domicilio en {{empresa_domicilio}}, representada por {{representante}}, en adelante "EL COMODANTE", y {{titular}}, DNI/CUIT {{dni}}, con domicilio en {{domicilio}}, teléfono {{telefono}}, cliente N° {{cliente_n}}, en adelante "EL COMODATARIO", se celebra el presente contrato de comodato, sujeto a las siguientes cláusulas:
+I. DEFINICIONES PREVIAS.
+1. Las presentes condiciones regulan expresamente las relaciones surgidas entre {{empresa}}, CUIT {{empresa_cuit}}, con domicilio en {{empresa_domicilio}}, representada por {{representante}}, en lo sucesivo YAPUR.NET, y el usuario del servicio de acceso a la red INTERNET a través de la modalidad tecnológica {{tecnologia}}, en adelante EL CLIENTE: {{titular}}, DNI/CUIT {{dni}}, con domicilio de instalación en {{domicilio}}, teléfono {{telefono}}, cliente N° {{cliente_n}}.
+2. La suscripción de este Contrato por parte del CLIENTE supone la aceptación expresa de todas las condiciones aquí previstas. Se firma en {{lugar}}, a {{fecha}}.
 
-PRIMERA - OBJETO. EL COMODANTE entrega en comodato (préstamo de uso gratuito) a EL COMODATARIO, que los recibe de conformidad, los siguientes equipos, de propiedad exclusiva de EL COMODANTE:
+II. CLIENTE.
+1. A los efectos del Contrato, CLIENTE es aquella persona física o jurídica que haya contratado a YAPUR.NET el Servicio de Internet.
+2. La condición de CLIENTE es personal e intransferible, y no puede cederse a terceras personas sin el expreso consentimiento de YAPUR.NET. Si cambia el titular del servicio, el nuevo titular firma un contrato nuevo; el anterior queda archivado cuando YAPUR.NET aprueba el cambio.
+
+III. VIGENCIA Y BAJA.
+1. El SERVICIO será prestado por tiempo indeterminado a partir de la aceptación de las presentes condiciones al momento de la suscripción.
+2. Cualquiera de las partes podrá dejar sin efecto y rescindir este acuerdo sin invocación de causa, preavisando esa circunstancia a la otra parte con una anticipación mínima de un mes calendario; la rescisión en estas condiciones no generará cargos indemnizatorios de ninguna especie. Lo mismo vale cuando el CLIENTE pide la rescisión expresamente por rechazar alguno de los cambios que YAPUR.NET le comunique en el precio del SERVICIO o en la forma de pago. Solo podrá solicitar la rescisión el titular del SERVICIO, haciéndose PRESENTE (considerado el único medio válido).
+3. Si el CLIENTE hace uso del derecho del punto 2, deberá comunicar su voluntad a YAPUR.NET, atendiendo las formalidades de estos Términos y Condiciones, dentro de los primeros 10 días del mes en que pide que se haga efectiva la baja del SERVICIO. La solicitud recibida a partir del día 11 de cada mes será procesada y concedida, en caso de corresponder, en el período mensual siguiente.
+4. En caso de mudanza de domicilio del CLIENTE, YAPUR.NET continuará prestando el SERVICIO en forma ininterrumpida hasta que el CLIENTE comunique esa circunstancia. El CLIENTE podrá consultar la posibilidad de trasladar el SERVICIO a su nuevo domicilio (punto 6 de la cláusula V). La mudanza no es causal de rescisión: la baja por mudanza se trata como rescisión sin causa (punto 2).
+
+IV. PRECIO Y CONDICIONES DE PAGO.
+1. YAPUR.NET facturará al CLIENTE el servicio de conectividad a Internet propiamente dicho.
+2. El CLIENTE se obliga al pago del abono mensual, o del proporcional que corresponda a un período menor, según los precios vigentes que declara conocer y aceptar, con independencia de la efectiva utilización del Servicio. Dichos importes serán incrementados con el valor de los impuestos correspondientes. La facturación será por mes adelantado y el vencimiento será el consignado en la factura o el recibo. Los pagos deberán efectuarse donde YAPUR.NET se lo notifique.
+3. La mora en los pagos será automática y devengará un interés equivalente a una vez y media la tasa de interés que perciba el Banco de la Nación Argentina, hasta la fecha de su efectivo pago, y/o gastos administrativos según corresponda, previa intimación telefónica, por mensaje, correo electrónico o cualquier otro medio que YAPUR.NET considere conveniente.
+4. La falta de pago en término facultará a YAPUR.NET a:
+4.1) Suspender el servicio hasta su efectivo pago.
+4.2) Dejar sin efecto las bonificaciones por promociones a las que el CLIENTE se encuentre adherido; a partir del incumplimiento el CLIENTE abonará por el servicio el precio del abono vigente.
+5. YAPUR.NET se reserva el derecho de rescindir el Contrato si los pagos se retrasan más de treinta (30) días corridos desde la fecha de vencimiento, sin necesidad de comunicación previa.
+6. La suspensión o la baja del SERVICIO no libera al CLIENTE de pagar los abonos adeudados hasta la fecha de la baja ni los demás cargos pendientes.
+
+V. DERECHOS Y OBLIGACIONES.
+1. EL CLIENTE tiene derecho a recibir la prestación del Servicio contratado en las condiciones aquí acordadas.
+2. EL CLIENTE se obliga a efectuar los pagos convenidos según los precios vigentes, en los plazos acordados.
+3. EL CLIENTE se obliga al cuidado y mantenimiento de los equipos entregados por YAPUR.NET y es totalmente responsable de ellos. En situaciones especiales o extremas, como hurto, robo, rotura voluntaria o involuntaria, o desperfectos eléctricos o climáticos que estropeen el correcto funcionamiento de un equipo en comodato, los gastos para volver a ponerlo en marcha o reponerlo estarán a cargo del CLIENTE en un 100%, que abonará el valor de reposición según la cláusula VII.4. No se cobra el desgaste normal por el uso.
+4. Si el CLIENTE solicita servicio técnico y la causa no es atribuible a YAPUR.NET, se compromete a abonar el precio correspondiente al servicio, más los materiales necesarios.
+5. EL CLIENTE se obliga a permitir el ingreso y a facilitar el acceso al personal de YAPUR.NET en los términos de la cláusula VI.
+6. Si el CLIENTE tiene que cambiar de domicilio, la instalación y puesta en marcha del Servicio en el nuevo domicilio deberá hacerla el personal técnico de YAPUR.NET, que puede no realizar el cambio si las condiciones técnicas no lo permiten. A los fines de los cargos por instalación que puedan cobrarse al CLIENTE, el cambio de domicilio se entiende como baja del Servicio y alta de uno nuevo.
+
+VI. INGRESO AL DOMICILIO, INSTALACIÓN Y RETIRO DE LOS EQUIPOS.
+1. EL CLIENTE AUTORIZA y se obliga a permitir el ingreso a su domicilio y a los lugares donde están o se van a colocar los equipos (incluyendo techo, azotea, terraza, paredes exteriores, mástil y patio) al personal de YAPUR.NET o a quien ésta designe, siempre que se encuentre debidamente identificado, para:
+a) conectar e instalar el Servicio y los equipos, tendiendo el cableado y fijando antenas, ONU y accesorios, con las perforaciones y fijaciones mínimas necesarias;
+b) inspeccionar, mantener, reparar, reorientar, actualizar o reemplazar los equipos y el cableado;
+c) cambiar de lugar o de equipo la instalación cuando sea necesario para prestar el Servicio;
+d) desinstalar y retirar los equipos y el cableado de propiedad de YAPUR.NET cuando el Servicio termina por cualquier causa (baja pedida por el CLIENTE, rescisión, falta de pago, mudanza u otra), o cuando YAPUR.NET lo disponga por razones técnicas;
+e) verificar el estado y el uso correcto del Servicio y de los equipos.
+2. El ingreso se coordina con el CLIENTE, en días y horarios razonables, y se realiza con cuidado de las instalaciones. En caso de urgencia técnica, YAPUR.NET podrá pedir el ingreso con la mayor inmediatez posible.
+3. EL CLIENTE declara ser propietario del inmueble o contar con la autorización del propietario (y, si corresponde, del consorcio) para la instalación y para los ingresos previstos en esta cláusula, y se hace responsable ante cualquier reclamo de terceros por ese motivo.
+4. Si el CLIENTE impide o no permite el ingreso para el retiro de los equipos, deberá devolverlos por sus propios medios dentro del plazo de la cláusula VII.4; si no lo hace, se aplica el valor de reposición allí previsto.
+
+VII. COMODATO.
+1. YAPUR.NET entrega al CLIENTE, en calidad de comodato (préstamo de uso gratuito) por el período durante el cual se preste el Servicio, los siguientes equipos, de propiedad exclusiva de YAPUR.NET, definidos como ACCESORIOS para la conexión con la red Internet, que el CLIENTE recibe de conformidad:
 
 {{equipos}}
 
-SEGUNDA - DESTINO. Los equipos se usan únicamente para recibir el servicio de internet contratado, en el domicilio indicado. EL COMODATARIO no puede prestarlos, alquilarlos, cederlos, abrirlos, modificarlos ni trasladarlos sin autorización de EL COMODANTE.
+2. EL CLIENTE se compromete a utilizar los equipos exclusivamente para el Servicio brindado y en el domicilio de instalación. No puede prestarlos, alquilarlos, cederlos, abrirlos, repararlos, modificarlos, moverlos, reorientarlos ni trasladarlos, ni permitir que lo haga un tercero, sin autorización de YAPUR.NET. Para recibir el Servicio se usan únicamente los equipos entregados por YAPUR.NET o los que ésta autorice expresamente.
+3. El comodato dura mientras se mantenga el Servicio y termina cuando éste se da de baja por cualquier causa.
+4. Al terminar el comodato, EL CLIENTE devolverá los equipos en buen estado (salvo el desgaste normal por el uso) dentro de los diez (10) días corridos de terminado el Servicio, o permitirá que YAPUR.NET los retire en los términos de la cláusula VI. Si no los devuelve, o los devuelve dañados por causas que no sean el desgaste normal, abonará el valor de reposición de cada equipo vigente en YAPUR.NET a la fecha de la pérdida o del daño, y YAPUR.NET le entregará los equipos nuevos que correspondan en caso de que continúe el Servicio.
 
-TERCERA - PLAZO. El comodato dura mientras se mantenga el servicio. Termina cuando el servicio se da de baja por cualquier causa.
+VIII. RESPONSABILIDADES.
+1. YAPUR.NET depende de servicios de terceras partes para prestar adecuadamente los que le son propios. La responsabilidad por los daños o perjuicios causados por culpa de aquellas es de dichas partes, incluyendo errores de encaminamiento (ruteo), pérdida de información o datos, retrasos en las entregas o interrupciones del Servicio no planificadas, todo ello sin perjuicio de los derechos que la Ley N° 24.240 de Defensa del Consumidor reconoce al CLIENTE.
+2. YAPUR.NET no responde por las interrupciones o la menor calidad del Servicio causadas por el CLIENTE, por la manipulación de los equipos por personas ajenas a YAPUR.NET, ni por caso fortuito o fuerza mayor.
 
-CUARTA - CUIDADO. EL COMODATARIO conserva los equipos con la diligencia de un buen cuidador y responde por su pérdida, robo o daño, salvo el desgaste normal por el uso. En ese caso abonará el valor de reposición: [COMPLETAR valor o criterio].
+IX. CONDICIONES FINALES.
+1. Cada cláusula de este Contrato es válida en sí misma y no invalidará al resto. La cláusula inválida o incompleta podrá ser sustituida por otra equivalente y válida por acuerdo de las PARTES.
+2. Si el CLIENTE contrata servicios adicionales no especificados en este Contrato, se regirán por sus respectivas condiciones de contratación.
+3. EL CLIENTE acepta recibir en el teléfono indicado, por llamada, mensaje o WhatsApp, los recibos, avisos de vencimiento, suspensión o reconexión, de visitas técnicas y demás comunicaciones del Servicio.
+4. Para cualquier cuestión judicial, las partes se someten a los tribunales ordinarios competentes del domicilio del CLIENTE o del lugar de prestación del Servicio, conforme a la ley de Defensa del Consumidor.
 
-QUINTA - DEVOLUCIÓN. Al terminar el servicio, EL COMODATARIO devuelve los equipos en el plazo de [COMPLETAR días] y en buen estado. EL COMODANTE puede retirarlos del domicilio y EL COMODATARIO permitirá el ingreso del personal técnico.
-
-SEXTA - CAMBIO DE TITULARIDAD. Si cambia el titular del servicio, el nuevo titular firma un nuevo contrato. El anterior queda archivado cuando EL COMODANTE aprueba el cambio.
-
-SÉPTIMA - JURISDICCIÓN. Para cualquier cuestión, las partes se someten a los tribunales ordinarios de [COMPLETAR jurisdicción].
-
-EL COMODATARIO declara haber leído este contrato, estar de acuerdo con su contenido y que los datos indicados son verdaderos. La firma se realiza en forma electrónica en un dispositivo de EL COMODANTE y queda guardada junto con la fecha, la hora y un código de verificación.`;
+EL CLIENTE declara haber leído este contrato, estar de acuerdo con su contenido y que los datos indicados son verdaderos. La firma se realiza en forma electrónica en un dispositivo de YAPUR.NET y queda guardada junto con la fecha, la hora y un código de verificación.`;
+/* la modalidad que figura en el contrato, según la tecnología del cliente (la ficha dice «fibra» o «wireless») */
+const CONTRATO_TECNOLOGIA = { fibra: 'Fibra óptica «INTERNET CABLEADO»', wireless: 'Antena inalámbrica «INTERNET POR ANTENA»' };
 function renderContrato(tpl, x) {
   const em = tpl.empresa || {};
+  /* la tecnología sale de la ficha del cliente; si no la tiene cargada, de los equipos (ONU: fibra · antena: wireless) */
+  const tec = x.tec || (x.equipos.some(e => e.t === 'ONU') ? 'fibra' : x.equipos.some(e => e.t === 'Antena') ? 'wireless' : '');
   const eq = x.equipos.map((e, i) => (i + 1) + '. ' + e.t + (e.d ? ' ' + e.d : '') + (e.s ? ' · N° de serie / MAC: ' + e.s : '') + ' · Cantidad: ' + e.n + ' · Estado: ' + e.e + (e.o ? ' · ' + e.o : '')).join('\n');
   const v = {
     empresa: em.razon, empresa_cuit: em.cuit, empresa_domicilio: em.domicilio, representante: em.rep, lugar: em.lugar,
     fecha: fechaLarga(x.ts), numero: x.num ? String(x.num).padStart(4, '0') : '(se asigna al firmar)',
-    titular: x.titular.nombre, dni: x.titular.dniTxt, domicilio: x.titular.dir + (x.titular.loc ? ', ' + x.titular.loc : ''), telefono: x.titular.tel, cliente_n: x.codigo, equipos: eq
+    titular: x.titular.nombre, dni: x.titular.dniTxt, domicilio: x.titular.dir + (x.titular.loc ? ', ' + x.titular.loc : ''), telefono: x.titular.tel, cliente_n: x.codigo, tecnologia: CONTRATO_TECNOLOGIA[tec] || 'Internet', equipos: eq
   };
   return String(tpl.texto).replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (m, k) => (k in v ? (String(v[k] || '').trim() || '-') : m));
 }
@@ -1349,14 +1398,14 @@ export class YapurDB extends DurableObject {
     const r = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
     let t = null; try { t = r ? JSON.parse(r.v) : null; } catch (e) { t = null; }
     if (!isPlain(t)) t = { texto: CONTRATO_TXT_DEF, ver: 1, final: false };
-    const aj = this.readDoc('ajustes', 'general') || {};
-    t.empresa = Object.assign({ razon: lim(aj.empresa || 'YAPUR.NET', 100), cuit: '', domicilio: '', rep: '', lugar: 'Añatuya, Santiago del Estero' }, isPlain(t.empresa) ? t.empresa : {});
+    /* datos de la empresa que figuraban en los contratos en papel; el CUIT lo completa el administrador */
+    t.empresa = Object.assign({ razon: 'YAPUR MAURO MIGUEL', cuit: '', domicilio: 'Av. Gral. Belgrano N° 500, Barrio Polo Norte, Añatuya, Santiago del Estero', rep: 'Mauro Miguel Yapur', lugar: 'Añatuya, Santiago del Estero' }, isPlain(t.empresa) ? t.empresa : {});
     return t;
   }
   contratoPlantillaVer(u) {
     if (!effPerms(u).comodato) throw httpErr(403, 'Tu usuario no puede ver los contratos de comodato.', 'permission_denied');
     const t = this.contratoTpl();
-    return { texto: t.texto, ver: t.ver, final: !!t.final, empresa: t.empresa, vars: CONTRATO_VARS, mod: t.mod || null, modPor: t.modPor || '' };
+    return { texto: t.texto, ver: t.ver, final: !!t.final, empresa: t.empresa, vars: CONTRATO_VARS, mod: t.mod || null, modPor: t.modPor || '', sugerido: u.role === 'admin' ? CONTRATO_TXT_DEF : undefined };
   }
   contratoPlantillaGuardar(u, b) {
     if (!isPlain(b)) throw httpErr(400, 'Datos inválidos.');
@@ -1454,7 +1503,7 @@ export class YapurDB extends DurableObject {
   }
   contratoVista(u, b) {
     const x = this.contratoPreparar(u, b);
-    const texto = renderContrato(x.tpl, { ts: Date.now(), num: 0, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo });
+    const texto = renderContrato(x.tpl, { ts: Date.now(), num: 0, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo, tec: x.c.tec });
     return { texto, tver: x.tpl.ver, eq: x.eq, final: !!x.tpl.final, prueba: !x.tpl.final, equipos: x.equipos, titular: x.titular, motivo: x.motivo };
   }
   contratoHash(c) { return sha(JSON.stringify(['yapur-comodato-v1', c.id, c.num, c.cid, c.motivo, c.prev || '', c.ts, c.texto, c.titular, c.equipos, c.eq, c.firmaSha, c.aclar])); }
@@ -1469,7 +1518,7 @@ export class YapurDB extends DurableObject {
       const x = this.contratoPreparar(u, b);
       if (Number(b.tver) !== x.tpl.ver || String(b.eq) !== x.eq) throw httpErr(409, 'El texto del contrato o los equipos cambiaron mientras se firmaba. Volvé a abrir el contrato para leer la versión actual.', 'failed_precondition');
       const num = this.q1('SELECT COALESCE(MAX(num),0)+1 n FROM contratos').n, ts = Date.now();
-      const texto = renderContrato(x.tpl, { ts, num, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo });
+      const texto = renderContrato(x.tpl, { ts, num, titular: x.titular, equipos: x.equipos, codigo: x.c.codigo, tec: x.c.tec });
       const titularS = JSON.stringify(x.titular), equiposS = JSON.stringify(x.equipos);
       const hash = await this.contratoHash({ id, num, cid: x.cid, motivo: x.motivo, prev: x.prev, ts, texto, titular: titularS, equipos: equiposS, eq: x.eq, firmaSha, aclar });
       let hecho = false;
