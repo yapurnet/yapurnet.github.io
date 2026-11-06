@@ -118,7 +118,7 @@ async def main():
         await pg.wait_for_function("document.querySelector('#toastRoot').textContent.includes('Ya hay')", timeout=4000)
         check('no deja repetir el nombre de una caja (aunque cambien las mayúsculas)', S_ok := (await pg.evaluate("S.red.size")) == 2)
         await pg.fill('#rf-nombre', 'NAP-02'); await pg.fill('#rf-puertos', '8')
-        await pg.select_option('#rf-padre', label='BE-01')
+        await pg.select_option('#rf-padre', label='BE-01 · Botella de empalme')
         await gps_fill(pg, ctx, *NAP2)
         await pg.click('#rform button[type=submit]')
         await pg.wait_for_function("S.red.size === 3", timeout=6000)

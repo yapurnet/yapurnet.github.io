@@ -275,12 +275,18 @@ function guard(u, p, coll, existing, patch, ctx) {
 }
 
 /* ----- red: cajas NAP y botellas de empalme (se guardan juntas en red/puntos, un registro por punto) ----- */
-const RED_TIPOS = ['nap', 'empalme'];
-const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
+const RED_TIPOS = ['nap', 'empalme', 'splitter'];
+const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos', 'rel', 'salidas'];
 /* solo de las botellas de empalme: qué fibra es, cuántos pelos tiene y de a cuántos por tubo, qué PON están vivos, qué hay que hacer y qué lleva cada pelo */
 const EMP_KEYS = ['fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
+const SPLIT_KEYS = ['rel', 'salidas'];
 const PELO_ESTADOS = ['libre', 'empalmado', 'reservado', 'danado'];
 const PELO_KEYS = ['e', 'p', 'a', 'n'];   // estado, PON que lleva, caja o botella a la que lleva, nota
+/* splitters: dividen la señal de un pelo (o de la salida de otro splitter) en varias salidas. Cada salida se anota igual que un pelo, pero sin PON
+   (el PON es del pelo de origen: dividir no cambia qué PON es, solo reparte la misma señal entre más salidas). */
+const RATIOS_SPLITTER = [2, 4, 8, 16, 32, 64];
+const SALIDA_ESTADOS = ['libre', 'conectado', 'reservado', 'danado'];
+const SALIDA_KEYS = ['e', 'a', 'n'];
 const isNum = v => typeof v === 'number' && isFinite(v);
 function guardRed(u, p, old, items) {
   for (const id of Object.keys(items)) {
@@ -308,6 +314,11 @@ function guardRed(u, p, old, items) {
       const e = guardEmpalme(id, nw);
       if (e) return e;
     }
+    if (SPLIT_KEYS.some(k => k in nw)) {
+      if (tipo !== 'splitter') return 'La relación y las salidas son solo de los splitters.';
+      const e = guardSplitter(id, nw);
+      if (e) return e;
+    }
   }
   return null;
 }
@@ -330,6 +341,23 @@ function guardEmpalme(id, nw) {
       if ('p' in x && x.p !== null && !(Number.isInteger(x.p) && x.p >= 1 && x.p <= 32)) return 'El PON del pelo ' + k + ' no es válido.';
       if ('a' in x && x.a !== null && (typeof x.a !== 'string' || !ID_RE.test(x.a) || x.a === id)) return 'A dónde lleva el pelo ' + k + ' no es válido.';
       if ('n' in x && x.n !== null && (typeof x.n !== 'string' || x.n.length > 120)) return 'La nota del pelo ' + k + ' es demasiado larga (hasta 120 letras).';
+    }
+  }
+  return null;
+}
+/* splitter: la relación (1x2, 1x4…) y cada salida (estado, a dónde lleva, nota). Sin PON: el PON es propiedad del pelo de origen. */
+function guardSplitter(id, nw) {
+  if ('rel' in nw && nw.rel !== null && !RATIOS_SPLITTER.includes(nw.rel)) return 'La relación del splitter tiene que ser 1x2, 1x4, 1x8, 1x16, 1x32 o 1x64.';
+  if ('salidas' in nw && nw.salidas !== null) {
+    if (!isPlain(nw.salidas)) return 'Las salidas no son válidas.';
+    for (const k of Object.keys(nw.salidas)) {
+      if (!/^[1-9]\d{0,2}$/.test(k) || Number(k) > 64) return 'Número de salida inválido: ' + k + '.';
+      const x = nw.salidas[k];
+      if (x === null) continue;
+      if (!isPlain(x) || Object.keys(x).some(q => !SALIDA_KEYS.includes(q))) return 'Los datos de la salida ' + k + ' no son válidos.';
+      if ('e' in x && !SALIDA_ESTADOS.includes(x.e)) return 'El estado de la salida ' + k + ' no es válido.';
+      if ('a' in x && x.a !== null && (typeof x.a !== 'string' || !ID_RE.test(x.a) || x.a === id)) return 'A dónde lleva la salida ' + k + ' no es válida.';
+      if ('n' in x && x.n !== null && (typeof x.n !== 'string' || x.n.length > 120)) return 'La nota de la salida ' + k + ' es demasiado larga (hasta 120 letras).';
     }
   }
   return null;

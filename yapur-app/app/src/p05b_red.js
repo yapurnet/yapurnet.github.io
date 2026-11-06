@@ -1,6 +1,8 @@
 /* ===== red: cajas NAP y botellas de empalme ===== */
 const RED={q:'',tipo:'todos',sort:'nombre',me:null,limit:60};
-const RED_TIPO={nap:'Caja NAP',empalme:'Botella de empalme'};
+const RED_TIPO={nap:'Caja NAP',empalme:'Botella de empalme',splitter:'Splitter'};
+const RED_TIPO_ORDEN={nap:0,splitter:1,empalme:2};
+const redTipoCmp=(a,b)=>(RED_TIPO_ORDEN[a.tipo]??9)-(RED_TIPO_ORDEN[b.tipo]??9)||redCmp(a,b);
 /* botellas de empalme: los PON (PON 1 = VLAN 41 … PON 8 = VLAN 48), los estados de un pelo y los colores de la fibra (código de 12 colores) */
 const PON_LISTA=[1,2,3,4,5,6,7,8];
 const ponTxt=n=>'PON '+n+' (VLAN '+(40+n)+')';
@@ -16,6 +18,12 @@ function peloInfo(n,xt){
   return {n,color:FIBRA_COL[((n-1)%xt)%12],tubo,tuboCol:FIBRA_COL[(tubo-1)%12]};
 }
 const xtuboDe=p=>p.xtubo==null?12:p.xtubo;
+/* splitters: 1x2, 1x4… hasta 1x64. Cada salida se anota igual que un pelo (libre · conectado · reservado · dañada), sin PON: dividir no cambia el PON, reparte la misma señal. */
+const RATIOS_SPLIT=[2,4,8,16,32,64];
+const SALIDA_EST={libre:'Libre',conectado:'Conectado',reservado:'Reservado',danado:'Dañada'};
+const salidaEntry=(p,n)=>{const x=p&&p.salidas&&p.salidas[n];return x&&typeof x==='object'?x:null;};
+const salidaEst=(p,n)=>{const x=salidaEntry(p,n);return x&&SALIDA_EST[x.e]?x.e:'libre';};
+const salidasUsadas=p=>Object.keys(p.salidas||{}).filter(n=>salidaEst(p,n)!=='libre'&&n<=(p.rel||0)).length;
 const fdot=c=>c?`<i class="fdot" style="background:${c[1]}" title="${esc(c[0])}"></i>`:'';
 const redName=id=>{const p=id&&S.red.get(id);return p?p.nombre:'';};
 const redCmp=(a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true});
@@ -94,10 +102,12 @@ function bindNapField(root,selfId){
 
 /* ----- lista ----- */
 function redRow(p,d){
-  const nap=p.tipo==='nap',u=nap?napUsed(p.id):0,kids=redKids(p.id).length,par=p.padre?redName(p.padre):'';
-  const use=nap?(p.puertos?`<span class="chip ${u>=p.puertos?'bad':'ok'}">${u}/${p.puertos} puertos</span>`:`<span class="chip">${u} ${u===1?'cliente':'clientes'}</span>`):[kids?`<span class="chip info">Alimenta ${kids}</span>`:'',...(p.pons||[]).map(n=>`<span class="chip ok">PON ${n}</span>`)].join(' ');
+  const nap=p.tipo==='nap',split=p.tipo==='splitter',u=nap?napUsed(p.id):0,kids=redKids(p.id).length,par=p.padre?redName(p.padre):'';
+  const use=nap?(p.puertos?`<span class="chip ${u>=p.puertos?'bad':'ok'}">${u}/${p.puertos} puertos</span>`:`<span class="chip">${u} ${u===1?'cliente':'clientes'}</span>`)
+    :split?(p.rel?`<span class="chip">1x${p.rel} · ${salidasUsadas(p)}/${p.rel}</span>`:`<span class="chip warn">Sin relación</span>`)
+    :[kids?`<span class="chip info">Alimenta ${kids}</span>`:'',...(p.pons||[]).map(n=>`<span class="chip ok">PON ${n}</span>`)].join(' ');
   return `<button class="item" type="button" data-open-red="${esc(p.id)}">
-    <div><div class="t">${esc(p.nombre)} <span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span></div>
+    <div><div class="t">${esc(p.nombre)} <span class="chip ${nap?'accent':split?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span></div>
     <div class="s">${esc([p.ref,par?'Sale de '+par:''].filter(Boolean).join(' · ')||'Sin referencia')}</div></div>
     <div class="side">${use}</div>
     <div class="tags">${hasGeo(p)?'':'<span class="chip warn">Sin ubicación</span>'}${d!=null?`<span class="chip info">a ${esc(fmtDist(d))}</span>`:''}</div></button>`;
@@ -107,6 +117,7 @@ function redRows(){
   let l=[...S.red.values()].filter(p=>{
     if(RED.tipo==='nap'&&p.tipo!=='nap')return false;
     if(RED.tipo==='empalme'&&p.tipo!=='empalme')return false;
+    if(RED.tipo==='splitter'&&p.tipo!=='splitter')return false;
     if(RED.tipo==='nogeo'&&hasGeo(p))return false;
     if(RED.tipo==='llenas'&&!(p.tipo==='nap'&&p.puertos&&napUsed(p.id)>=p.puertos))return false;
     if(parts.length){const h=norm([p.nombre,p.ref,p.notas,p.fibra,p.hacer,RED_TIPO[p.tipo],redName(p.padre)].join(' '));if(!parts.every(x=>h.includes(x)))return false;}
@@ -118,21 +129,22 @@ function redRows(){
 }
 let redRun=null;
 function exportRed(){
-  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
-  [...S.red.values()].sort((a,b)=>(a.tipo===b.tipo?0:a.tipo==='nap'?-1:1)||redCmp(a,b)).forEach(p=>{
-    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
+  const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','relación splitter','salidas usadas','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
+  [...S.red.values()].sort(redTipoCmp).forEach(p=>{
+    rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',p.tipo==='splitter'&&p.rel?'1x'+p.rel:'',p.tipo==='splitter'&&p.rel?salidasUsadas(p):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
   });
   saveFile('red-'+todayStr()+'.csv',toCsv(rows));
 }
 VIEWS.red={
   mount(el){
     el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="rd-q" type="search" placeholder="Buscar caja o empalme por nombre o referencia" autocomplete="off" aria-label="Buscar en la red" value="${esc(RED.q)}"></div>
-      <div class="line"><button class="btn primary" type="button" id="rd-new-nap">Nueva caja NAP</button><button class="btn" type="button" id="rd-new-emp">Nueva botella de empalme</button></div>
+      <div class="line"><button class="btn primary" type="button" id="rd-new-nap">Nueva caja NAP</button><button class="btn" type="button" id="rd-new-split">Nuevo splitter</button><button class="btn" type="button" id="rd-new-emp">Nueva botella de empalme</button></div>
       <div class="seg" id="rd-seg"></div>
       <div class="line"><button class="btn small" type="button" id="rd-near">Ordenar por cercanía (GPS)</button><button class="btn small ghost" type="button" id="rd-name" hidden>Ordenar por nombre</button><button class="btn small ghost" type="button" id="rd-csv">Descargar lista</button></div>
       <div class="hint" id="rd-near-st"></div></div><div id="rd-count" class="hint"></div><div class="list" id="rd-list"></div>`;
     $('#rd-q',el).addEventListener('input',e=>{RED.q=e.target.value;RED.limit=60;this.update();});
     $('#rd-new-nap',el).addEventListener('click',()=>openRedForm(null,'nap'));
+    $('#rd-new-split',el).addEventListener('click',()=>openRedForm(null,'splitter'));
     $('#rd-new-emp',el).addEventListener('click',()=>openRedForm(null,'empalme'));
     $('#rd-seg',el).addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;RED.tipo=b.dataset.f;RED.limit=60;this.update();});
     $('#rd-csv',el).addEventListener('click',exportRed);
@@ -156,7 +168,7 @@ VIEWS.red={
   },
   update(){
     const seg=$('#rd-seg');if(!seg)return;
-    const fs=[['todos','Todos'],['nap','Cajas NAP'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas']];
+    const fs=[['todos','Todos'],['nap','Cajas NAP'],['splitter','Splitters'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas']];
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${RED.tipo===k}">${l}</button>`).join('');
     const nm=$('#rd-name');if(nm)nm.hidden=RED.sort!=='cerca';
     const rows=redRows();
@@ -220,20 +232,26 @@ const canMoverNap=()=>can('red')&&(can('editarClientes')||can('ubicacion')||can(
 /* ----- ficha de una caja o empalme ----- */
 function openRed(id){
   const p=S.red.get(id);if(!p){toast('No se encontró ese punto de la red','bad');return;}
-  const nap=p.tipo==='nap',grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],kids=redKids(p.id),par=p.padre?S.red.get(p.padre):null;
-  const conecta=nap?kids.map(k=>({r:k,pelos:[]})):empalmeConecta(p),llega=nap?napLlegaPor(p):[];
+  const nap=p.tipo==='nap',split=p.tipo==='splitter',grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],par=p.padre?S.red.get(p.padre):null;
+  const conecta=redConecta(p),llega=llegaPorDe(p);
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
   const m=grid?napMap(p):null;
   const libres=grid&&m.libres.length?m.libres.slice(0,24).join(', ')+(m.libres.length>24?'…':''):'';
   const vis=cl.filter(clientVisible).sort((a,b)=>((parseInt(a.napPuerto,10)||999)-(parseInt(b.napPuerto,10)||999))||norm(a.nombre).localeCompare(norm(b.nombre)));
+  const usoChip=nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`
+    :p.tipo==='empalme'?(p.hilos?` <span class="chip">${pelosUsados(p)}/${p.hilos} pelos en uso</span>`:'')
+    :(split&&p.rel?` <span class="chip">${salidasUsadas(p)}/${p.rel} salidas en uso</span>`:'');
   const html=`
-    <div class="head-row"><div><span class="chip ${nap?'accent':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${nap?` <span class="chip ${p.puertos&&cl.length>=p.puertos?'bad':'ok'}">${cl.length}${p.puertos?'/'+p.puertos+' puertos':(cl.length===1?' cliente':' clientes')}</span>`:(p.hilos?` <span class="chip">${pelosUsados(p)}/${p.hilos} pelos en uso</span>`:'')}</div>
+    <div class="head-row"><div><span class="chip ${nap?'accent':split?'quiet':'info'}">${esc(RED_TIPO[p.tipo]||p.tipo)}</span>${usoChip}</div>
       <div class="actions start">${can('red')?'<button class="btn small" type="button" data-act="editar">Editar</button>':''}</div></div>
     <h2 style="overflow-wrap:anywhere">${esc(p.nombre)}</h2>
-    <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Fibra',esc(p.fibra))}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Llega por',llega.map(x=>`<button class="btn small ghost" type="button" data-red="${esc(x.e.id)}">${esc(x.e.nombre)} · pelo ${x.n}${x.pon?' · PON '+x.pon:''}</button>`).join(' '))}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
-    ${nap?'':empalmeFichaHTML(p)}
+    <dl class="kv">${kv('Referencia',esc(p.ref))}${kv('Fibra',esc(p.fibra))}${split&&p.rel?kv('Relación','1x'+p.rel):''}${kv('Sale de',par?`<button class="btn small ghost" type="button" data-red="${esc(par.id)}">${esc(par.nombre)}</button>`:'')}${kv('Llega por',llega.map(x=>`<button class="btn small ghost" type="button" data-red="${esc(x.e.id)}">${esc(x.e.nombre)} · ${x.e.tipo==='splitter'?'salida':'pelo'} ${x.n}${x.pon?' · PON '+x.pon:''}</button>`).join(' '))}${kv('Puertos sin usar',esc(libres))}${kv('Notas',esc(p.notas))}</dl>
+    ${p.tipo==='empalme'?empalmeFichaHTML(p):split?splitterFichaHTML(p):''}
     <div class="geo"><div class="legend small muted">Cómo llegar</div><div class="actions start">${geoActions(p)}${can('red')?`<button class="btn small ghost" type="button" data-act="ubicacion">${hasGeo(p)?'Cambiar ubicación':'Cargar ubicación'}</button>`:''}</div></div>
-    ${conecta.length?`<div><h3>${nap?'De acá salen':'Cajas que conecta'}</h3><div class="list" style="margin-top:8px">${conecta.map(({r:k,pelos})=>`<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div>${pelos.length?`<div class="s">${pelos.length>1?'Pelos ':'Pelo '}${pelos.map(x=>x.n).join(', ')}${[...new Set(pelos.map(x=>x.pon).filter(Boolean))].map(n=>' · PON '+n).join('')}</div>`:''}</div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`).join('')}</div></div>`:''}
+    ${conecta.length?`<div><h3>${nap||split?'De acá salen':'Cajas que conecta'}</h3><div class="list" style="margin-top:8px">${conecta.map(({r:k,pelos})=>{
+      const lab=split?'Salida':'Pelo';
+      return `<button class="item" type="button" data-red="${esc(k.id)}"><div><div class="t">${esc(k.nombre)}</div>${pelos.length?`<div class="s">${pelos.length>1?lab+'s ':lab+' '}${pelos.map(x=>x.n).join(', ')}${[...new Set(pelos.map(x=>x.pon).filter(Boolean))].map(n=>' · PON '+n).join('')}</div>`:''}</div><div class="side"><span class="chip ${k.tipo==='nap'?'accent':k.tipo==='splitter'?'quiet':'info'}">${esc(RED_TIPO[k.tipo]||k.tipo)}</span></div></button>`;
+    }).join('')}</div></div>`:''}
     ${grid?portsSectionHTML(p,m):''}
     ${nap&&!grid?`<div><h3>Clientes conectados</h3>${vis.length?`<div class="list" style="margin-top:8px">${vis.map(c=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${c.napPuerto?'Puerto '+esc(c.napPuerto)+' · ':''}${esc(c.nombre)}</div><div class="s">${esc(c.dir||'Sin domicilio')}${c.loc?' · '+esc(c.loc):''}</div></div><div class="side">${estChip(c)}</div></button>`).join('')}</div>`:`<div class="hint">${cl.length?'No tenés acceso a ver los datos de esos clientes.':'Todavía no hay clientes conectados a esta caja. Se asignan desde la ficha del cliente o al terminar una instalación.'}</div>`}
       ${cl.length>vis.length&&vis.length?`<div class="hint">Y ${cl.length-vis.length} más que tu perfil no puede ver.</div>`:''}</div>`:''}`;
@@ -242,6 +260,7 @@ function openRed(id){
       const o=e.target.closest('[data-open-client]');if(o){openClient(o.dataset.openClient);return;}
       const g=e.target.closest('[data-cl]');if(g){openNapClient(p.id,g.dataset.cl);return;}
       const pl=e.target.closest('[data-pelo]');if(pl){openPelo(p.id,parseInt(pl.dataset.pelo,10));return;}
+      const sl=e.target.closest('[data-salida]');if(sl){openSalida(p.id,parseInt(sl.dataset.salida,10));return;}
       const fr=e.target.closest('[data-free]');if(fr){openAsignarPuerto(p.id,parseInt(fr.dataset.free,10));return;}
       const r=e.target.closest('[data-red]');if(r){openRed(r.dataset.red);return;}
       const a=e.target.closest('[data-act]');if(!a)return;
@@ -263,12 +282,90 @@ function empalmeConecta(p){
   m.forEach(v=>v.pelos.sort((a,b)=>a.n-b.n));
   return [...m.values()].sort((a,b)=>redCmp(a.r,b.r));
 }
-/* de qué botellas llega una caja (según el pelo que dice llevarle) */
-function napLlegaPor(p){
+/* por dónde llega la señal a este punto (desde el pelo de una botella, o desde la salida de un splitter que dicen llevarle) */
+function llegaPorDe(p){
   const out=[];
-  S.red.forEach(e=>{if(e.tipo!=='empalme'||!e.pelos)return;
-    Object.keys(e.pelos).forEach(n=>{const x=peloEntry(e,n);if(x&&x.a===p.id&&peloEst(e,n)!=='libre')out.push({e,n:Number(n),pon:x.p||null});});});
+  S.red.forEach(e=>{
+    if(e.id===p.id)return;
+    if(e.tipo==='empalme'&&e.pelos)Object.keys(e.pelos).forEach(n=>{const x=peloEntry(e,n);if(x&&x.a===p.id&&peloEst(e,n)!=='libre')out.push({e,n:Number(n),pon:x.p||null});});
+    if(e.tipo==='splitter'&&e.salidas)Object.keys(e.salidas).forEach(n=>{const x=salidaEntry(e,n);if(x&&x.a===p.id&&salidaEst(e,n)!=='libre')out.push({e,n:Number(n),pon:null});});
+  });
   return out.sort((a,b)=>redCmp(a.e,b.e)||a.n-b.n);
+}
+/* a dónde salen las salidas de un splitter, igual que empalmeConecta para los pelos de una botella */
+function splitterConecta(p){
+  const m=new Map();
+  redKids(p.id).forEach(k=>m.set(k.id,{r:k,pelos:[]}));
+  Object.keys(p.salidas||{}).forEach(n=>{
+    const x=salidaEntry(p,n);if(!x||!x.a||!S.red.has(x.a)||salidaEst(p,n)==='libre')return;
+    if(!m.has(x.a))m.set(x.a,{r:S.red.get(x.a),pelos:[]});
+    m.get(x.a).pelos.push({n:Number(n),pon:null});
+  });
+  m.forEach(v=>v.pelos.sort((a,b)=>a.n-b.n));
+  return [...m.values()].sort((a,b)=>redCmp(a.r,b.r));
+}
+/* qué conecta un punto, según su tipo: una caja solo lo que declaran sus hijos (padre), una botella sus pelos, un splitter sus salidas */
+function redConecta(p){
+  if(p.tipo==='empalme')return empalmeConecta(p);
+  if(p.tipo==='splitter')return splitterConecta(p);
+  return redKids(p.id).map(k=>({r:k,pelos:[]}));
+}
+/* ficha de un splitter: su relación (1x2, 1x4…) y cada salida, igual que los pelos de una botella pero sin tubos ni PON */
+function splitterFichaHTML(p){
+  const rel=p.rel||0,puede=can('red');
+  if(!rel)return `<div><h3>Salidas</h3><div class="hint">${puede?'Elegí la relación del splitter en «Editar» (1x2, 1x4…) para poder anotar cada salida.':'Todavía no se cargó la relación de este splitter.'}</div></div>`;
+  const cell=n=>{
+    const x=salidaEntry(p,n),e=salidaEst(p,n),dest=x&&x.a&&S.red.has(x.a)?S.red.get(x.a):null,col=FIBRA_COL[(n-1)%12];
+    const lbl=e==='libre'?'Libre':dest?dest.nombre:SALIDA_EST[e];
+    const aria='Salida '+n+' ('+col[0].toLowerCase()+'): '+SALIDA_EST[e]+(dest?' · lleva a '+dest.nombre:'');
+    const body=`<span class="pn">${fdot(col)}${n}</span><span class="pl">${esc(lbl)}</span>`;
+    const cls=e==='conectado'?'empalmado':e;
+    return puede?`<button class="pelo est-${cls}" type="button" data-salida="${n}" aria-label="${esc(aria)}" title="${esc(aria)}">${body}</button>`:`<div class="pelo est-${cls}" aria-label="${esc(aria)}">${body}</div>`;
+  };
+  const cells=[];for(let n=1;n<=rel;n++)cells.push(cell(n));
+  const usados=Object.keys(p.salidas||{}).map(Number).filter(n=>n>=1&&n<=rel&&salidaEst(p,n)!=='libre').sort((a,b)=>a-b);
+  const lista=usados.map(n=>{
+    const x=salidaEntry(p,n),col=FIBRA_COL[(n-1)%12],dest=x.a&&S.red.get(x.a),est=salidaEst(p,n);
+    const linea=[dest?'lleva a '+dest.nombre:'',x.n||''].filter(Boolean).join(' · ');
+    const tag=`<${puede?'button':'div'} class="item" type="button" ${puede?`data-salida="${n}"`:''}><div><div class="t">${fdot(col)} Salida ${n} · ${esc(col[0].toLowerCase())}</div><div class="s">${esc(linea||SALIDA_EST[est])}</div></div><div class="side"><span class="chip ${est==='reservado'?'warn':est==='danado'?'bad':'ok'}">${esc(SALIDA_EST[est])}</span></div></${puede?'button':'div'}>`;
+    return tag;
+  }).join('');
+  return `<div><h3>Salidas (1x${rel})</h3><div class="hint">${usados.length} de ${rel} en uso.${puede?' Tocá una salida para anotar a dónde lleva.':''}</div><div class="pelos">${cells.join('')}</div>${lista?`<h3 style="margin-top:14px">A dónde lleva cada salida</h3><div class="list" style="margin-top:8px">${lista}</div>`:''}</div>`;
+}
+/* anotar una salida: a dónde lleva (otra caja, otro splitter o una botella) y una nota */
+function openSalida(id,n){
+  const p=S.red.get(id);if(!p||p.tipo!=='splitter')return;
+  if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
+  const x=salidaEntry(p,n),col=FIBRA_COL[(n-1)%12];
+  const e0=x&&SALIDA_EST[x.e]?x.e:'conectado';
+  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort(redTipoCmp);
+  const html=`<div class="head-row"><span class="chip">${fdot(col)} ${esc(col[0])}</span></div>
+    <form class="form" id="sl-form" novalidate>
+    ${F('Estado de la salida','sl-e',`<select id="sl-e">${Object.entries(SALIDA_EST).map(([k,v])=>opt(k,v,k===e0)).join('')}</select>`)}
+    <div id="sl-det">
+    ${F('Lleva a (caja, splitter o botella)','sl-a',`<select id="sl-a"><option value="">No indicar</option>${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si la caja, el splitter o la botella todavía no está cargada, cargala primero en Red.')}
+    </div>
+    ${F('Nota','sl-n',`<input id="sl-n" maxlength="120" autocomplete="off" value="${esc(x&&x.n||'')}" placeholder="Ej.: pigtail verde, sigue al poste 4">`)}
+    <div class="actions"><button class="btn ghost" type="button" id="sl-cancel">Cancelar</button>${x?'<button class="btn danger" type="button" id="sl-libre">Dejar libre</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`;
+  openModal({title:'Salida '+n+' · '+p.nombre,html,onMount(el){
+    const sync=()=>{$('#sl-det',el).hidden=$('#sl-e',el).value==='libre';};
+    $('#sl-e',el).addEventListener('change',sync);sync();
+    $('#sl-cancel',el).addEventListener('click',()=>openRed(id));
+    const guardar=async patch=>{
+      try{
+        await putItem('red','puntos',id,{salidas:{[n]:patch},mod:Date.now()});
+        await esperarRed(id,q=>{const y=salidaEntry(q,n);return patch?!!y&&y.e===patch.e&&(y.a||null)===patch.a&&(y.n||'')===patch.n:!y;});
+        toast(patch?'Salida '+n+' guardada':'Salida '+n+' libre');openRed(id);
+      }catch(err){dbError(err);}
+    };
+    $('#sl-form',el).addEventListener('submit',e=>{
+      e.preventDefault();
+      const est=$('#sl-e',el).value,a=$('#sl-a',el).value||null,nota=$('#sl-n',el).value.trim();
+      if(est==='libre'&&!nota)return guardar(null);
+      guardar({e:est,a:est==='libre'?null:a,n:nota});
+    });
+    const lib=$('#sl-libre',el);if(lib)lib.addEventListener('click',()=>guardar(null));
+  }});
 }
 function empalmeFichaHTML(p){
   const hil=p.hilos||0,xt=xtuboDe(p),puede=can('red');
@@ -305,14 +402,14 @@ function openPelo(id,n){
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const x=peloEntry(p,n),info=peloInfo(n,xtuboDe(p));
   const e0=x&&PELO_EST[x.e]?x.e:'empalmado';
-  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort((a,b)=>(a.tipo===b.tipo?0:a.tipo==='nap'?-1:1)||redCmp(a,b));
+  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort(redTipoCmp);
   const pons=[...new Set([...PON_LISTA,...(p.pons||[]),...(x&&x.p?[x.p]:[])])].sort((a,b)=>a-b);
   const html=`<div class="head-row"><div>${info.color?`<span class="chip">${fdot(info.color)} ${esc(info.color[0])}</span> `:''}${info.tubo&&p.hilos>xtuboDe(p)?`<span class="chip">Tubo ${info.tubo}${info.tuboCol?' · '+esc(info.tuboCol[0].toLowerCase()):''}</span>`:''}</div></div>
     <form class="form" id="pl-form" novalidate>
     ${F('Estado del pelo','pl-e',`<select id="pl-e">${Object.entries(PELO_EST).map(([k,v])=>opt(k,v,k===e0)).join('')}</select>`)}
     <div id="pl-det">
     ${F('PON que lleva','pl-pon',`<select id="pl-pon"><option value="">No indicar</option>${pons.map(k=>opt(k,ponTxt(k)+((p.pons||[]).includes(k)?' · vivo':''),x&&x.p===k)).join('')}</select>`)}
-    ${F('Lleva a (caja o botella)','pl-a',`<select id="pl-a"><option value="">No indicar</option>${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si la caja o la botella todavía no está cargada, cargala primero en Red.')}
+    ${F('Lleva a (caja, splitter o botella)','pl-a',`<select id="pl-a"><option value="">No indicar</option>${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si todavía no está cargada, cargala primero en Red.')}
     </div>
     ${F('Nota','pl-n',`<input id="pl-n" maxlength="120" autocomplete="off" value="${esc(x&&x.n||'')}" placeholder="Ej.: empalmado con el pelo 3 de la botella siguiente">`)}
     <div class="actions"><button class="btn ghost" type="button" id="pl-cancel">Cancelar</button>${x?'<button class="btn danger" type="button" id="pl-libre">Dejar libre</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`;
@@ -504,14 +601,15 @@ function openRedGeo(id){
 function openRedForm(id,tipoNuevo){
   const old=id?S.red.get(id):null;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
-  const p=old||{tipo:tipoNuevo==='empalme'?'empalme':'nap',puertos:tipoNuevo==='empalme'?null:16};
+  const p=old||{tipo:tipoNuevo==='empalme'?'empalme':tipoNuevo==='splitter'?'splitter':'nap',puertos:tipoNuevo==='nap'||!tipoNuevo?16:null};
   const bloqueados=old?redDescendants(old.id):new Set();
-  const padres=[...S.red.values()].filter(x=>x.tipo==='empalme'&&(!old||(x.id!==old.id&&!bloqueados.has(x.id)))).sort(redCmp);
+  const padres=[...S.red.values()].filter(x=>(x.tipo==='empalme'||x.tipo==='splitter')&&(!old||(x.id!==old.id&&!bloqueados.has(x.id)))).sort(redTipoCmp);
   const html=`<form class="form" id="rform" novalidate>
-    <div class="grid2">${F('Qué es','rf-tipo',`<select id="rf-tipo"${old?' disabled':''}>${opt('nap','Caja NAP (de acá salen los clientes)',p.tipo==='nap')}${opt('empalme','Botella de empalme',p.tipo==='empalme')}</select>`)}
+    <div class="grid2">${F('Qué es','rf-tipo',`<select id="rf-tipo"${old?' disabled':''}>${opt('nap','Caja NAP (de acá salen los clientes)',p.tipo==='nap')}${opt('splitter','Splitter (divide la señal)',p.tipo==='splitter')}${opt('empalme','Botella de empalme',p.tipo==='empalme')}</select>`)}
     ${F('Nombre o número *','rf-nombre',`<input id="rf-nombre" value="${esc(p.nombre||'')}" autocomplete="off" placeholder="NAP-12">`)}</div>
     <div class="grid2" id="rf-fila"><div id="rf-puertos-w">${F('Cantidad de puertos','rf-puertos',`<input id="rf-puertos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.puertos?esc(p.puertos):''}">`,'Salidas de la caja (8, 16…).')}</div>
-    ${F('Sale de la botella de empalme','rf-padre',`<select id="rf-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre,x.id===p.padre)).join('')}</select>`)}</div>
+    <div id="rf-rel-w">${F('Relación (salidas)','rf-rel',`<select id="rf-rel"><option value="">Elegí…</option>${RATIOS_SPLIT.map(n=>opt(n,'1x'+n,p.rel===n)).join('')}</select>`,'Cuántas salidas tiene el splitter.')}</div></div>
+    <div class="grid2">${F('Sale de','rf-padre',`<select id="rf-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo),x.id===p.padre)).join('')}</select>`,'La botella de empalme o el splitter del que sale la señal.')}</div>
     <div id="rf-emp-w">
     ${F('Qué fibra es','rf-fibra',`<input id="rf-fibra" maxlength="120" autocomplete="off" value="${esc(p.fibra||'')}" placeholder="Fibra de 24 pelos, tendido desde ADMIN02">`)}
     <div class="grid2">${F('Cantidad de pelos','rf-hilos',`<input id="rf-hilos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.hilos?esc(p.hilos):(old?'':24)}">`,'Los que tiene el cable (12, 24, 48…).')}
@@ -523,10 +621,10 @@ function openRedForm(id,tipoNuevo){
     ${geoFieldHTML(p,'Si estás al lado de la caja o de la botella, tocá el botón y se completa solo.')}
     ${F('Notas','rf-notas',`<textarea id="rf-notas">${esc(p.notas||'')}</textarea>`)}
     <div class="actions">${old&&can('editarClientes')?'<button class="btn danger" type="button" id="rf-del">Eliminar</button>':''}<button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
-  openModal({title:old?'Editar '+(RED_TIPO[p.tipo]||'punto').toLowerCase():(p.tipo==='nap'?'Nueva caja NAP':'Nueva botella de empalme'),html,onMount(el){
+  openModal({title:old?'Editar '+(RED_TIPO[p.tipo]||'punto').toLowerCase():(p.tipo==='nap'?'Nueva caja NAP':p.tipo==='splitter'?'Nuevo splitter':'Nueva botella de empalme'),html,onMount(el){
     const read=bindGeoField(el),v=i=>$('#'+i,el).value.trim();
     const kind=()=>$('#rf-tipo',el).value;
-    const sync=()=>{$('#rf-puertos-w',el).hidden=kind()!=='nap';$('#rf-emp-w',el).hidden=kind()!=='empalme';};
+    const sync=()=>{const k=kind();$('#rf-puertos-w',el).hidden=k!=='nap';$('#rf-rel-w',el).hidden=k!=='splitter';$('#rf-emp-w',el).hidden=k!=='empalme';};
     $('#rf-pons',el).addEventListener('click',e=>{const b=e.target.closest('[data-pon]');if(b)b.setAttribute('aria-pressed',String(b.getAttribute('aria-pressed')!=='true'));});
     $('#rf-tipo',el).addEventListener('change',sync);sync();
     $('#rform',el).addEventListener('submit',async e=>{
@@ -535,10 +633,20 @@ function openRedForm(id,tipoNuevo){
       const tipo=kind(),nombre=v('rf-nombre');
       if(!nombre)return toast('Falta el nombre','bad');
       if([...S.red.values()].some(x=>x.tipo===tipo&&x.id!==(old&&old.id)&&norm(x.nombre)===norm(nombre)))return toast('Ya hay '+(tipo==='nap'?'una caja NAP':'una botella de empalme')+' con ese nombre','bad');
-      let puertos=null;
+      let puertos=null,rel=null;
       if(tipo==='nap'&&v('rf-puertos')!==''){puertos=parseInt(v('rf-puertos'),10);if(!(puertos>=1&&puertos<=288))return toast('Los puertos tienen que ser un número entre 1 y 288','bad');}
       if(old&&puertos&&puertos<napUsed(old.id))return toast('La caja ya tiene '+napUsed(old.id)+' clientes conectados: no puede tener menos puertos','bad');
+      if(tipo==='splitter'){
+        if(v('rf-rel')==='')return toast('Elegí la relación del splitter (1x2, 1x4…)','bad');
+        rel=parseInt(v('rf-rel'),10);
+        if(!RATIOS_SPLIT.includes(rel))return toast('La relación no es válida','bad');
+        if(old&&old.rel&&rel<old.rel){
+          const sobran=Object.keys(old.salidas||{}).filter(n=>Number(n)>rel&&salidaEst(old,n)!=='libre');
+          if(sobran.length)return toast('La salida '+Math.max(...sobran.map(Number))+' tiene datos cargados: no puede tener menos salidas. Dejala libre primero.','bad');
+        }
+      }
       const obj={tipo,nombre,lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,puertos,padre:v('rf-padre')||null,ref:v('rf-ref'),notas:v('rf-notas'),mod:Date.now()};
+      if(tipo==='splitter')obj.rel=rel;
       if(tipo==='empalme'){
         const hilos=v('rf-hilos')===''?null:parseInt(v('rf-hilos'),10);
         if(hilos!==null&&!(hilos>=1&&hilos<=288))return toast('Los pelos tienen que ser un número entre 1 y 288','bad');
@@ -553,7 +661,7 @@ function openRedForm(id,tipoNuevo){
         else{nid=newId();await putItem('red','puntos',nid,Object.assign({creado:Date.now()},obj));}
         toast(old?'Cambios guardados':(tipo==='nap'?'Caja NAP guardada':'Botella de empalme guardada'));closeModal();
         /* una caja recién creada se abre sola, ya dibujada, para ir cargando qué cliente va en cada puerto */
-        if(nid&&((tipo==='nap'&&puertos)||(tipo==='empalme'&&obj.hilos))){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
+        if(nid&&((tipo==='nap'&&puertos)||(tipo==='empalme'&&obj.hilos)||(tipo==='splitter'&&obj.rel))){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
       }catch(err){dbError(err);}
     });
     const del=$('#rf-del',el);
