@@ -46,12 +46,12 @@ SIN_PERMISO = """
 
 async def main():
     st, j = api('POST', '/api/setup', {'codigo': CODE, 'usuario': 'mauro', 'clave': 'claveSegura1', 'nombre': 'Mauro'}); TA = j['token']
-    for u, n, tel in [('pedro', 'Pedro', ''), ('ana', 'Ana', ''), ('cris', 'Cris', ''), ('luis', 'Luis Gómez', '3844222222'), ('tomi', 'Tomi', '')]:
+    for u, n, tel in [('pedro', 'Pedro', ''), ('ana', 'Ana', ''), ('cris', 'Cris', ''), ('luis', 'Luis Gómez', '3844222222'), ('tomi', 'Tomi', ''), ('nico', 'Nico', '')]:
         api('POST', '/api/users', {'usuario': u, 'nombre': n, 'role': 'tecnico', 'clave': u + '1234', **({'tel': tel} if tel else {})}, TA)
     api('POST', '/api/ubicacion/horario', {'desde': 0, 'hasta': 24}, TA)   # a cualquier hora del día en que se corra la prueba
     api('POST', '/api/jornada/base', {'lat': -28.4601, 'lng': -62.8302, 'radio': 40, 'tol': 10, 'dias': [0, 1, 2, 3, 4, 5, 6]}, TA)
-    tok = {u: api('POST', '/api/login', {'usuario': u, 'clave': u + '1234'})[1]['token'] for u in ['pedro', 'ana', 'cris', 'luis', 'tomi']}
-    for u in ['pedro', 'cris', 'luis', 'tomi']: api('POST', '/api/ubicacion/acepto', {}, tok[u])   # ya habían aceptado el aviso de antes
+    tok = {u: api('POST', '/api/login', {'usuario': u, 'clave': u + '1234'})[1]['token'] for u in ['pedro', 'ana', 'cris', 'luis', 'tomi', 'nico']}
+    for u in ['pedro', 'cris', 'luis', 'tomi', 'nico']: api('POST', '/api/ubicacion/acepto', {}, tok[u])   # ya habían aceptado el aviso de antes
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         geo = {'latitude': -28.4601, 'longitude': -62.8302, 'accuracy': 15}
@@ -123,6 +123,8 @@ async def main():
             check('Cris: la tarjeta dice que la app no tiene permiso de ubicación y resume el tramo', 'La app no tiene permiso de ubicación desde las' in cr and 'Ubicación apagada o sin permiso' in cr and '1 tramo' in cr, cr)
             det = await mp.evaluate("[...document.querySelectorAll('.tcard')].find(c=>c.innerText.includes('Cris')).querySelector('details:last-of-type').innerHTML")
             check('y el detalle del tramo dice «ahora» mientras sigue así', 'la app sin permiso de ubicación' in det and 'a ahora' in det, det)
+            ni = next(c for c in cards if 'Nico' in c['t'])['t']
+            check('Nico: aceptó pero nunca mandó ni un latido → igual aparece un «Motivo probable» explicando que puede no tener la app instalada', 'Todavía no mandó su posición' in ni and 'Motivo probable' in ni and 'YAPUR Gestión' in ni and 'Permitir todo el tiempo' in ni, ni)
 
         # --- 15 min o más sin señal en horario: contador rojo en la pestaña y barra arriba (solo si ya pasaron 15 min desde las 00:00)
         api('POST', '/api/ubicacion/latido', {'gps': 1, 'red': 1, 'perm': 1, 'bat': 3, 'via': 'apk'}, tok['tomi'])   # Tomi aceptó y nunca mandó una posición
