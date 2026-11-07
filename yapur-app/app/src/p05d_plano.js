@@ -2,8 +2,11 @@
    Se arma un árbol por cada punto que no tiene «Sale de» (la OLT siempre es uno; una botella o un splitter
    viejo sin OLT cargada también lo es). Las conexiones son las mismas que ya muestra la ficha («De acá salen»),
    así que el plano nunca puede decir algo distinto de lo que dice la ficha de cada punto. */
-const PLANO_W=176, PLANO_H=60, PLANO_GX=26, PLANO_GY=70, PLANO_PAD=30;
+const PLANO_W=176, PLANO_H=60, PLANO_GX=26, PLANO_GY=70, PLANO_PAD=30, PLANO_PON_PAD=18;
 const PLANO_TIPO_CLS={olt:'olt',nap:'nap',splitter:'splitter',empalme:'empalme'};
+/* un color por PON (no es el color de fibra: ese es por pelo/salida) para que el recuadro de cada PON
+   se distinga del de al lado con solo mirarlo */
+const PON_GRUPO_COL=['#2f6fdc','#f08a24','#2e9e4f','#8a5a2b','#8a4fd0','#d64545','#0f9aa8','#b8860b'];
 /* segunda línea de cada caja: cuánto tiene cargado y cuánto está en uso */
 function planoResumen(p){
   if(p.tipo==='nap')return p.puertos?napUsed(p.id)+'/'+p.puertos+' puertos':(napUsed(p.id)+(napUsed(p.id)===1?' cliente':' clientes'));
@@ -46,6 +49,42 @@ function planoLayout(bosque){
   const w=Math.max(PLANO_W,x-PLANO_GX*3),h=(maxD+1)*(PLANO_H+PLANO_GY)-PLANO_GY;
   return {w,h};
 }
+/* el rectángulo que cubre un nodo y toda su descendencia (para dibujar el perímetro de un PON) */
+function planoBBox(nodo){
+  let x0=nodo.x-PLANO_W/2,x1=nodo.x+PLANO_W/2,y1=nodo.y+PLANO_H;
+  nodo.hijos.forEach(h=>{
+    const r=planoBBox(h.nodo);
+    if(r.x0<x0)x0=r.x0;if(r.x1>x1)x1=r.x1;if(r.y1>y1)y1=r.y1;
+  });
+  return {x0,x1,y1};
+}
+/* un recuadro por cada fibra (botella) con PON vivo marcado, alrededor de toda su rama (splitters y cajas
+   que cuelgan de ella) — así en un plano con varios PON uno al lado del otro se ve de un vistazo cuál es cuál */
+function planoGrupos(bosque){
+  const grupos=[];
+  function walk(nodo){
+    if(nodo.p.tipo==='empalme'&&(nodo.p.pons||[]).length){
+      const r=planoBBox(nodo),pons=nodo.p.pons.slice().sort((a,b)=>a-b);
+      grupos.push({
+        x0:r.x0-PLANO_PON_PAD,x1:r.x1+PLANO_PON_PAD,
+        y0:nodo.y-PLANO_PON_PAD,y1:r.y1+PLANO_PON_PAD,
+        label:pons.map(n=>'PON '+n).join(' + '),
+        col:PON_GRUPO_COL[(pons[0]-1)%PON_GRUPO_COL.length]
+      });
+    }
+    nodo.hijos.forEach(h=>walk(h.nodo));
+  }
+  bosque.forEach(walk);
+  return grupos;
+}
+function planoGrupoSVG(g){
+  const tagH=22,tagGap=6,tagW=Math.max(70,g.label.length*7.4+22),ty=g.y0-tagGap-tagH;
+  return `<g class="pgroup" style="--pg:${g.col}">
+    <rect class="pgroup-box" x="${g.x0}" y="${g.y0}" width="${g.x1-g.x0}" height="${g.y1-g.y0}" rx="16"></rect>
+    <rect class="pgroup-tag" x="${g.x0}" y="${ty}" width="${tagW}" height="${tagH}" rx="6"></rect>
+    <text class="pgroup-txt" x="${g.x0+11}" y="${ty+tagH-7}">${esc(g.label)}</text>
+  </g>`;
+}
 /* una caja del plano: nombre, tipo y cuánto está en uso; tocarla abre su ficha (igual que en el resto de la app) */
 function planoCajaSVG(nodo){
   const p=nodo.p,x=nodo.x-PLANO_W/2,y=nodo.y,cls=(PLANO_TIPO_CLS[p.tipo]||'')+(p.tipo==='nap'&&!p.iluminada?' apagada':'');
@@ -82,9 +121,10 @@ function planoSVG(){
     nodo.hijos.forEach(hi=>{lineas.push(planoLineaSVG(nodo,hi.nodo,hi.pelos));walk(hi.nodo);});
   }
   bosque.forEach(walk);
+  const grupos=planoGrupos(bosque).map(planoGrupoSVG);
   const W=w+PLANO_PAD*2,H=h+PLANO_PAD*2;
   const svg=`<svg viewBox="${-PLANO_PAD} ${-PLANO_PAD} ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" font-family="Public Sans,system-ui,sans-serif">
-    <g>${lineas.join('')}</g><g>${cajas.join('')}</g></svg>`;
+    <g>${grupos.join('')}</g><g>${lineas.join('')}</g><g>${cajas.join('')}</g></svg>`;
   return {svg,w:W,h:H,vacio:false};
 }
 /* ----- versión simplificada: solo las cajas NAP, una al lado de la otra en una grilla, sin mostrar
@@ -114,7 +154,7 @@ function openRedPlano(){
       <button class="btn small" type="button" id="pln-mas">Acercar</button><button class="btn small" type="button" id="pln-menos">Alejar</button><button class="btn small ghost" type="button" id="pln-100">Tamaño real</button>
       <button class="btn small" type="button" id="pln-ref">Actualizar</button><button class="btn small" type="button" id="pln-print">Imprimir</button></div>
     ${vacio?`<div class="empty"><b>Todavía no hay nada para dibujar</b><span>${modo==='full'?'Cargá la OLT y los puntos que salen de ella en la pestaña Red.':'Todavía no hay ninguna caja NAP cargada en la pestaña Red.'}</span></div>`:`<div class="plano-wrap" id="pln-wrap"><div id="pln-canvas" style="transform:scale(1);transform-origin:0 0">${svg}</div></div>
-    <div class="hint">Tocá una caja para abrir su ficha.${modo==='full'?' Las líneas punteadas son conexiones declaradas («Sale de») a las que todavía no se les anotó el pelo o la salida.':' No se muestran los splitters ni la OLT.'}</div>`}`;
+    <div class="hint">Tocá una caja para abrir su ficha.${modo==='full'?' Las líneas punteadas son conexiones declaradas («Sale de») a las que todavía no se les anotó el pelo o la salida. El recuadro de colores agrupa toda la rama de cada PON (se arma solo cuando una fibra tiene marcado qué PON lleva).':' No se muestran los splitters ni la OLT.'}</div>`}`;
   openModal({title:modo==='full'?'Plano de la red':'Plano de la red (solo cajas)',html,wide:true,onMount(el){
     const canvas=$('#pln-canvas',el);
     const zoom=d=>{PLANO_ZOOM=Math.max(.25,Math.min(3,PLANO_ZOOM+d));if(canvas)canvas.style.transform='scale('+PLANO_ZOOM+')';};
@@ -131,7 +171,8 @@ function openRedPlano(){
 const PLANO_PRINT_CSS='@page{size:A4 landscape;margin:10mm}html,body{margin:0;background:#fff}h1{font:700 14pt "Public Sans",system-ui,sans-serif;margin:0 0 6mm}svg{width:100%;height:auto;display:block}'
   +'.pnode rect{fill:#F4F8F9;stroke:#587080;stroke-width:1.5}.pnode.olt rect{fill:#D6EFEC;stroke:#0A7C77}.pnode.nap rect{fill:#DDF3E4;stroke:#1E8449}.pnode.nap.apagada rect{fill:#F4F8F9;stroke:#587080}.pnode.empalme rect{fill:#DCE8F7;stroke:#245FA8}'
   +'.pnode-t{font:700 11px "Public Sans",system-ui,sans-serif;fill:#0E2230}.pnode-s{font:500 9.5px "Public Sans",system-ui,sans-serif;fill:#587080}'
-  +'.pedge{fill:none;stroke:#8c96a3;stroke-width:2}.pedge.sinconectar{stroke-dasharray:5 4}.pedge-lab circle{fill:#fff;stroke:#8c96a3}.pedge-lab text{font:700 9px "Public Sans",system-ui,sans-serif;fill:#0E2230}';
+  +'.pedge{fill:none;stroke:#8c96a3;stroke-width:2}.pedge.sinconectar{stroke-dasharray:5 4}.pedge-lab circle{fill:#fff;stroke:#8c96a3}.pedge-lab text{font:700 9px "Public Sans",system-ui,sans-serif;fill:#0E2230}'
+  +'.pgroup rect.pgroup-box{fill:none;stroke:var(--pg,#8c96a3);stroke-width:2;stroke-dasharray:9 7;opacity:.6}.pgroup rect.pgroup-tag{fill:var(--pg,#8c96a3);opacity:.92}.pgroup text.pgroup-txt{font:700 12px "Public Sans",system-ui,sans-serif;fill:#fff}';
 function printPlano(){
   const modo=planoModo();
   if(!modo)return;

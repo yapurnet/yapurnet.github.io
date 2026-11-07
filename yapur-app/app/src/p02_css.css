@@ -256,6 +256,9 @@ button.pelo:hover{border-color:var(--accent-line)}
 .pedge.sinconectar{stroke-dasharray:5 4}
 .pedge-lab circle{fill:var(--surface);stroke:var(--muted)}
 .pedge-lab text{fill:var(--ink);font-size:9px;font-weight:700}
+.pgroup rect.pgroup-box{fill:none;stroke:var(--pg,var(--muted));stroke-width:2;stroke-dasharray:9 7;opacity:.6}
+.pgroup rect.pgroup-tag{fill:var(--pg,var(--muted));opacity:.92}
+.pgroup text.pgroup-txt{fill:#fff;font-size:12px;font-weight:700}
 .todo{padding:10px 12px;border-radius:var(--r-sm);background:var(--warn-soft)}
 .todo b{color:var(--warn)}
 .comp-thumb{display:block;align-self:flex-start;justify-self:start;width:auto;height:auto;max-width:100%;max-height:220px;object-fit:contain;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--line)}
