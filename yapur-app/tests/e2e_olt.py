@@ -15,6 +15,15 @@ def api(method, path, body=None, token=None):
         with urllib.request.urlopen(req, timeout=20) as r: return r.status, json.loads(r.read() or b'null')
     except urllib.error.HTTPError as e: return e.code, json.loads(e.read() or b'null')
 ERR = []
+async def sin_aviso(pg):
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
+    if await pg.evaluate("S.realRole") != 'tecnico': return
+    try:
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
+        await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
+    except Exception: pass
 async def login(ctx, user, clave):
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: ERR.append('PAGEERROR ' + str(e)))
@@ -24,6 +33,7 @@ async def login(ctx, user, clave):
     await pg.fill('#lg-user', user); await pg.fill('#lg-pass', clave)
     await pg.click('#lg-form button[type=submit]')
     await pg.wait_for_selector('#tabs .tab', timeout=10000)
+    await sin_aviso(pg)
     return pg
 async def red_id(pg, nombre): return await pg.evaluate("n => { const p=[...S.red.values()].find(x=>x.nombre===n); return p?p.id:null; }", nombre)
 
@@ -180,7 +190,8 @@ async def main():
         txt = open(await d.path(), encoding='utf-8-sig').read()
         fila = next((l for l in txt.splitlines() if l.startswith('OLT,OLT-01,')), None)
         cols = fila.split(',') if fila else []
-        check('el CSV trae la fila de la OLT con 8 puertos, 1 salida usada y sin relación de splitter', fila is not None and cols[4] == '8' and cols[6] == '' and cols[7] == '1', fila)
+        # columnas: tipo,nombre,latitud,longitud,puertos,clientes conectados,iluminada,relación splitter,salidas usadas,...
+        check('el CSV trae la fila de la OLT con 8 puertos, 1 salida usada y sin relación de splitter', fila is not None and cols[4] == '8' and cols[7] == '' and cols[8] == '1', fila)
 
         # 9) no deja reducir la cantidad de puertos de la OLT si un puerto de más tiene datos
         await pg.evaluate(f"openRed('{olt1}')"); await pg.wait_for_selector('.sheet .pelos')
@@ -204,7 +215,7 @@ async def main():
         await pg.click('.sheet [data-close]')
 
         # 11) sin permiso de red, la ficha de la OLT queda de solo lectura
-        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx2.route('**/fonts.g*/**', lambda r: r.abort())
         pg2 = await login(ctx2, 'sinred2', 'sinred2123')
         await pg2.wait_for_function("S.loaded.red", timeout=8000)

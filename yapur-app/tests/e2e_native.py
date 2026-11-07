@@ -5,11 +5,12 @@ from playwright.async_api import async_playwright
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
 res = []
 async def sin_aviso(pg):
-    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no» como lo haría una persona
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral ahora mismo, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 
@@ -37,7 +38,7 @@ async def main():
     api('PATCH', '/api/doc/clientes/c00', {'data': {'items': {'a': {'nombre': 'Ana Pérez', 'estado': 'activo', 'planId': 'p1', 'tel': '3844 56-2605', 'dir': 'Calle 1', 'lat': -28.46, 'lng': -62.83}}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
-        ctx = await br.new_context(viewport={'width': 390, 'height': 844}, bypass_csp=True)
+        ctx = await br.new_context(viewport={'width': 390, 'height': 844}, bypass_csp=True, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx.add_init_script(FAKE)
         await ctx.route('**/fonts.g*/**', lambda r: r.abort())
         await ctx.route('https://wa.me/**', lambda r: r.fulfill(status=200, content_type='text/html', body='<h1 id="wa">WhatsApp</h1>'))

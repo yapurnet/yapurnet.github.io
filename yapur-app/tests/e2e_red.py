@@ -6,11 +6,12 @@ from playwright.async_api import async_playwright
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
 res = []
 async def sin_aviso(pg):
-    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no» como lo haría una persona
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 
@@ -44,6 +45,10 @@ async def login(ctx, user, clave):
 async def toasts(pg): return await pg.inner_text('#toastRoot')
 async def tabs(pg): return await pg.evaluate("[...document.querySelectorAll('#tabs .tab')].map(b=>b.textContent.replace(/\\d+$/,'').trim())")
 async def gps_fill(pg, ctx, lat, lng, acc=5):
+    # el técnico (con el bloqueo nuevo) ya tiene su propio watchPosition corriendo de fondo para compartir ubicación; el Chromium
+    # de este sandbox solo le avisa posiciones nuevas al PRIMER watchPosition registrado en la página, así que frenamos el propio
+    # antes de que el botón registre el suyo (en un celular real, con GPS de verdad, los dos conviven sin problema)
+    await pg.evaluate("if(typeof UB!=='undefined'&&UB.watch!=null)ubicStop()")
     await ctx.set_geolocation({'latitude': lat, 'longitude': lng, 'accuracy': acc})
     await pg.click('#cf-gps')
     await pg.wait_for_function("document.querySelector('#cf-geo').value !== ''", timeout=8000)
@@ -185,7 +190,7 @@ async def main():
         check('el técnico puede mover clientes de caja', await pg.evaluate("canMoverNap()") is True)
 
         # 8) un técnico sin permiso de red no ve la pestaña ni puede escribir
-        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx2.route('**/fonts.g*/**', lambda r: r.abort())
         pg2 = await login(ctx2, 'sinred', 'sinred123')
         check('sin el permiso no aparece la pestaña «Red»', 'Red' not in await tabs(pg2), await tabs(pg2))

@@ -13,7 +13,7 @@ def api(method, path, body=None, token=None):
         with urllib.request.urlopen(req, timeout=20) as r: return r.status, json.loads(r.read() or b'null')
     except urllib.error.HTTPError as e: return e.code, json.loads(e.read() or b'null')
 ERR = []
-async def login(ctx, user, clave):
+async def login(ctx, user, clave, gateable=False):
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: ERR.append('PAGEERROR ' + str(e)))
     pg.on('console', lambda m: ERR.append('CONSOLE ' + m.text) if m.type == 'error' and 'fonts.g' not in m.text and 'Failed to load resource' not in m.text and 'ERR_' not in m.text else None)
@@ -21,7 +21,12 @@ async def login(ctx, user, clave):
     await pg.wait_for_selector('#lg-form', timeout=8000)
     await pg.fill('#lg-user', user); await pg.fill('#lg-pass', clave)
     await pg.click('#lg-form button[type=submit]')
-    await pg.wait_for_selector('#tabs .tab', timeout=10000)
+    if gateable:
+        # un técnico sin permiso de ubicación, en horario laboral, queda bloqueado (sin pestañas): esta prueba igual puede seguir,
+        # porque #latBar y #ubChip viven fuera de #view/#tabs y el bloqueo no los toca. #roleChip confirma que entró igual.
+        await pg.wait_for_selector('#roleChip:not([hidden])', timeout=10000)
+    else:
+        await pg.wait_for_selector('#tabs .tab', timeout=10000)
     return pg
 def lista(tok):
     return api('GET', '/api/ubicaciones', None, tok)[1]
@@ -88,12 +93,13 @@ async def main():
         check('y su latido llega solo', bool(await espera(lambda: tec(TA, 'Ana')['latido'])), tec(TA, 'Ana')['latido'])
 
         # --- Cris: la app sin permiso de ubicación → el servidor anota el tramo «sin permiso»
-        cp = await login(await ctx_tec(sin_permiso=True), 'cris', 'cris1234')
+        cp = await login(await ctx_tec(sin_permiso=True), 'cris', 'cris1234', gateable=True)
         await cp.wait_for_selector('#latBar:not([hidden])', timeout=8000)
         await cp.click('#lat-ok')
         ab = await espera(lambda: tec(TA, 'Cris')['apagados'])
         check('sin permiso de ubicación: queda anotado el tramo, abierto', bool(ab) and ab[0]['tipo'] == 'permiso' and ab[0]['hasta'] is None, ab)
         check('y en el celular se ve «Ubicación sin permiso»', 'sin permiso' in (await cp.inner_text('#ubChip')).lower(), await cp.inner_text('#ubChip'))
+        check('sin permiso, en horario laboral, tampoco la deja usar la app (bloqueo por ubicación)', await cp.evaluate("document.querySelectorAll('#tabs .tab').length") == 0)
 
         # --- la oficina mira: Luis dejó de mandar y su celular dice que tiene la ubicación apagada
         now = int(time.time() * 1000)

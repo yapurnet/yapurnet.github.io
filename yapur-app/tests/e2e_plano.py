@@ -16,11 +16,12 @@ def api(method, path, body=None, token=None):
     except urllib.error.HTTPError as e: return e.code, json.loads(e.read() or b'null')
 ERR = []
 async def sin_aviso(pg):
-    # un técnico, al entrar, puede ver el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no»
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 async def login(ctx, user, clave):
@@ -144,7 +145,7 @@ async def main():
         await ctxp.close()
 
         # 7) el permiso nuevo: un técnico sin «redPlano» no ve el botón; con el permiso, lo ve y puede abrir el plano (de solo lectura)
-        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx2.route('**/fonts.g*/**', lambda r: r.abort())
         pgA = await login(ctx2, 'sinplano', 'sinplano123')
         await pgA.click('#tabs [data-tab=red]')
@@ -152,7 +153,7 @@ async def main():
         check('un técnico sin el permiso «redPlano» no ve «Ver plano de la red»', await pgA.locator('#rd-plano').count() == 0)
         await ctx2.close()
 
-        ctx3 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx3 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx3.route('**/fonts.g*/**', lambda r: r.abort())
         pgB = await login(ctx3, 'conplano', 'conplano123')
         await pgB.click('#tabs [data-tab=red]')
@@ -165,7 +166,7 @@ async def main():
         # 8) el permiso «redPlanoCajas»: ve el botón «Ver cajas NAP» y un plano simplificado, nomás con las 2 cajas NAP,
         #    sin la OLT, las botellas ni los splitters, y sin líneas (no hay jerarquía que dibujar). El texto no dice
         #    «solo cajas» para no insinuarle al técnico que le están ocultando algo más.
-        ctx4 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx4 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx4.route('**/fonts.g*/**', lambda r: r.abort())
         pgC = await login(ctx4, 'solocajas', 'solocajas123')
         await pgC.click('#tabs [data-tab=red]')
