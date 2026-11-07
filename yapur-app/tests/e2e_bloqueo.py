@@ -74,9 +74,12 @@ async def main():
         txt2 = await pg2.inner_text('#view')
         check('sin el permiso del navegador, en horario laboral, tampoco deja usar la app', 'permiso de ubicación' in txt2.lower(), txt2[:200])
         check('(y sigue sin aparecer ninguna pestaña)', await tabs_count(pg2) == 0)
+        # el permiso del navegador no se vuelve a consultar solo (nadie quiere que el sitio repregunte todo el tiempo): hace
+        # falta tocar «Ya lo di: revisar de nuevo», que es lo que simulamos arreglando el permiso y tocando ese botón
         await pg2.evaluate("UB.denied=false")   # simula que ya le dio el permiso de nuevo
+        await pg2.click('#gt-retry')
         await pg2.wait_for_selector('#tabs .tab', timeout=8000)
-        check('al arreglarlo, se destraba solo en unos segundos (sin tocar nada)', True)
+        check('al tocar «Ya lo di: revisar de nuevo» con el permiso ya arreglado, se destraba', True)
 
         # --- 3) fuera de horario: no se exige nada, aunque no haya aceptado el aviso ni tenga permiso
         api('POST', '/api/ubicacion/horario', {'desde': otra, 'hasta': (otra + 1) % 24 or 24}, TA)

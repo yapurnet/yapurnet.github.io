@@ -190,7 +190,8 @@ async def main():
         txt = open(await d.path(), encoding='utf-8-sig').read()
         fila = next((l for l in txt.splitlines() if l.startswith('OLT,OLT-01,')), None)
         cols = fila.split(',') if fila else []
-        check('el CSV trae la fila de la OLT con 8 puertos, 1 salida usada y sin relación de splitter', fila is not None and cols[4] == '8' and cols[6] == '' and cols[7] == '1', fila)
+        # columnas: tipo,nombre,latitud,longitud,puertos,clientes conectados,iluminada,relación splitter,salidas usadas,...
+        check('el CSV trae la fila de la OLT con 8 puertos, 1 salida usada y sin relación de splitter', fila is not None and cols[4] == '8' and cols[7] == '' and cols[8] == '1', fila)
 
         # 9) no deja reducir la cantidad de puertos de la OLT si un puerto de más tiene datos
         await pg.evaluate(f"openRed('{olt1}')"); await pg.wait_for_selector('.sheet .pelos')

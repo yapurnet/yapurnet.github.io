@@ -138,7 +138,7 @@ function ubicWatch(){
     if(UB.queue.length>60)UB.queue.shift();
     ubicFlush();
   },e=>{
-    if(e&&e.code===1){UB.denied=true;if(UB.watch!=null)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;toast('Activá el permiso de ubicación de la app para compartirla con la oficina','bad');ubicChip();LAT.ts=0;ubicLatido();}
+    if(e&&e.code===1){UB.denied=true;if(UB.watch!=null)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;toast('Activá el permiso de ubicación de la app para compartirla con la oficina','bad');ubicChip();LAT.ts=0;ubicLatido();gateCheck();}   /* si ya era horario y hacía falta el permiso, que bloquee apenas se sabe (no recién en el próximo minuto) */
   },{enableHighAccuracy:true,maximumAge:20000,timeout:60000});
 }
 function ubicStop(){
