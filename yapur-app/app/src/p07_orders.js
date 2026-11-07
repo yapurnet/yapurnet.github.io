@@ -39,7 +39,7 @@ function orderCard(o){
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
-      ${can('ordenesTodas')&&o.estado!=='pendiente'?'<button class="btn small" type="button" data-oact="volver">Volver a pendiente</button>':''}
+      ${(can('ordenesTodas')||(can('operarOrdenes')&&o.tecnico===S.tecId))&&o.estado!=='pendiente'?'<button class="btn small" type="button" data-oact="volver">Volver a pendiente</button>':''}
       ${can('ordenesTodas')?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(t?t.tel:'',orderText(o,c))}">Enviar por WhatsApp</a><button class="btn small danger" type="button" data-oact="cancel">Cancelar orden</button>`:''}</div>`:''}
   </article>`;
 }
@@ -190,7 +190,7 @@ async function orderAction(o,act){
     else if(act==='geo')openGeoQuick(o.clientId);
     else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo? Queda anotado quién la canceló y cuándo, y se puede reabrir.','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime(),cancelPor:(S.me&&S.me.nombre)||''});toast('Orden cancelada');}}
     else if(act==='reabrir'){if(!can('ordenesTodas'))return;await saveOrder(o,{estado:'pendiente',cierre:null,cancelPor:null});toast('Orden reabierta: vuelve a figurar como pendiente');}
-    else if(act==='volver'){if(!can('ordenesTodas')||o.estado==='pendiente')return;await saveOrder(o,{estado:'pendiente'});toast('Orden vuelta a pendiente');}
+    else if(act==='volver'){if(o.estado==='pendiente')return;if(!can('ordenesTodas')&&!(can('operarOrdenes')&&o.tecnico===S.tecId))return;await saveOrder(o,{estado:'pendiente'});toast('Orden vuelta a pendiente');}
   }catch(err){dbError(err);}
 }
 VIEWS.ordenes={
