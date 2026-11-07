@@ -88,6 +88,21 @@ async def main():
         check('la OLT se dibuja de color distinto (el origen de la red)', await pg.locator('.pnode.olt').count() == 1)
         check('las cajas NAP tienen su propia clase de color', await pg.locator('.pnode.nap').count() == 2)
         check('las botellas de empalme tienen su propia clase de color', await pg.locator('.pnode.empalme').count() == 2)
+        check('sin ningún PON marcado todavía en las fibras, no se dibuja ningún recuadro de PON', await pg.locator('.pgroup').count() == 0)
+
+        # 2b) perímetro por PON: se marca «PON vivos» en las dos botellas (BE-01 con 2 PON compartidos en la
+        #     misma fibra, BE-02 con 1 solo) y debe aparecer un recuadro con su etiqueta por cada una
+        red({'e1': {'pons': [3, 1], 'mod': 3}})
+        red({'e2': {'pons': [2], 'mod': 3}})
+        await pg.wait_for_function("S.red.get('e1').pons && S.red.get('e1').pons.length === 2", timeout=4000)
+        await pg.click('#pln-ref')
+        await pg.wait_for_selector('.plano-wrap svg', timeout=8000)
+        labels = await pg.evaluate("[...document.querySelectorAll('.pgroup .pgroup-txt')].map(t=>t.textContent)")
+        check('aparece un recuadro de PON por cada fibra con PON marcado', await pg.locator('.pgroup').count() == 2, labels)
+        check('la fibra con 2 PON juntos los junta en una sola etiqueta, ordenados', 'PON 1 + PON 3' in labels, labels)
+        check('la otra fibra muestra su propio PON', 'PON 2' in labels, labels)
+        colors = await pg.evaluate("[...document.querySelectorAll('.pgroup')].map(g=>g.getAttribute('style')||'')")
+        check('cada recuadro tiene su propio color para distinguirse', len(set(colors)) == 2, colors)
 
         # 3) los colores de las conexiones son los mismos que ya se ven en la ficha de cada salida/pelo (azul = color 1, naranja = color 2)
         styles = await pg.evaluate("[...document.querySelectorAll('.pedge')].map(e=>e.getAttribute('style')||'')")
