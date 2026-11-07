@@ -731,11 +731,12 @@ public class MainActivity extends Activity {
                     LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
                     if (lm != null) {
                         if (Build.VERSION.SDK_INT >= 28) {
-                            gps = lm.isLocationEnabled();   // refleja la llave general «Ubicación» tal cual la ve el técnico, sin
-                                                             // depender de qué proveedor exista o esté registrado en este celular
-                                                             // en particular (isProviderEnabled(NETWORK_PROVIDER) es conocido por
-                                                             // quedar en «prendido» aunque la ubicación esté apagada en varios
-                                                             // equipos, sobre todo MIUI/Xiaomi, muy comunes acá)
+                            // isLocationEnabled() refleja la llave general «Ubicación» tal cual la ve el técnico, sin depender de
+                            // qué proveedor exista o esté registrado en este celular en particular (isProviderEnabled(NETWORK_PROVIDER)
+                            // es conocido por quedar en «prendido» aunque la ubicación esté apagada en varios equipos, sobre todo
+                            // MIUI/Xiaomi, muy comunes acá). Se compila contra el android.jar de la API 23 (el minSdkVersion de la
+                            // app), que no tiene este método todavía: se llama por reflexión, como ya se hace en el resto del archivo.
+                            gps = (Boolean) LocationManager.class.getMethod("isLocationEnabled").invoke(lm);
                         } else {
                             gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
                         }
