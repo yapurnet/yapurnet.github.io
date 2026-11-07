@@ -20,14 +20,16 @@ def shard(cid):
     return 'c%02d' % (h % 16)
 ERR = []
 async def sin_aviso(pg):
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 async def login(br, user, clave):
-    ctx = await br.new_context(bypass_csp=True, viewport={'width': 400, 'height': 900})
+    ctx = await br.new_context(bypass_csp=True, viewport={'width': 400, 'height': 900}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
     await ctx.route('**/fonts.g*/**', lambda r: r.abort())
     pg = await ctx.new_page()
     pg.on('pageerror', lambda e: ERR.append('PAGEERROR ' + str(e)))

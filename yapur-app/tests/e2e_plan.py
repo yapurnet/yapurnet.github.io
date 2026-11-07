@@ -32,15 +32,16 @@ async def login(ctx, user, clave):
     await sin_aviso(pg)
     return pg
 async def nuevo(br):
-    c = await br.new_context(bypass_csp=True, viewport={'width': 1000, 'height': 900})
+    c = await br.new_context(bypass_csp=True, viewport={'width': 1000, 'height': 900}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
     await c.route('**/fonts.g*/**', lambda r: r.abort())
     return c
 async def sin_aviso(pg):
-    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no» como lo haría una persona
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 async def lista(pg):
@@ -55,7 +56,7 @@ async def main():
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: {'nombre': nom, 'estado': 'activo', 'planId': pl, 'ip': '10.1.0.5', 'dir': 'Calle 1', 'alta': '2026-01-10', 'desde': time.strftime('%Y-%m')}}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
-        ctx = await br.new_context(bypass_csp=True, viewport={'width': 1000, 'height': 900})
+        ctx = await br.new_context(bypass_csp=True, viewport={'width': 1000, 'height': 900}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx.route('**/fonts.g*/**', lambda r: r.abort())
 
         # 1) el técnico: ni plan, ni «Sin plan», ni cola de MikroTik

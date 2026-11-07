@@ -6,11 +6,12 @@ from playwright.async_api import async_playwright
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
 res = []
 async def sin_aviso(pg):
-    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo contesta «Ahora no» como lo haría una persona
+    # un técnico, al entrar, ve el aviso de ubicación en horario laboral: la prueba lo acepta como lo haría una persona (si no lo
+    # acepta, y es horario laboral, la app no lo deja usarla hasta que lo haga: ver gateCheck en p07c_ubic.js)
     if await pg.evaluate("S.realRole") != 'tecnico': return
     try:
-        await pg.wait_for_selector('[role=dialog] [data-act=no]', timeout=4000)
-        await pg.click('[role=dialog] [data-act=no]')
+        await pg.wait_for_selector('[role=dialog] [data-act=si]', timeout=4000)
+        await pg.click('[role=dialog] [data-act=si]')
         await pg.wait_for_selector('[role=dialog]', state='detached', timeout=4000)
     except Exception: pass
 
@@ -185,7 +186,7 @@ async def main():
         check('el técnico puede mover clientes de caja', await pg.evaluate("canMoverNap()") is True)
 
         # 8) un técnico sin permiso de red no ve la pestaña ni puede escribir
-        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844})
+        ctx2 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
         await ctx2.route('**/fonts.g*/**', lambda r: r.abort())
         pg2 = await login(ctx2, 'sinred', 'sinred123')
         check('sin el permiso no aparece la pestaña «Red»', 'Red' not in await tabs(pg2), await tabs(pg2))
