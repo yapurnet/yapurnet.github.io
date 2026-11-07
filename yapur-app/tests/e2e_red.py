@@ -433,6 +433,23 @@ async def main():
         await pg.click('.sheet [data-act=editar]'); await pg.wait_for_selector('#rform')
         check('el técnico puede editar pero no tiene el botón «Eliminar»', await pg.query_selector('#rf-del') is None)
         await pg.click('.sheet [data-close]')
+
+        # 11) una fibra de drop (1 solo pelo, sin tubos): «Pelos por tubo» ofrece un valor para eso, sin decir «solo»
+        await pg.click('#tabs [data-tab=red]'); await pg.wait_for_selector('#rd-new-emp')
+        await pg.click('#rd-new-emp'); await pg.wait_for_selector('#rform')
+        opts = await pg.eval_on_selector_all('#rf-xtubo option', "os => os.map(o => [o.value, o.textContent])")
+        check('«Pelos por tubo» ofrece un drop de 1 pelo (además de los de 2 y 4 ya existentes)', ['1', 'Drop de 1 pelo'] in [list(o) for o in opts], opts)
+        await pg.fill('#rf-nombre', 'DROP-01'); await pg.fill('#rf-fibra', 'Drop de 1 pelo al poste de Beto')
+        await pg.fill('#rf-hilos', '1'); await pg.select_option('#rf-xtubo', '1')
+        await pg.click('#rform button[type=submit]')
+        await pg.wait_for_function("[...S.red.values()].some(p=>p.nombre==='DROP-01')", timeout=6000)
+        drop1 = await red_id(pg, 'DROP-01')
+        check('la fibra de drop queda con 1 pelo y xtubo 1', (await pg.evaluate("id => S.red.get(id)", drop1))['hilos'] == 1 and (await pg.evaluate("id => S.red.get(id)", drop1))['xtubo'] == 1)
+        await pg.wait_for_selector('.sheet .pelo', timeout=6000)
+        shd = await pg.inner_text('.sheet')
+        check('con un solo pelo no se avisa ningún «Tubo» (es toda la fibra, no hace falta agruparla)', 'Tubo' not in shd and await pg.locator('.sheet .pelo').count() == 1, shd[:400])
+        await pg.click('.sheet [data-close]')
+
         await ctx.close(); await br.close()
     print('\nERRORES:', 'ninguno' if not ERR else ERR)
     print(f'{sum(res)} ok, {len(res) - sum(res)} con fallas')
