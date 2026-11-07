@@ -724,7 +724,7 @@ function openRedForm(id,tipoNuevo){
     <div id="rf-emp-w">
     ${F('Qué fibra es','rf-fibra',`<input id="rf-fibra" maxlength="120" autocomplete="off" value="${esc(p.fibra||'')}" placeholder="Fibra de 24 pelos, tendido desde ADMIN02">`)}
     <div class="grid2">${F('Cantidad de pelos','rf-hilos',`<input id="rf-hilos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.hilos?esc(p.hilos):(old?'':24)}">`,'Los que tiene el cable (12, 24, 48…).')}
-    ${F('Pelos por tubo','rf-xtubo',`<select id="rf-xtubo">${[[12,'12 por tubo'],[6,'6 por tubo'],[4,'4 por tubo'],[8,'8 por tubo'],[2,'2 por tubo'],[0,'No mostrar colores']].map(([k,l])=>opt(k,l,k===xtuboDe(p))).join('')}</select>`,'Sirve para mostrar el color de cada pelo y de cada tubo.')}</div>
+    ${F('Pelos por tubo','rf-xtubo',`<select id="rf-xtubo">${[[12,'12 por tubo'],[8,'8 por tubo'],[6,'6 por tubo'],[4,'4 por tubo (o drop de 4 pelos)'],[2,'2 por tubo (o drop de 2 pelos)'],[1,'Drop de 1 pelo'],[0,'No mostrar colores']].map(([k,l])=>opt(k,l,k===xtuboDe(p))).join('')}</select>`,'Sirve para mostrar el color de cada pelo y de cada tubo. Un drop de 1, 2 o 4 pelos (sin tubos) usa esa misma cantidad.')}</div>
     <div class="field"><label>PON vivos</label><div class="seg" id="rf-pons">${PON_LISTA.map(n=>`<button type="button" data-pon="${n}" aria-pressed="${(p.pons||[]).includes(n)}">PON ${n}</button>`).join('')}</div><div class="hint">Marcá los PON que tienen luz en esta fibra: pueden ser varios (PON 1 = VLAN 41, PON 2 = VLAN 42…).</div></div>
     ${F('Qué hay que hacer','rf-hacer',`<textarea id="rf-hacer" maxlength="500" placeholder="Ej.: empalmar el pelo 5 con la caja 3">${esc(p.hacer||'')}</textarea>`,'Pendientes o instrucciones para quien vaya a la botella.')}
     </div>
