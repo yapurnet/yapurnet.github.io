@@ -45,6 +45,10 @@ async def login(ctx, user, clave):
 async def toasts(pg): return await pg.inner_text('#toastRoot')
 async def tabs(pg): return await pg.evaluate("[...document.querySelectorAll('#tabs .tab')].map(b=>b.textContent.replace(/\\d+$/,'').trim())")
 async def gps_fill(pg, ctx, lat, lng, acc=5):
+    # el técnico (con el bloqueo nuevo) ya tiene su propio watchPosition corriendo de fondo para compartir ubicación; el Chromium
+    # de este sandbox solo le avisa posiciones nuevas al PRIMER watchPosition registrado en la página, así que frenamos el propio
+    # antes de que el botón registre el suyo (en un celular real, con GPS de verdad, los dos conviven sin problema)
+    await pg.evaluate("if(typeof UB!=='undefined'&&UB.watch!=null)ubicStop()")
     await ctx.set_geolocation({'latitude': lat, 'longitude': lng, 'accuracy': acc})
     await pg.click('#cf-gps')
     await pg.wait_for_function("document.querySelector('#cf-geo').value !== ''", timeout=8000)
