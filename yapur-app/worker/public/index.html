@@ -430,7 +430,7 @@ function precioFijo(con,aj){
 /* ===== estado global ===== */
 const S={
   db:null,me:null,ready:false,uid:null,
-  realRole:'tecnico',role:'tecnico',tab:'',perfil:null,preview:false,gate:false,perms:{},pv:0,
+  realRole:'tecnico',role:'tecnico',tab:'',perfil:null,preview:false,gate:false,ubicGate:false,perms:{},pv:0,
   ajustes:{empresa:'YAPUR.NET',tecnicos:[],perfiles:[],diaVenc:10,ciclos:null,feriados:null,servicios:null,promesaMax:10},
   planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),red:new Map(),rv:0,
   loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false,red:false},
@@ -5095,7 +5095,7 @@ VIEWS.instalaciones={
 /* ===== ubicación de los técnicos en horario laboral =====
    Los técnicos aceptan un aviso y, solo dentro del horario (por defecto de 8 a 20 h), la app manda su posición cada minuto.
    El servidor vuelve a controlar el horario con su reloj y borra todo a los 14 días. Quien tiene el permiso «verTecnicos» la ve en la pestaña Técnicos. */
-const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,nat:false,started:false,refr:false,bg:'',bgPedido:false,sOk:false};
+const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,gpsOff:false,nat:false,started:false,refr:false,bg:'',bgPedido:false,sOk:false};
 const arNow=()=>{const d=new Date(Date.now()-3*3600e3);return {fecha:d.toISOString().slice(0,10),h:d.getUTCHours()+d.getUTCMinutes()/60};};
 /* tramos del día: [[8,20]] de corrido, o [[8,13],[17,22]] en un día cortado (con siesta). Los datos viejos traen solo desde/hasta. */
 const stTramos=s=>!s?[]:(s.tramos&&s.tramos.length?s.tramos:[[s.desde,s.hasta]]);
@@ -5256,6 +5256,11 @@ function ubicActualizar(){
   if(typeof jornadaCargar==='function')jornadaCargar();
 }
 function ubicLoop(){
+  ubicEstadoNativoAplicar();
+  ubicLoopCore();
+  gateCheck();
+}
+function ubicLoopCore(){
   ubicLatido();
   if(!UB.st||!UB.st.acepto||UB.denied&&!UB.nat){ubicChip();return;}
   const b=window.YapurApp,tr=stTramos(UB.st),nat=ubNativo();
@@ -5297,11 +5302,15 @@ async function ubicInit(){
   if(!UB.st.aplica)return;
   let recien=false;
   if(!UB.st.acepto){
-    if(UB.asked)return;UB.asked=true;
-    if(!await ubicAviso(UB.st))return;
-    try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});}catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo más tarde.','bad');return;}
-    if(ubNativo())ubSiempreMarcar();   /* el aviso de recién ya decía que se comparte también con la app cerrada */
-    recien=true;
+    /* si no acepta (o se corta la conexión al guardarlo), se sigue igual: dentro del horario, el bloqueo de abajo (gateCheck)
+       se encarga de no dejarlo usar la app hasta que lo acepte */
+    if(!UB.asked){
+      UB.asked=true;
+      if(await ubicAviso(UB.st)){
+        try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});if(ubNativo())ubSiempreMarcar();recien=true;}   /* el aviso de recién ya decía que se comparte también con la app cerrada */
+        catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo más tarde.','bad');}
+      }
+    }
   }else if(ubNativo()&&!ubSiempreOk()&&!UB.asked){
     /* aceptó el aviso de antes («con la app abierta»): lo nuevo se avisa aparte y, si no quiere, sigue como antes */
     UB.asked=true;
@@ -5316,6 +5325,65 @@ async function ubicInit(){
   const tick=()=>ubicRefrescar().then(ubicLoop,ubicLoop);
   setInterval(tick,60000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
+}
+
+/* ----- bloqueo de la app por ubicación, dentro del horario laboral -----
+   Si el técnico no aceptó compartir la ubicación, le sacaron el permiso, o (en el APK, que es quien puede saberlo con certeza)
+   tiene la ubicación del celular apagada, no puede usar la app para nada mientras dure el horario de hoy: se lo explica en una
+   pantalla sin forma de cerrarla, y se destraba solo apenas se soluciona (sin tener que reabrir la app). Fuera de horario, o si
+   la función de ubicación está apagada para este técnico, no se exige nada: es la misma regla de siempre, «fuera del horario
+   no se toma ni se exige nada». No es a prueba de alguien decidido a esquivarlo (puede cerrar la app), pero si la quiere usar,
+   tiene que tenerla prendida. */
+const GATE={on:false,motivo:'',timer:null};
+/* «permiso» (1/0) y «gps» (1/0) según lo que el propio Android informa (no lo que la página pudo o no pudo leer); solo existe
+   en el APK que ya trae este bridge (ubicEstado) — en el navegador, o con un APK más viejo, no cambia nada de lo que ya había. */
+function ubicEstadoNativo(){
+  const b=ubNativo();if(!b||typeof b.ubicEstado!=='function')return null;
+  try{const s=String(b.ubicEstado());return s.length===2?{perm:s[0]==='1',gps:s[1]==='1'}:null;}catch(e){return null;}
+}
+function ubicEstadoNativoAplicar(){
+  const ne=ubicEstadoNativo();if(ne){UB.denied=!ne.perm;UB.gpsOff=!ne.gps;}
+}
+function ubicGateMotivo(){
+  if(S.realRole!=='tecnico'||S.preview)return '';
+  if(!UB.st||!UB.st.aplica||!ubDentro())return '';
+  if(!UB.st.acepto)return 'aviso';
+  if(UB.denied)return 'permiso';
+  if(ubNativo()&&UB.gpsOff)return 'gps';
+  return '';
+}
+function gateHTML(m){
+  if(m==='aviso')return `<div class="card auth"><h2>Ubicación en horario laboral</h2><p>Para usar la app en este horario hace falta aceptar compartir tu ubicación con la oficina:</p>${ubAvisoLista(UB.st,!!ubNativo())}<div class="actions"><button class="btn primary" type="button" id="gt-ok">Entendido, aceptar</button></div></div>`;
+  if(m==='permiso')return `<div class="card auth"><h2>Falta el permiso de ubicación</h2><p>Para usar la app en este horario hace falta darle a la app el permiso de ubicación.</p><div class="actions">${ubNativo()?'<button class="btn primary" type="button" id="gt-perm">Dar el permiso</button>':''}<button class="btn${ubNativo()?' ghost':' primary'}" type="button" id="gt-retry">Ya lo di: revisar de nuevo</button></div></div>`;
+  if(m==='gps')return `<div class="card auth"><h2>La ubicación del celular está apagada</h2><p>Para usar la app en este horario hace falta prender la ubicación del celular.</p><div class="actions"><button class="btn primary" type="button" id="gt-gps">Prender ubicación</button><button class="btn ghost" type="button" id="gt-retry">Ya la prendí: revisar de nuevo</button></div></div>`;
+  return '';
+}
+function gateMount(){
+  tabsHtml='';$('#tabs').innerHTML='';closeModal();
+  const el=$('#view');el.innerHTML=gateHTML(GATE.motivo);window.scrollTo(0,0);
+  const ok=$('#gt-ok',el);
+  if(ok)ok.addEventListener('click',async()=>{
+    ok.disabled=true;ok.textContent='Guardando…';
+    try{UB.st=await NET.api('POST','/api/ubicacion/acepto',{});if(ubNativo())ubSiempreMarcar();gateCheck();}
+    catch(e){toast('No se pudo guardar tu respuesta. Probá de nuevo.','bad');ok.disabled=false;ok.textContent='Entendido, aceptar';}
+  });
+  const rt=$('#gt-retry',el);
+  if(rt)rt.addEventListener('click',()=>{ubicEstadoNativoAplicar();if(UB.denied&&UB.watch==null)ubicWatch();gateCheck();});
+  const pm=$('#gt-perm',el);
+  if(pm)pm.addEventListener('click',()=>{const b=ubNativo();try{b&&b.abrirAjustesPermiso&&b.abrirAjustesPermiso();}catch(e){}});
+  const gp=$('#gt-gps',el);
+  if(gp)gp.addEventListener('click',()=>{const b=ubNativo();try{b&&b.abrirAjustesUbicacion&&b.abrirAjustesUbicacion();}catch(e){}});
+}
+function gateCheck(){
+  const m=ubicGateMotivo();
+  if(m){
+    if(!GATE.on||GATE.motivo!==m){GATE.on=true;GATE.motivo=m;S.ubicGate=true;gateMount();}
+    if(!GATE.timer)GATE.timer=setInterval(()=>{ubicEstadoNativoAplicar();gateCheck();},4000);
+  }else if(GATE.on){
+    GATE.on=false;GATE.motivo='';S.ubicGate=false;
+    if(GATE.timer){clearInterval(GATE.timer);GATE.timer=null;}
+    refreshAll();
+  }
 }
 
 /* ----- jornada, lado del técnico: ingreso y fin del día, anotados solos al llegar y al volver a la base ----- */
@@ -6841,7 +6909,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='de1cf857f5';
+const BUILD='cc8b7c12c4';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -6922,7 +6990,7 @@ function computePerms(){
 /* ===== navegación ===== */
 let tabsHtml='',renderTimer=null;
 function allowedTabs(){
-  const t=[];if(S.gate)return t;
+  const t=[];if(S.gate||S.ubicGate)return t;
   if(can('resumen'))t.push(['resumen','Resumen']);
   if(can('cobrar')||can('caja'))t.push(['cobranzas','Cobranzas']);
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
@@ -6960,7 +7028,7 @@ function dataChanged(key){
   if(key==='pagos'||key==='clientes'||key==='planes'||key==='ajustes')rebuildDerived();
   if(key==='red')S.rv++;
   if(renderTimer)return;
-  renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
+  renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate||S.ubicGate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab);});
 $('#view').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('.kpi.tap[data-go]')){e.preventDefault();e.target.click();}});   /* los recuadros del Resumen que llevan a otra pestaña también se abren con el teclado */
@@ -6992,13 +7060,13 @@ function startData(){
 function refreshAll(){
   computePerms();updateHeader();startData();
   const tabs=allowedTabs(),last=S.tab||lsGet('tab');
-  showTab(tabs.some(x=>x[0]===last)?last:tabs[0][0]);
+  showTab(tabs.some(x=>x[0]===last)?last:(tabs[0]||[])[0]);
 }
 function onAjustesChanged(){
   const sig=()=>JSON.stringify([S.perfil&&S.perfil.id,S.perms]);
   const before=sig();
   computePerms();
-  if(before!==sig()){updateHeader();startData();const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:tabs[0][0]);}
+  if(before!==sig()){updateHeader();startData();const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:(tabs[0]||[])[0]);}
   else dataChanged('ajustes');
 }
 /* cambió mi tipo o mis permisos en el servidor */
@@ -7008,7 +7076,7 @@ function onMeChanged(m){
   const antes=S.me.perms||{},gana=Object.keys(m.perms||{}).some(k=>m.perms[k]&&!antes[k]);   /* si le dieron un permiso, el servidor ahora le manda más datos (el plan, los precios…) */
   S.me=m;computePerms();updateHeader();startData();
   if(gana)NET.resync();
-  const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:tabs[0][0]);
+  const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:(tabs[0]||[])[0]);
   toast('Se actualizaron tus permisos');
 }
 $('#viewAsBtn').addEventListener('click',()=>{

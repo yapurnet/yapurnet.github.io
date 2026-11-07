@@ -27,7 +27,7 @@ function computePerms(){
 /* ===== navegación ===== */
 let tabsHtml='',renderTimer=null;
 function allowedTabs(){
-  const t=[];if(S.gate)return t;
+  const t=[];if(S.gate||S.ubicGate)return t;
   if(can('resumen'))t.push(['resumen','Resumen']);
   if(can('cobrar')||can('caja'))t.push(['cobranzas','Cobranzas']);
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
@@ -65,7 +65,7 @@ function dataChanged(key){
   if(key==='pagos'||key==='clientes'||key==='planes'||key==='ajustes')rebuildDerived();
   if(key==='red')S.rv++;
   if(renderTimer)return;
-  renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
+  renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate||S.ubicGate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab);});
 $('#view').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('.kpi.tap[data-go]')){e.preventDefault();e.target.click();}});   /* los recuadros del Resumen que llevan a otra pestaña también se abren con el teclado */
@@ -97,13 +97,13 @@ function startData(){
 function refreshAll(){
   computePerms();updateHeader();startData();
   const tabs=allowedTabs(),last=S.tab||lsGet('tab');
-  showTab(tabs.some(x=>x[0]===last)?last:tabs[0][0]);
+  showTab(tabs.some(x=>x[0]===last)?last:(tabs[0]||[])[0]);
 }
 function onAjustesChanged(){
   const sig=()=>JSON.stringify([S.perfil&&S.perfil.id,S.perms]);
   const before=sig();
   computePerms();
-  if(before!==sig()){updateHeader();startData();const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:tabs[0][0]);}
+  if(before!==sig()){updateHeader();startData();const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:(tabs[0]||[])[0]);}
   else dataChanged('ajustes');
 }
 /* cambió mi tipo o mis permisos en el servidor */
@@ -113,7 +113,7 @@ function onMeChanged(m){
   const antes=S.me.perms||{},gana=Object.keys(m.perms||{}).some(k=>m.perms[k]&&!antes[k]);   /* si le dieron un permiso, el servidor ahora le manda más datos (el plan, los precios…) */
   S.me=m;computePerms();updateHeader();startData();
   if(gana)NET.resync();
-  const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:tabs[0][0]);
+  const tabs=allowedTabs();showTab(tabs.some(x=>x[0]===S.tab)?S.tab:(tabs[0]||[])[0]);
   toast('Se actualizaron tus permisos');
 }
 $('#viewAsBtn').addEventListener('click',()=>{

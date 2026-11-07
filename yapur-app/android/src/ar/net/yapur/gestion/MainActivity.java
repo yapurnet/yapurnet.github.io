@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.LocationManager;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -715,6 +716,49 @@ public class MainActivity extends Activity {
             } catch (Throwable t) {
                 return "error";
             }
+        }
+
+        /* Lo que Android sabe con certeza (no lo que la página pudo o no pudo leer con el GPS del navegador): si la app tiene el
+           permiso de ubicación y si la ubicación del celular está prendida (GPS o red). Dos caracteres, «1»/«0»: permiso primero,
+           ubicación después (por ejemplo «10» = con permiso, pero con la ubicación apagada). La página usa esto para no dejar
+           usar la app en horario de trabajo si falta alguna de las dos. */
+        @JavascriptInterface
+        public String ubicEstado() {
+            try {
+                boolean perm = hasLocationPermission();
+                boolean gps = true;
+                try {
+                    LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                    gps = lm != null && (lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
+                } catch (Throwable t) { gps = true; }   // sin dato: no se bloquea por las dudas
+                return (perm ? "1" : "0") + (gps ? "1" : "0");
+            } catch (Throwable t) {
+                return "11";   // sin dato: no se bloquea por las dudas
+            }
+        }
+
+        /* Lleva directo a la pantalla de Android donde se prende o apaga la ubicación (no a los Ajustes en general): un solo toque
+           menos que «Ajustes → Ubicación». La usa el técnico desde el bloqueo cuando tiene el GPS apagado. */
+        @JavascriptInterface
+        public void abrirAjustesUbicacion() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)); } catch (Throwable t) { /* nada */ }
+                }
+            });
+        }
+
+        /* Lleva directo a la ficha de la app en Ajustes (Permisos está a un toque de ahí), en vez de dejar que el técnico tenga que
+           ir buscando «Ajustes → Aplicaciones → Gestión YAPUR → Permisos». La usa el bloqueo cuando falta el permiso de ubicación. */
+        @JavascriptInterface
+        public void abrirAjustesPermiso() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); } catch (Throwable t) { /* nada */ }
+                }
+            });
         }
 
         private String arrancarUbicacion(String token, int desde, int hasta, String tramos) {

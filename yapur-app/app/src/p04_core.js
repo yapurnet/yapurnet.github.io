@@ -52,7 +52,7 @@ function precioFijo(con,aj){
 /* ===== estado global ===== */
 const S={
   db:null,me:null,ready:false,uid:null,
-  realRole:'tecnico',role:'tecnico',tab:'',perfil:null,preview:false,gate:false,perms:{},pv:0,
+  realRole:'tecnico',role:'tecnico',tab:'',perfil:null,preview:false,gate:false,ubicGate:false,perms:{},pv:0,
   ajustes:{empresa:'YAPUR.NET',tecnicos:[],perfiles:[],diaVenc:10,ciclos:null,feriados:null,servicios:null,promesaMax:10},
   planes:new Map(),clientes:new Map(),ordenes:new Map(),pagos:new Map(),red:new Map(),rv:0,
   loaded:{ajustes:false,planes:false,clientes:false,ordenes:false,pagos:false,red:false},

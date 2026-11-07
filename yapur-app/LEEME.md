@@ -366,6 +366,19 @@ Cómo funciona, para que sea claro y justo con quien trabaja en la calle:
   - **Nada que corra en el celular es a prueba de alguien decidido a esconderse**: apagar el celular, dejarlo en la base o en la casa, usar otro, sacarle los datos, forzar el cierre de la app. «Sin señal» **no prueba por sí solo** que esté en su casa: puede ser cobertura, batería o un celular que Android durmió (por eso el sistema dice «motivo probable» y no acusa). Lo que sí deja es **evidencia**: a qué hora dejó de responder, dónde estaba la última vez y cuántas veces apagó la ubicación en el día. **Lo que no se puede esquivar es un GPS puesto en el vehículo** (un rastreador conectado a la batería del vehículo, escondido y con su propia SIM): sigue andando aunque el técnico apague el celular, y es lo que corresponde para saber **dónde están los vehículos de la empresa**. El sistema se puede conectar a uno de esos (por ejemplo, con un servidor Traccar) si decidís comprarlos.
 - Si el técnico no dio el permiso de ubicación del celular, ve «Ubicación sin permiso» y en la pestaña figura «Todavía no mandó su posición».
 
+## Bloqueo de la app si falta la ubicación (horario laboral)
+
+**Solo durante el horario laboral de hoy**, un técnico que no está compartiendo su ubicación **no puede usar la app para nada**: se le muestra una pantalla sin forma de cerrarla (no hay pestañas, no hay vuelta atrás) que explica qué falta y cómo solucionarlo. No se aplica a la oficina ni al administrador, y fuera de horario no se exige nada (es la misma regla de siempre: «fuera del horario no se toma ni se exige nada»).
+
+Se bloquea solo por algo que el propio técnico decidió o le falta, **nunca por una señal de GPS débil o momentánea** (eso sería injusto: un lugar cerrado o un bache de señal no debe dejarlo sin poder cargar un pago o cerrar una orden). Los tres motivos posibles, y lo que ve:
+- **Todavía no aceptó el aviso** de compartir ubicación (dijo «Ahora no», o se cortó la conexión al guardarlo): ve el mismo aviso de siempre con el botón **«Entendido, aceptar»**.
+- **Le sacaron el permiso de ubicación** al navegador o a la app: ve «Falta el permiso de ubicación» con un botón para revisarlo de nuevo (y, en el APK, uno que lleva directo a los ajustes de la app).
+- **Tiene la ubicación del celular apagada** (GPS y red): solo se puede saber con certeza **en el APK** (el navegador no distingue «apagada» de «sin señal todavía»), con un botón **«Prender ubicación»** que lleva directo a la pantalla de Android para prenderla.
+
+**Se destraba solo**, sin recargar la página ni tocar nada más: apenas se soluciona (acepta el aviso, da el permiso, prende el GPS), la propia app lo nota en unos segundos y deja usarla de nuevo. No es a prueba de alguien decidido a esquivarlo (puede cerrar la app y no abrirla), pero si la quiere usar, tiene que tenerla prendida.
+
+**El motivo «GPS apagado» necesita el APK que arma GitHub después de este cambio** (trae un aviso nuevo, `ubicEstado`, que le pregunta a Android con certeza si el permiso y la ubicación están dados). Con un APK anterior, o en Chrome, siguen funcionando igual los otros dos motivos (aviso y permiso), pero el de «GPS apagado» no se puede detectar y no bloquea por eso. Pruebas: `tests/e2e_bloqueo.py`.
+
 ## Control de ingreso y fin del día (jornada)
 
 Anota **solo**, sin que el técnico toque nada, a qué hora empezó y a qué hora terminó el día, mirando si el celular está en la base (donde guardan los vehículos). No hace falta APK nuevo. **Viene apagado:** mientras no se cargue la base no se anota nada, no hay alarmas ni barra en el celular del técnico.
