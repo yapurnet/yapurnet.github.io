@@ -4722,6 +4722,11 @@ const ordSinCobrar=o=>!!o&&o.tipo==='instalacion'&&o.estado==='hecha'&&!!o.sinCo
 const ESTADO_ORD_CLS={pendiente:'warn',en_camino:'info',en_curso:'info',hecha:'ok',cancelada:''};
 /* «Cancelada el 06/11/2026 01:52 por Laura»: cuándo y quién (las canceladas antes de esta versión no tienen el nombre) */
 const cancelTxt=o=>{if(!o||o.estado!=='cancelada')return '';const c=String(o.cierre||'');return 'Cancelada'+(c?' el '+dmy(c.slice(0,10))+(c.length>10?' '+c.slice(11,16):''):'')+(o.cancelPor?' por '+o.cancelPor:'');};
+/* los comentarios son para preguntar o avisar algo puntual de ESTA orden (qué materiales se usaron, cuánto cobrar, por qué se demoró…),
+   sin salir de la app a un chat aparte: puede comentar la oficina/admin en cualquier orden, y el técnico asignado en la suya, esté
+   abierta o ya cerrada (justo el caso de una visita ya hecha a la que después hay que preguntarle algo para poder cobrarla) */
+const puedeComentarOrden=o=>can('ordenesTodas')||(can('operarOrdenes')&&!!S.tecId&&o.tecnico===S.tecId);
+const comentTxt=c=>dmy(String(c.ts||'').slice(0,10))+' '+String(c.ts||'').slice(11,16);
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
@@ -4745,6 +4750,7 @@ function orderCard(o){
     ${o.notas?`<div>${esc(o.notas)}</div>`:''}${o.resultado?`<div class="notice info"><b>Resultado:</b> ${esc(o.resultado)}</div>`:''}
     ${o.tipo==='instalacion'&&o.sinCobro&&o.estado==='hecha'?(ordSinCobrar(o)?`<div class="notice"><b>Instalación sin cobrar:</b> ${esc(SIN_COBRO[o.sinCobro]||o.sinCobro)}${o.sinCobroNota?' · '+esc(o.sinCobroNota):''}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar la instalación</button></div>':''}`:'<div class="small muted">La instalación se cobró después de cerrar la orden.</div>'):''}
     <div class="small muted">${tec?'Asignada a <b>'+esc(tec)+'</b>':'Sin técnico asignado'}${o.estado==='cancelada'?' · '+esc(cancelTxt(o)):o.cierre?' · cerrada '+esc(o.cierre):''}</div>
+    ${puedeComentarOrden(o)||(o.comentarios&&o.comentarios.length)?`<div class="actions start"><button class="btn small ghost" type="button" data-oact="comentarios">Comentarios${o.comentarios&&o.comentarios.length?' ('+o.comentarios.length+')':''}</button></div>`:''}
     ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
@@ -4889,6 +4895,27 @@ function openFinishOrder(o){
     });
   }});
 }
+function openOrderComments(o){
+  const puede=puedeComentarOrden(o),lista=o.comentarios||[];
+  const html=`<div class="list" id="oc-list">${lista.length?lista.map(c=>`<div class="s"><b>${esc(c.quien||'')}</b> · <span class="muted">${esc(comentTxt(c))}</span><div style="overflow-wrap:anywhere">${esc(c.texto)}</div></div>`).join(''):'<div class="hint">Todavía no hay comentarios.</div>'}</div>
+    ${puede?`<form class="form" id="ocform"><textarea id="oc-texto" maxlength="500" placeholder="Por ejemplo: ¿qué materiales usaste? / Se usó un router nuevo y 5m de cable…"></textarea>
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button><button class="btn primary" type="submit">Comentar</button></div></form>`
+    :'<div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button></div>'}`;
+  openModal({title:'Comentarios de la orden',html,onMount(el){
+    const f=$('#ocform',el);
+    if(f)f.addEventListener('submit',async e=>{
+      e.preventDefault();
+      const ta=$('#oc-texto',el),texto=ta.value.trim();
+      if(!texto)return toast('Escribí el comentario','bad');
+      try{
+        const c={texto:texto.slice(0,500),quien:(S.me&&S.me.nombre)||'',ts:todayStr()+' '+nowTime()};
+        /* se guardan los últimos 30: alcanza de sobra para una orden y no deja crecer el documento sin límite */
+        await saveOrder(o,{comentarios:[...(o.comentarios||[]),c].slice(-30)});
+        toast('Comentario agregado');closeModal();
+      }catch(err){dbError(err);}
+    });
+  }});
+}
 async function orderAction(o,act){
   try{
     if(act==='next'){
@@ -4901,6 +4928,7 @@ async function orderAction(o,act){
     else if(act==='edit')openOrderForm({id:o.id});
     else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
+    else if(act==='comentarios')openOrderComments(o);
     else if(act==='cancel'){if(await askConfirm('¿Cancelar esta orden de trabajo? Queda anotado quién la canceló y cuándo, y se puede reabrir.','Cancelar orden',true)){await saveOrder(o,{estado:'cancelada',cierre:todayStr()+' '+nowTime(),cancelPor:(S.me&&S.me.nombre)||''});toast('Orden cancelada');}}
     else if(act==='reabrir'){if(!can('ordenesTodas'))return;await saveOrder(o,{estado:'pendiente',cierre:null,cancelPor:null});toast('Orden reabierta: vuelve a figurar como pendiente');}
     else if(act==='volver'){if(o.estado==='pendiente')return;if(!can('ordenesTodas')&&!(can('operarOrdenes')&&o.tecnico===S.tecId))return;await saveOrder(o,{estado:'pendiente'});toast('Orden vuelta a pendiente');}
@@ -6911,7 +6939,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='932f673f4f';
+const BUILD='85c2632ac0';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
