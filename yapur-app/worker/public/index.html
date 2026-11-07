@@ -5438,6 +5438,8 @@ function motTxt(m){
   return `La app <b>dejó de responder a las ${h}</b> (cerrada, celular sin datos o apagado)${hasNum(m.bat)?' · batería '+esc(String(m.bat))+' %':''}. Con esto no se puede saber cuál de esas fue.`;
 }
 const motCorto=m=>!m?'':m.tipo==='ubicacion_apagada'?'ubicación apagada':m.tipo==='sin_permiso'?'app sin permiso':m.tipo==='sin_posicion'?'el celular no da posiciones':m.tipo==='bateria'?'sin batería':'app sin responder';
+/* sin ningún «latido» en lo que va del tramo no hay motivo puntual que afirmar (lo decide el servidor), pero sí vale la explicación más común */
+const MOT_SIN_DATO='No se sabe seguro: el celular no mandó ningún control desde que arrancó este horario. Es lo típico de <b>no tener instalada la app YAPUR Gestión</b> (usar el sitio en el navegador): ahí la ubicación se manda solo mientras la página sigue abierta, y se corta en cuanto se bloquea la pantalla o se cambia de app. Convendría instalarle la app y, al abrirla, dejar el permiso de ubicación en <b>«Permitir todo el tiempo»</b> y <b>«sin restricción de batería»</b>.';
 const tecProblema=t=>t.estado==='sin_senal'||t.estado==='sin_datos';
 const tecSinIngreso=(t,d)=>d.dia===d.hoy&&!!t.jornada&&t.jornada.estado==='sin_ingreso';
 const tecSinRetomar=(t,d)=>d.dia===d.hoy&&!!t.jornada&&!!t.jornada.sinRetomar;
@@ -5476,7 +5478,7 @@ function tecCard(t,d){
   const detalle=u?`${esHoy?'Última vez':'Último punto'} a las ${hhmm(u.ts)}${hasNum(u.acc)?' · precisión ±'+Math.round(u.acc)+' m':''}${dBase}${t.ruta.length>1?` · de ${hhmm(t.ruta[0][0])} a ${hhmm(t.ruta[t.ruta.length-1][0])}`:''}`:(e==='sin_datos'?'Todavía no mandó su posición: tiene que abrir la app en el celular.':'');
   const hu=t.huecos||[];
   const huHTML=hu.length?`<details class="small tec-hu"><summary>Sin señal ${esc(durTxt(t.sinSenalMin))} en ${hu.length} ${hu.length===1?'tramo':'tramos'}</summary><ul class="plain">${hu.map(g=>`<li>${hhmm(g.desde)} a ${hhmm(g.hasta)} · ${durTxt((g.hasta-g.desde)/60000)}${g.inicio?' (antes de su primera posición)':''}${g.sigue?' (sigue sin señal)':''}</li>`).join('')}</ul></details>`:'';
-  const motHTML=t.motivo?`<div class="small tec-mot"><b>Motivo probable:</b> ${motTxt(t.motivo)}</div>`:'';
+  const motHTML=t.motivo?`<div class="small tec-mot"><b>Motivo probable:</b> ${motTxt(t.motivo)}</div>`:(esHoy&&tecProblema(t)?`<div class="small tec-mot"><b>Motivo probable:</b> ${MOT_SIN_DATO}</div>`:'');
   const ap=t.apagados||[];
   const apHTML=ap.length?`<details class="small tec-hu"><summary>Ubicación apagada o sin permiso ${esc(durTxt(t.apagadoMin))} en ${ap.length} ${ap.length===1?'tramo':'tramos'}</summary><ul class="plain">${ap.map(g=>`<li>${hhmm(g.desde)} a ${g.hasta==null?'ahora':hhmm(g.hasta)} · ${g.tipo==='permiso'?'la app sin permiso de ubicación':'ubicación del celular apagada'}${g.hasta!=null&&g.hasta>g.desde?' · '+durTxt((g.hasta-g.desde)/60000):''}</li>`).join('')}</ul></details>`:'';
   const ruta=rutaUrl(t.ruta),aviso=tecProblema(t)&&t.tel&&can('telefono');
@@ -6839,7 +6841,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='38c1370788';
+const BUILD='de1cf857f5';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
