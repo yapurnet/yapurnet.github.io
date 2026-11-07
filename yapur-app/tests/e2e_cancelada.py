@@ -1,6 +1,6 @@
 # Órdenes canceladas: queda anotado quién y cuándo la canceló, se ve en la orden y en la ficha del cliente, y la oficina la puede reabrir.
-# El técnico no puede cancelar ni reabrir. Tampoco puede «volver a pendiente» una orden que ya salió a atender (eso es de la
-# oficina, para cuando el técnico la marcó «Salgo para allá» o «Llegué» y en los hechos no fue). Chromium real contra workerd.
+# El técnico no puede cancelar ni reabrir. Si marcó «Salgo para allá» o «Llegué» y en los hechos no fue, la puede volver a pendiente
+# él mismo (solo la suya); la oficina puede volver a pendiente cualquier orden en camino/en curso. Chromium real contra workerd.
 import asyncio, datetime, json, os, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
@@ -102,14 +102,26 @@ async def main():
         await pt.click('#tabs [data-tab=ordenes]'); await pt.click('[data-f=hechas]'); await pt.wait_for_selector('[data-oid="o1"]')
         tc = await pt.inner_text('[data-oid="o1"]')
         check('el técnico ve que se canceló y quién, pero no puede reabrirla', 'Cancelada el' in tc and 'por Laura' in tc and await pt.query_selector('[data-oid="o1"] [data-oact=reabrir]') is None, tc)
-        # 4) el técnico sale («Salgo para allá») pero en los hechos no fue: la oficina la vuelve a pendiente
+        # 4) el técnico sale («Salgo para allá») pero en los hechos no fue: la puede volver a pendiente él mismo
         await pt.click('[data-f=abiertas]'); await pt.wait_for_selector('[data-oid="o3"]')
         check('el técnico no tiene «Volver a pendiente» (orden propia, todavía pendiente)', await pt.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
         await pt.click('[data-oid="o3"] [data-oact=next]')
         await pt.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'en_camino'", timeout=8000)
-        check('tampoco una vez en camino', await pt.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
+        await pt.wait_for_selector('[data-oid="o3"] [data-oact=volver]')
+        check('en camino, el técnico ya tiene «Volver a pendiente» (es su propia orden)', (await pt.inner_text('[data-oid="o3"] [data-oact=volver]')).strip() == 'Volver a pendiente')
+        await pt.click('[data-oid="o3"] [data-oact=volver]')
+        await pt.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'pendiente'", timeout=8000)
+        o3 = orden(TA, 'o3', cur)
+        check('vuelve a pendiente sin perder el técnico asignado', o3['estado'] == 'pendiente' and o3.get('tecnico') == pedro['id'], o3)
+        check('avisa que volvió a pendiente', 'Orden vuelta a pendiente' in await pt.inner_text('#toastRoot'))
+        await pt.wait_for_selector('[data-oid="o3"] [data-oact=volver]', state='detached', timeout=8000)
+        check('ya no ofrece «Volver a pendiente» (ya está pendiente)', await pt.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
+        check('vuelve a ofrecer «Salgo para allá»', (await pt.inner_text('[data-oid="o3"] [data-oact=next]')).strip() == 'Salgo para allá')
+        # 5) de nuevo en camino: la oficina también la puede volver a pendiente (no solo el técnico dueño)
+        await pt.click('[data-oid="o3"] [data-oact=next]')
+        await pt.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'en_camino'", timeout=8000)
         await po.click('[data-f=abiertas]'); await po.wait_for_selector('[data-oid="o3"] [data-oact=volver]')
-        check('la oficina sí tiene «Volver a pendiente» con la orden en camino', (await po.inner_text('[data-oid="o3"] [data-oact=volver]')).strip() == 'Volver a pendiente')
+        check('la oficina también tiene «Volver a pendiente» con la orden en camino', (await po.inner_text('[data-oid="o3"] [data-oact=volver]')).strip() == 'Volver a pendiente')
         await po.click('[data-oid="o3"] [data-oact=volver]')
         await po.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'pendiente'", timeout=8000)
         o3 = orden(TA, 'o3', cur)
