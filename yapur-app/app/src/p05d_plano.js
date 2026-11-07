@@ -155,7 +155,7 @@ function openRedPlano(){
       <button class="btn small" type="button" id="pln-ref">Actualizar</button><button class="btn small" type="button" id="pln-print">Imprimir</button></div>
     ${vacio?`<div class="empty"><b>Todavía no hay nada para dibujar</b><span>${modo==='full'?'Cargá la OLT y los puntos que salen de ella en la pestaña Red.':'Todavía no hay ninguna caja NAP cargada en la pestaña Red.'}</span></div>`:`<div class="plano-wrap" id="pln-wrap"><div id="pln-canvas" style="transform:scale(1);transform-origin:0 0">${svg}</div></div>
     <div class="hint">Tocá una caja para abrir su ficha.${modo==='full'?' Las líneas punteadas son conexiones declaradas («Sale de») a las que todavía no se les anotó el pelo o la salida. El recuadro de colores agrupa toda la rama de cada PON (se arma solo cuando una fibra tiene marcado qué PON lleva).':' No se muestran los splitters ni la OLT.'}</div>`}`;
-  openModal({title:modo==='full'?'Plano de la red':'Plano de la red (solo cajas)',html,wide:true,onMount(el){
+  openModal({title:modo==='full'?'Plano de la red':'Cajas NAP',html,wide:true,onMount(el){
     const canvas=$('#pln-canvas',el);
     const zoom=d=>{PLANO_ZOOM=Math.max(.25,Math.min(3,PLANO_ZOOM+d));if(canvas)canvas.style.transform='scale('+PLANO_ZOOM+')';};
     const m=$('#pln-mas',el);if(m)m.addEventListener('click',()=>zoom(.2));
@@ -178,7 +178,7 @@ function printPlano(){
   if(!modo)return;
   const {svg,vacio}=planoDatos(modo);
   if(vacio)return toast('Todavía no hay nada para dibujar','bad');
-  const tit='Plano de la red'+(modo==='cajas'?' (solo cajas)':'');
+  const tit=modo==='cajas'?'Cajas NAP':'Plano de la red';
   const html='<!doctype html><meta charset="utf-8"><title>'+esc(tit)+' · '+esc(S.ajustes.empresa||'YAPUR.NET')+'</title><h1>'+esc(tit)+' · '+esc(S.ajustes.empresa||'YAPUR.NET')+'</h1>'+svg+'<style>'+PLANO_PRINT_CSS+'</style>';
   const b=window.YapurApp;
   if(b){
