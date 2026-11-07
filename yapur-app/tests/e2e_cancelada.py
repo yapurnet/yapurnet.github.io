@@ -1,5 +1,6 @@
 # Órdenes canceladas: queda anotado quién y cuándo la canceló, se ve en la orden y en la ficha del cliente, y la oficina la puede reabrir.
-# El técnico no puede cancelar ni reabrir. Chromium real contra el servidor de verdad (workerd).
+# El técnico no puede cancelar ni reabrir. Tampoco puede «volver a pendiente» una orden que ya salió a atender (eso es de la
+# oficina, para cuando el técnico la marcó «Salgo para allá» o «Llegué» y en los hechos no fue). Chromium real contra workerd.
 import asyncio, datetime, json, os, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
@@ -48,13 +49,14 @@ async def main():
     api('POST', '/api/users', {'usuario': 'laura', 'nombre': 'Laura', 'role': 'oficina', 'clave': 'laura123'}, TA)
     st, ul = api('GET', '/api/users', token=TA)
     pedro = next(u for u in ul['users'] if u['usuario'] == 'pedro')
-    for cid, nombre in (('a', 'Cordoba Alicia'), ('b', 'Beto Bravo')):
+    for cid, nombre in (('a', 'Cordoba Alicia'), ('b', 'Beto Bravo'), ('c', 'Juan Perez')):
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: {'nombre': nombre, 'estado': 'pendiente', 'dir': 'Calle ' + cid, 'loc': 'Añatuya'}}}}, TA)
     base = {'tipo': 'instalacion', 'prioridad': 'normal', 'fecha': manana.isoformat(), 'creado': hoy.isoformat(), 'estado': 'pendiente', 'tecnico': pedro['id']}
     api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {
         'o1': dict(base, clientId='a', notas='hay que instalar el servicio'),
         # una cancelada de antes de esta versión: sin el nombre de quien la canceló
-        'o2': dict(base, clientId='b', estado='cancelada', cierre=hoy.isoformat() + ' 08:15', notas='orden vieja')}}}, TA)
+        'o2': dict(base, clientId='b', estado='cancelada', cierre=hoy.isoformat() + ' 08:15', notas='orden vieja'),
+        'o3': dict(base, clientId='c', notas='cambio de router')}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         async def nuevo():
@@ -100,6 +102,22 @@ async def main():
         await pt.click('#tabs [data-tab=ordenes]'); await pt.click('[data-f=hechas]'); await pt.wait_for_selector('[data-oid="o1"]')
         tc = await pt.inner_text('[data-oid="o1"]')
         check('el técnico ve que se canceló y quién, pero no puede reabrirla', 'Cancelada el' in tc and 'por Laura' in tc and await pt.query_selector('[data-oid="o1"] [data-oact=reabrir]') is None, tc)
+        # 4) el técnico sale («Salgo para allá») pero en los hechos no fue: la oficina la vuelve a pendiente
+        await pt.click('[data-f=abiertas]'); await pt.wait_for_selector('[data-oid="o3"]')
+        check('el técnico no tiene «Volver a pendiente» (orden propia, todavía pendiente)', await pt.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
+        await pt.click('[data-oid="o3"] [data-oact=next]')
+        await pt.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'en_camino'", timeout=8000)
+        check('tampoco una vez en camino', await pt.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
+        await po.click('[data-f=abiertas]'); await po.wait_for_selector('[data-oid="o3"] [data-oact=volver]')
+        check('la oficina sí tiene «Volver a pendiente» con la orden en camino', (await po.inner_text('[data-oid="o3"] [data-oact=volver]')).strip() == 'Volver a pendiente')
+        await po.click('[data-oid="o3"] [data-oact=volver]')
+        await po.wait_for_function("(S.ordenes.get('o3')||{}).estado === 'pendiente'", timeout=8000)
+        o3 = orden(TA, 'o3', cur)
+        check('vuelve a pendiente sin perder el técnico asignado', o3['estado'] == 'pendiente' and o3.get('tecnico') == pedro['id'], o3)
+        check('avisa que volvió a pendiente', 'Orden vuelta a pendiente' in await po.inner_text('#toastRoot'))
+        await po.wait_for_selector('[data-oid="o3"] [data-oact=volver]', state='detached', timeout=8000)
+        check('ya no ofrece «Volver a pendiente» (ya está pendiente)', await po.query_selector('[data-oid="o3"] [data-oact=volver]') is None)
+        check('vuelve a ofrecer «Salgo para allá»', (await po.inner_text('[data-oid="o3"] [data-oact=next]')).strip() == 'Salgo para allá')
         await br.close()
     check('sin errores en la consola ni en la página', not ERR, ERR[:5])
     print('\n%d ok, %d fallas' % (sum(res), len(res) - sum(res)))
