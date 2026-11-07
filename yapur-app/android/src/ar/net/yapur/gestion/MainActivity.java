@@ -729,7 +729,17 @@ public class MainActivity extends Activity {
                 boolean gps = true;
                 try {
                     LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-                    gps = lm != null && (lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
+                    if (lm != null) {
+                        if (Build.VERSION.SDK_INT >= 28) {
+                            gps = lm.isLocationEnabled();   // refleja la llave general «Ubicación» tal cual la ve el técnico, sin
+                                                             // depender de qué proveedor exista o esté registrado en este celular
+                                                             // en particular (isProviderEnabled(NETWORK_PROVIDER) es conocido por
+                                                             // quedar en «prendido» aunque la ubicación esté apagada en varios
+                                                             // equipos, sobre todo MIUI/Xiaomi, muy comunes acá)
+                        } else {
+                            gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+                        }
+                    }
                 } catch (Throwable t) { gps = true; }   // sin dato: no se bloquea por las dudas
                 return (perm ? "1" : "0") + (gps ? "1" : "0");
             } catch (Throwable t) {
