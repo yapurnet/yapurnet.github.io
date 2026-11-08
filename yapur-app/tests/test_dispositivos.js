@@ -6,9 +6,15 @@ const { start } = require('./harness');
 let BASE = '', okN = 0, failN = 0;
 const t = (name, cond, extra) => { if (cond) { okN++; console.log('ok   ' + name); } else { failN++; console.log('FAIL ' + name + (extra !== undefined ? ' -> ' + JSON.stringify(extra) : '')); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* un cliente real (navegador o APK) manda siempre el mismo User-Agent mientras dura la sesión; acá se simula lo mismo: el
+   User-Agent explícito de un llamado queda pegado a su token para los que vengan después con el mismo, salvo que se mande otro. */
+const UA_POR_TOKEN = new Map();
 async function call(method, p, body, token, hdr) {
-  const r = await fetch(BASE + p, { method, headers: Object.assign({ 'content-type': 'application/json' }, token ? { authorization: 'Bearer ' + token } : {}, hdr || {}), body: body === undefined ? undefined : JSON.stringify(body) });
+  hdr = Object.assign({}, hdr || {});
+  if (token) { if (hdr['user-agent']) UA_POR_TOKEN.set(token, hdr['user-agent']); else if (UA_POR_TOKEN.has(token)) hdr['user-agent'] = UA_POR_TOKEN.get(token); }
+  const r = await fetch(BASE + p, { method, headers: Object.assign({ 'content-type': 'application/json' }, token ? { authorization: 'Bearer ' + token } : {}, hdr), body: body === undefined ? undefined : JSON.stringify(body) });
   let j = null; try { j = await r.json(); } catch (e) {}
+  if (j && typeof j.token === 'string' && hdr['user-agent']) UA_POR_TOKEN.set(j.token, hdr['user-agent']);   // setup/login: el token nuevo nace con el User-Agent de ese mismo pedido
   return { s: r.status, j };
 }
 /* conexión en vivo como la usa la app: WebSocket (el servidor se duerme mientras nadie hace nada). Devuelve los mensajes ya separados en {ev,data}. */
@@ -68,6 +74,16 @@ const login = (u, c, did, ua) => call('POST', '/api/login', { usuario: u, clave:
     t('ya entra desde ese equipo', r.s === 200 && !!T1, r);
     r = await call('GET', '/api/me', undefined, T1, { 'x-did': D1 });
     t('y la sesión funciona', r.s === 200 && r.j.me.usuario === 'tec1', r);
+
+    /* ---- actualizó el APK sin volver a loguearse: la sesión sigue siendo la misma, pero el teléfono ya manda un User-Agent
+       con la versión nueva en cada pedido (así lo hace un cliente real). Dispositivos tiene que mostrar la versión de ahora,
+       no quedarse para siempre con la que tenía cuando entró por primera vez. */
+    const UA_APK_216 = UA_APK.replace('YapurApp/2.11', 'YapurApp/2.16');
+    r = await call('GET', '/api/me', undefined, T1, { 'x-did': D1, 'user-agent': UA_APK_216 });
+    t('la app actualizada sigue sirviendo con la misma sesión', r.s === 200 && r.j.me.usuario === 'tec1', r);
+    r = await call('GET', '/api/dispositivos', undefined, A);
+    const p1v2 = r.j.lista.find(x => x.id === p1.id);
+    t('Dispositivos ya muestra la versión nueva, sin que haya tenido que volver a entrar', p1v2 && p1v2.label === 'SM-A135M · Android 13 · App Yapur 2.16', p1v2);
 
     /* ---- otro equipo con la misma clave (alguien que la consiguió) ---- */
     r = await login('tec1', 'pedro1', D2, UA_WEB);
