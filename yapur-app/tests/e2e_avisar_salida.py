@@ -1,9 +1,10 @@
 # «Avisar que salgo»: en una orden abierta, el técnico tiene un enlace de WhatsApp al cliente con un mensaje ya armado (saludo
 # según la hora, su nombre, que ya sale). Es un enlace editable de WhatsApp (nunca se manda solo), no una acción de la orden.
 # Se ofrece igual de grande que «Salgo para allá» tanto en la orden propia como en una sin asignar todavía (ahí firma el que
-# está por tomarla, y al tocarlo de paso la toma y la pasa a «en camino», como si hubiera tocado «Salgo para allá»). No lo
-# tiene la oficina (ya tiene su propio «Enviar por WhatsApp» con los datos de la orden) ni un técnico ajeno a una orden ya
-# asignada a otro. Chromium real contra workerd.
+# está por tomarla, y al tocarlo de paso la toma y la pasa a «en camino», como si hubiera tocado «Salgo para allá»). También
+# se lo ofrece a un técnico con permiso de ver todas las órdenes (antes quedaba excluido, y se quedaba sin ninguna forma de
+# avisarle al cliente). No lo tiene la oficina (ya tiene su propio «Enviar por WhatsApp» con los datos de la orden) ni un
+# técnico ajeno a una orden ya asignada a otro. Chromium real contra workerd.
 import asyncio, datetime, json, os, sys, urllib.parse, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
@@ -48,11 +49,16 @@ async def main():
     api('POST', '/api/users', {'usuario': 'laura', 'nombre': 'Laura', 'role': 'oficina', 'clave': 'laura123'}, TA)
     st, ul = api('GET', '/api/users', token=TA)
     pedro = next(u for u in ul['users'] if u['usuario'] == 'pedro')
+    api('POST', '/api/users', {'usuario': 'fernanda', 'nombre': 'Fernanda', 'role': 'tecnico', 'clave': 'fernanda1', 'permisos': {'ordenesTodas': True}}, TA)
+    st, ul = api('GET', '/api/users', token=TA)
+    fernanda = next(u for u in ul['users'] if u['usuario'] == 'fernanda')
     api('PATCH', '/api/doc/clientes/' + shard('a'), {'data': {'items': {'a': {'nombre': 'Cordoba Alicia', 'estado': 'activo', 'dir': 'Calle a', 'loc': 'Añatuya', 'tel': '03854123456'}}}}, TA)
     api('PATCH', '/api/doc/clientes/' + shard('b'), {'data': {'items': {'b': {'nombre': 'Diaz Bruno', 'estado': 'activo', 'dir': 'Calle b', 'loc': 'Añatuya', 'tel': '03854654321'}}}}, TA)
+    api('PATCH', '/api/doc/clientes/' + shard('c'), {'data': {'items': {'c': {'nombre': 'Gomez Carla', 'estado': 'activo', 'dir': 'Calle c', 'loc': 'Añatuya', 'tel': '03854789012'}}}}, TA)
     api('PATCH', '/api/doc/ordenes/' + cur, {'data': {'items': {
         'o1': {'tipo': 'visita', 'prioridad': 'normal', 'fecha': manana.isoformat(), 'creado': hoy.isoformat(), 'estado': 'pendiente', 'tecnico': pedro['id'], 'clientId': 'a', 'notas': 'cambio de router'},
-        'o2': {'tipo': 'visita', 'prioridad': 'normal', 'fecha': manana.isoformat(), 'creado': hoy.isoformat(), 'estado': 'pendiente', 'tecnico': '', 'clientId': 'b', 'notas': 'sin asignar todavía'}}}}, TA)
+        'o2': {'tipo': 'visita', 'prioridad': 'normal', 'fecha': manana.isoformat(), 'creado': hoy.isoformat(), 'estado': 'pendiente', 'tecnico': '', 'clientId': 'b', 'notas': 'sin asignar todavía'},
+        'o3': {'tipo': 'visita', 'prioridad': 'normal', 'fecha': manana.isoformat(), 'creado': hoy.isoformat(), 'estado': 'pendiente', 'tecnico': fernanda['id'], 'clientId': 'c', 'notas': 'cable cortado'}}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         async def nuevo():
@@ -95,6 +101,16 @@ async def main():
         st_o2, j_o2 = api('GET', '/api/doc/ordenes/' + cur, token=TA)
         check('al tocarlo de paso la toma (queda asignada a quien tocó)', j_o2['data']['items']['o2']['tecnico'] == otro['id'], j_o2['data']['items']['o2'])
         check('…y la pasa a «en camino», como «Salgo para allá»', j_o2['data']['items']['o2']['estado'] == 'en_camino')
+        # 2c) un técnico con permiso de ver todas las órdenes (como Fernanda) también lo tiene en su propia orden: antes
+        #     quedaba afuera de este enlace y se quedaba sin ninguna forma de avisarle al cliente
+        pf = await login(await nuevo(), 'fernanda', 'fernanda1')
+        await pf.click('#tabs [data-tab=ordenes]'); await pf.wait_for_selector('[data-oid="o3"]')
+        linkf = pf.locator('[data-oid="o3"] a:has-text("Avisar que salgo")')
+        check('una técnica con «ver todas las órdenes» también tiene «Avisar que salgo» en su propia orden', await linkf.count() == 1)
+        hreff = await linkf.get_attribute('href')
+        textof = urllib.parse.unquote(hreff.split('text=', 1)[1])
+        check('se presenta con su propio nombre', 'Soy el técnico Fernanda, de YAPUR.NET.' in textof, textof)
+        check('sigue viendo también el selector de técnico (no el filtro de mías/libres, propio de quien ve todas las órdenes)', await pf.query_selector('#or-tec') is not None)
         # 3) la oficina no tiene este enlace (tiene el suyo propio, «Enviar por WhatsApp», con los datos de la orden),
         #    ni en la orden asignada ni en una sin asignar
         po = await login(await nuevo(), 'laura', 'laura123')
