@@ -578,6 +578,8 @@ function ubicMotivoDe(lat, estado, ahora, iniTr, apag) {
 }
 const arTime = ts => { const d = new Date(ts - 3 * 3600e3); return { fecha: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
 const arDayStart = fecha => Date.parse(fecha + 'T00:00:00-03:00');
+/* «2026-11» -> «2026-10»: para mirar también el mes anterior al calcular novedades cerca de un cambio de mes */
+const prevMesKey = cur => { let [y, m] = cur.split('-').map(Number); m--; if (m < 1) { m = 12; y--; } return y + '-' + String(m).padStart(2, '0'); };
 
 /* ----- horario por día: de corrido (un tramo) o cortado (mañana y tarde, con siesta en el medio) -----
    plan = { corrido:{desde,hasta}, cortado:{m:[d,h],t:[d,h]}|null, dias:{0..6:'corrido'|'cortado'}, fechas:{'AAAA-MM-DD':'corrido'|'cortado'} }.
@@ -1893,7 +1895,27 @@ export class YapurDB extends DurableObject {
   ubicEstado(u) {
     const ahora = Date.now(), fecha = arTime(ahora).fecha, h = this.ubicDia(fecha), corte = u.role === 'tecnico' ? this.ubicCorteDe(u.id, fecha) : null;
     const tramos = ubicTramosCorte(h.tramos, arDayStart(fecha), corte);
-    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, modo: h.modo, dentro: !(corte && ahora >= corte) && this.ubicDentro(ahora, tramos), corte, dias: UBIC_DIAS };
+    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, modo: h.modo, dentro: !(corte && ahora >= corte) && this.ubicDentro(ahora, tramos), corte, dias: UBIC_DIAS, novedades: this.tecNovedades(u) };
+  }
+  /* cuántas de SUS órdenes (asignadas a él) cambiaron desde la última vez que las miró: una orden nueva, una que le volvieron a
+     asignar, un comentario… con mirar el campo «mod» alcanza, sin tener que distinguir de qué se trata. Lo pide el APK junto con
+     el horario (misma llamada, cada 10 minutos) para poder avisarle con una notificación aunque tenga la app cerrada. */
+  tecNovedades(u) {
+    if (u.role !== 'tecnico') return 0;
+    const visto = Number((this.q1('SELECT v FROM meta WHERE k=?', 'ordvisto:' + u.id) || {}).v) || 0;
+    const cur = arTime(Date.now()).fecha.slice(0, 7);
+    let n = 0;
+    for (const mk of [prevMesKey(cur), cur]) {
+      const d = this.readDoc('ordenes', mk), items = d && isPlain(d.items) ? d.items : {};
+      for (const k in items) { const o = items[k]; if (isPlain(o) && o.tecnico === u.id && Number(o.mod) > visto) n++; }
+    }
+    return n;
+  }
+  /* el técnico marca como vistas sus novedades: se llama al entrar a la pestaña de Órdenes */
+  ordenesVisto(u) {
+    const ts = Date.now();
+    if (u.role === 'tecnico') this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ordvisto:' + u.id, String(ts));
+    return { ok: true, visto: ts };
   }
   /* la oficina corta el GPS de un técnico desde una hora de hoy (por defecto, ahora): desde ahí no se guarda nada más, se borra lo que ya había guardado
      desde esa hora y esa hora queda como el fin de su jornada. Sirve cuando el regreso a la base no se detectó solo. «Reanudar» lo deshace hacia adelante. */
@@ -2308,6 +2330,7 @@ export class YapurDB extends DurableObject {
       this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubicok:' + a.user.id, String(Date.now()));
       return send(200, this.ubicEstado(a.user));
     }
+    if (p === '/api/ordenes/visto' && m === 'POST') return send(200, this.ordenesVisto((await this.needAuth(request)).user));
     if (p === '/api/ubicacion' && m === 'POST') return send(200, this.ubicGuardar((await this.needAuth(request)).user, readBody(raw, 2e5)));
     if (p === '/api/ubicacion/latido' && m === 'POST') return send(200, this.ubicLatido((await this.needAuth(request)).user, readBody(raw, 2e3)));
     if (p === '/api/ubicacion/cortar' && m === 'POST') { const a = await this.needAdmin(request); return send(200, this.ubicCortar(a.user, readBody(raw, 1e3))); }

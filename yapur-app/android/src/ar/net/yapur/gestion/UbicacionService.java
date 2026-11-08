@@ -67,6 +67,7 @@ public class UbicacionService extends Service implements LocationListener {
     static final String P_TOKEN = "ub_token";
     static final String P_TRAMOS = "ub_tramos";
     static final String P_LATIDO = "ub_latido";   // la página ya le mostró al técnico el aviso del latido: recién ahí el servicio lo manda
+    static final String P_NOV_NOTIF = "ub_nov_notif";   // cuántas novedades ya se avisaron por notificación (para no repetir la misma)
     /* Android no deja que una app cambie la importancia de un canal ya creado (solo el usuario puede), así que la notificación
        silenciosa va en canales NUEVOS. «ubicacion» (el viejo, con ícono en la barra) se borra en cuanto el servicio deja de usarlo. */
     private static final String CANAL_VIEJO = "ubicacion";
@@ -74,8 +75,10 @@ public class UbicacionService extends Service implements LocationListener {
     private static final String CANAL_ESPERA = "ubicacion_espera";     // fuera del horario: importancia mínima
     private static final String CANAL_PROBLEMA = "ubicacion_problema";  // GPS apagado o sin permiso: es lo único que sí conviene que se note
     private static final String CANAL_AVISO = "ubicacion_aviso";
+    private static final String CANAL_NOVEDADES = "ordenes_novedades";  // orden nueva, reasignada o con un comentario: sí conviene que se note
     private static final int NOTIF_ID = 4107;
     private static final int NOTIF_AVISO_ID = 4108;
+    private static final int NOTIF_NOV_ID = 4109;
     private static final int FOREGROUND_SERVICE_TYPE_LOCATION = 8;   // Android 10+
     private static final long CADA_MS = 60000L;                      // una posición por minuto
     private static final long ENTRE_PUNTOS_MS = 45000L;              // el GPS y la red avisan los dos: alcanza con uno por minuto
@@ -347,7 +350,22 @@ public class UbicacionService extends Service implements LocationListener {
             getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(P_TRAMOS, tramosTexto()).apply();
             main.removeCallbacks(ciclo);
             main.post(ciclo);   // el horario pudo cambiar: se vuelve a mirar ya
+            avisarSiHayNovedades(j.optInt("novedades", 0));
         } catch (Throwable t) { /* respuesta rara: queda el horario que había */ }
+    }
+
+    /* orden nueva, reasignada o con un comentario en alguna de las suyas: lo manda el servidor junto con el horario (mismo pedido
+       cada 10 minutos), así que esto avisa aunque la app esté cerrada. Solo avisa de nuevo si el número subió desde el último aviso
+       (si se quedó igual, ya se lo dijo); si llegó a 0 es que entró a Órdenes y las vio, así que queda listo para la próxima racha. */
+    private void avisarSiHayNovedades(int n) {
+        SharedPreferences sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int notificado = sp.getInt(P_NOV_NOTIF, 0);
+        if (n > 0 && n > notificado) {
+            avisarNovedades(this, n);
+            sp.edit().putInt(P_NOV_NOTIF, n).apply();
+        } else if (n == 0 && notificado != 0) {
+            sp.edit().putInt(P_NOV_NOTIF, 0).apply();
+        }
     }
 
     /* 401 (la sesión ya no vale) y 409 (no aceptó el aviso) cortan enseguida; 403 (no es técnico) recién cuando se repite 3 veces seguidas.
@@ -607,13 +625,30 @@ public class UbicacionService extends Service implements LocationListener {
     static Notification.Builder constructor(Context c, String canal, int importancia) throws Exception {
         if (Build.VERSION.SDK_INT >= 26) {
             Class<?> chC = Class.forName("android.app.NotificationChannel");
-            String nombre = CANAL_ACTIVA.equals(canal) ? "Ubicación en horario laboral" : CANAL_ESPERA.equals(canal) ? "Ubicación en espera" : CANAL_PROBLEMA.equals(canal) ? "Problemas con el GPS" : "Avisos de ubicación";
+            String nombre = CANAL_ACTIVA.equals(canal) ? "Ubicación en horario laboral" : CANAL_ESPERA.equals(canal) ? "Ubicación en espera" : CANAL_PROBLEMA.equals(canal) ? "Problemas con el GPS" : CANAL_NOVEDADES.equals(canal) ? "Novedades en tus órdenes" : "Avisos de ubicación";
             Object ch = chC.getConstructor(String.class, CharSequence.class, int.class).newInstance(canal, nombre, importancia);
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             NotificationManager.class.getMethod("createNotificationChannel", chC).invoke(nm, ch);
             return Notification.Builder.class.getConstructor(Context.class, String.class).newInstance(c, canal);
         }
         return new Notification.Builder(c);
+    }
+
+    /** Orden nueva, reasignada o con un comentario en alguna de las suyas: a diferencia de las de ubicación, esta sí conviene
+        que suene y se note (importancia 3 = IMPORTANCE_DEFAULT), porque es algo que el técnico tiene que ir a mirar. */
+    static void avisarNovedades(Context c, int n) {
+        try {
+            Notification.Builder b = constructor(c, CANAL_NOVEDADES, 3);
+            Intent open = new Intent(c, MainActivity.class);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent pi = PendingIntent.getActivity(c, 3, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            b.setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentTitle("Gestión YAPUR")
+                .setContentText(n == 1 ? "Tenés una orden con novedades." : "Tenés " + n + " órdenes con novedades.")
+                .setAutoCancel(true)
+                .setContentIntent(pi);
+            ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).notify(NOTIF_NOV_ID, b.build());
+        } catch (Throwable t) { /* sin aviso: lo va a ver igual la próxima vez que entre a la app */ }
     }
 
     /** «Tocá para reactivar»: cuando Android no deja arrancar el servicio solo, tocar una notificación sí está permitido. */

@@ -4739,6 +4739,9 @@ const salidaMsg=o=>`${saludoHora()} Soy el técnico ${quienSale(o)}, de YAPUR.NE
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
+  /* si el que guarda es el técnico, ya se enteró de lo que acaba de pasar en esta orden: se marca visto enseguida para que el
+     servicio de notificaciones no le avise después de su propio cambio como si fuera una novedad ajena */
+  if(S.realRole==='tecnico'&&!S.preview)NET.api('POST','/api/ordenes/visto',{}).catch(()=>{});
 }
 function orderText(o,c){
   const lines=[`Orden de trabajo: ${TIPOS_ORD[o.tipo]||o.tipo}${o.prioridad==='urgente'?' (URGENTE)':''}`,`Cliente: ${c?c.nombre:'(sin cliente)'}`];
@@ -4948,6 +4951,9 @@ async function orderAction(o,act){
 }
 VIEWS.ordenes={
   mount(el){
+    /* al entrar a esta pestaña, el técnico marca como vistas sus novedades (orden nueva, reasignada o con un comentario):
+       así el servicio en el celular sabe que ya se enteró y no le repite la notificación por lo mismo */
+    if(S.realRole==='tecnico'&&!S.preview)NET.api('POST','/api/ordenes/visto',{}).catch(()=>{});
     const tech=!can('ordenesTodas');
     el.innerHTML=`<div class="head-row"><h2>Órdenes de trabajo</h2>${can('crearOrdenes')?'<button class="btn primary" type="button" id="or-new">Nueva orden</button>':''}</div>
       <div id="or-who"></div><div id="or-pend"></div><div class="toolbar"><div class="seg" id="or-seg"></div>
@@ -6951,7 +6957,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='765b6e3276';
+const BUILD='04cda38637';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
