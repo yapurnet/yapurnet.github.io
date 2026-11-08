@@ -4783,7 +4783,7 @@ function orderCard(o){
     ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
-    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}${c&&c.tel&&can('telefono')&&can('operarOrdenes')&&!!S.tecId&&!can('ordenesTodas')&&(o.tecnico===S.tecId||!o.tecnico)?`<a class="btn primary" target="_blank" rel="noopener" data-oact="avisar" href="${waUrl(c.tel,salidaMsg(o))}">Avisar que salgo</a>`:''}
+    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}${c&&c.tel&&can('telefono')&&can('operarOrdenes')&&!!S.tecId&&(o.tecnico===S.tecId||!o.tecnico)?`<a class="btn primary" target="_blank" rel="noopener" data-oact="avisar" href="${waUrl(c.tel,salidaMsg(o))}">Avisar que salgo</a>`:''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
@@ -7006,7 +7006,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='f7c8ac5bac';
+const BUILD='910a42d5f8';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
