@@ -172,6 +172,23 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .bars.tight .bar span{font-size:10px;line-height:1.15;text-align:center}
 .bars.tight .bar b{font-size:10px}
 .bars.tight .bar.now span{color:var(--ink);font-weight:700}
+/* resumen: altas y bajas de clientes por mes, una barra verde y una roja lado a lado por mes */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:1px}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+.bars2{display:flex;align-items:flex-end;gap:14px;height:150px;padding-top:6px}
+.bars2 .grp{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;min-width:0}
+.bars2 .pair{display:flex;align-items:flex-end;gap:3px;height:100%}
+.bars2 .pair i{display:block;width:12px;border-radius:4px 4px 1px 1px;min-height:2px}
+.bars2 .pair i.alta{background:var(--ok)} .bars2 .pair i.baja{background:var(--bad)}
+.bars2 .grp span{font-size:11px;color:var(--muted)}
+.bars2 .grp.now span{color:var(--ink);font-weight:700}
+/* resumen: órdenes cerradas por técnico, una barra horizontal por técnico */
+.hbars{display:flex;flex-direction:column;gap:9px}
+.hbar-row{display:flex;align-items:center;gap:8px}
+.hbar-lbl{flex:0 0 38%;max-width:160px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbar-track{flex:1;background:var(--surface-2);border-radius:5px;height:14px;overflow:hidden}
+.hbar-fill{height:100%;background:var(--accent);border-radius:5px;min-width:2px}
+.hbar-val{flex:0 0 22px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
 .in-nav{display:flex;align-items:center;gap:8px}
 .in-nav .tt{flex:1;min-width:0;text-align:center;display:flex;flex-direction:column}
 .in-nav .tt b{font-family:var(--f-display);font-size:17px;overflow-wrap:anywhere}
@@ -6907,6 +6924,28 @@ VIEWS.cobranzas={
 };
 
 /* ===== resumen ===== */
+/* clientes: altas y bajas por mes (últimos 6), para ver si la empresa crece o se achica. «Alta» es c.alta (fecha de alta vigente,
+   se actualiza en cada reactivación desde «pendiente»); «baja» es c.bajaFecha (fecha en que se dio de baja, quede o no reactivado
+   después: la baja fue un hecho real de ese mes igual). */
+function clientesEvol(meses){
+  const altas={},bajas={};
+  for(const c of S.clientes.values()){
+    if(/^\d{4}-\d{2}-\d{2}$/.test(c.alta||''))altas[c.alta.slice(0,7)]=(altas[c.alta.slice(0,7)]||0)+1;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(c.bajaFecha||''))bajas[c.bajaFecha.slice(0,7)]=(bajas[c.bajaFecha.slice(0,7)]||0)+1;
+  }
+  return meses.map(m=>({m,altas:altas[m]||0,bajas:bajas[m]||0}));
+}
+/* órdenes cerradas por técnico en un mes: para ver la carga de trabajo repartida, no solo instalaciones (eso ya lo tiene su propia
+   pantalla con el detalle). Incluye a los técnicos con 0 en el mes, para que se note quién no cerró nada. */
+function ordenesPorTec(cur){
+  const cnt=new Map();
+  for(const o of S.ordenes.values()){
+    if(o.estado!=='hecha'||!o.tecnico)continue;
+    if((o.cierre||'').slice(0,7)!==cur)continue;
+    cnt.set(o.tecnico,(cnt.get(o.tecnico)||0)+1);
+  }
+  return S.ajustes.tecnicos.map(t=>({nombre:t.nombre,n:cnt.get(t.id)||0})).sort((a,b)=>b.n-a.n||a.nombre.localeCompare(b.nombre,'es'));
+}
 VIEWS.resumen={
   mount(el){el.innerHTML='<div id="rs" class="wrap" style="padding:0"></div>';this.update();},
   update(){
@@ -6927,6 +6966,11 @@ VIEWS.resumen={
     const open=[...S.ordenes.values()].filter(ORD_OPEN);
     const urg=open.filter(o=>o.prioridad==='urgente').length;
     const ins=can('ordenesTodas')&&S.loaded.ordenes?instResumen():null;
+    const evol=veTotales()?clientesEvol(meses):null;
+    const maxEv=evol?Math.max(1,...evol.map(e=>Math.max(e.altas,e.bajas))):1;
+    const netoEv=evol?evol.reduce((s,e)=>s+e.altas-e.bajas,0):0;
+    const tecs=can('ordenesTodas')&&S.loaded.ordenes&&S.ajustes.tecnicos.length?ordenesPorTec(cur):null;
+    const maxTec=tecs?Math.max(1,...tecs.map(t=>t.n)):1;
     debtors.sort((a,b)=>b.b.deuda-a.b.deuda);
     const cd=cortesData();
     const steps=[['Crear los planes de velocidad',S.planes.size>0,'planes'],['Crear los perfiles del equipo',S.ajustes.perfiles.length>0,'ajustes'],['Cargar o importar los clientes',S.clientes.size>0,'clientes']];
@@ -6944,6 +6988,11 @@ VIEWS.resumen={
       <div class="kpis three"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
       <div class="list" style="margin-top:8px">${calendarHTML()}</div></div>
     <div class="card"><h3>Cobrado por mes</h3><div class="bars">${meses.map(m=>{const v=porMes[m]||0;return `<div class="bar${m===cur?' now':''}"><b>${v?esc(fmtMoney(v).replace(/\s/g,'')):''}</b><i style="height:${Math.max(2,Math.round(96*v/max))}px"></i><span>${esc(monthShort(m))}</span></div>`;}).join('')}</div></div>
+    ${evol?`<div class="card"><div class="head-row"><h3>Clientes: altas y bajas</h3><div class="small muted"><span class="dot ok"></span>Altas <span class="dot bad" style="margin-left:8px"></span>Bajas</div></div>
+      <div class="bars2">${evol.map(e=>`<div class="grp${e.m===cur?' now':''}" title="${esc(monthLabel(e.m))}: ${e.altas} ${e.altas===1?'alta':'altas'}, ${e.bajas} ${e.bajas===1?'baja':'bajas'}"><div class="pair"><i class="alta" style="height:${Math.max(2,Math.round(96*e.altas/maxEv))}px"></i><i class="baja" style="height:${Math.max(2,Math.round(96*e.bajas/maxEv))}px"></i></div><span>${esc(monthShort(e.m))}</span></div>`).join('')}</div>
+      <div class="hint">${netoEv>0?`+${netoEv} clientes netos`:netoEv<0?`${netoEv} clientes netos`:'Sin cambio neto'} en los últimos 6 meses.</div></div>`:''}
+    ${tecs?`<div class="card"><div class="head-row"><h3>Órdenes cerradas por técnico</h3><span class="small muted">${esc(monthLabel(cur))}</span></div>
+      <div class="hbars">${tecs.map(t=>`<div class="hbar-row"><span class="hbar-lbl">${esc(t.nombre)}</span><div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(t.n?3:0,Math.round(100*t.n/maxTec))}%"></div></div><span class="hbar-val">${t.n}</span></div>`).join('')}</div></div>`:''}
     <div class="card"><div class="head-row"><h3>Mayores deudas</h3><button class="btn small" type="button" data-go="cobranzas" data-sub="morosos">Ver todos</button></div>
       ${debtors.length?`<div class="list">${debtors.slice(0,5).map(({c,b})=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${can('telefono')?esc(c.tel||''):''}</div></div><div class="side"><b class="tnum">${fmtMoney(b.deuda)}</b><span class="chip bad">${b.vencidos} ${b.vencidos===1?'mes':'meses'}</span></div></button>`).join('')}</div>`:'<div class="hint">No hay clientes con deuda vencida.</div>'}</div>
     ${S.planes.size?`<div class="card"><h3>Clientes por plan</h3><div class="tbl-wrap"><table><thead><tr><th>Plan</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${[...S.planes.values()].sort((a,b)=>a.bajada-b.bajada).map(p=>{const n=planCount.get(p.id)||0;return `<tr><td>${esc(p.nombre)} <span class="muted small mono">${esc(p.bajada)}/${esc(p.subida)}</span></td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(planNow(p))}</td><td class="right tnum">${fmtMoney(n*planNow(p))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}
@@ -6957,7 +7006,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='04cda38637';
+const BUILD='0f3b84be0e';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

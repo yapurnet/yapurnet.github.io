@@ -1,4 +1,26 @@
 /* ===== resumen ===== */
+/* clientes: altas y bajas por mes (últimos 6), para ver si la empresa crece o se achica. «Alta» es c.alta (fecha de alta vigente,
+   se actualiza en cada reactivación desde «pendiente»); «baja» es c.bajaFecha (fecha en que se dio de baja, quede o no reactivado
+   después: la baja fue un hecho real de ese mes igual). */
+function clientesEvol(meses){
+  const altas={},bajas={};
+  for(const c of S.clientes.values()){
+    if(/^\d{4}-\d{2}-\d{2}$/.test(c.alta||''))altas[c.alta.slice(0,7)]=(altas[c.alta.slice(0,7)]||0)+1;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(c.bajaFecha||''))bajas[c.bajaFecha.slice(0,7)]=(bajas[c.bajaFecha.slice(0,7)]||0)+1;
+  }
+  return meses.map(m=>({m,altas:altas[m]||0,bajas:bajas[m]||0}));
+}
+/* órdenes cerradas por técnico en un mes: para ver la carga de trabajo repartida, no solo instalaciones (eso ya lo tiene su propia
+   pantalla con el detalle). Incluye a los técnicos con 0 en el mes, para que se note quién no cerró nada. */
+function ordenesPorTec(cur){
+  const cnt=new Map();
+  for(const o of S.ordenes.values()){
+    if(o.estado!=='hecha'||!o.tecnico)continue;
+    if((o.cierre||'').slice(0,7)!==cur)continue;
+    cnt.set(o.tecnico,(cnt.get(o.tecnico)||0)+1);
+  }
+  return S.ajustes.tecnicos.map(t=>({nombre:t.nombre,n:cnt.get(t.id)||0})).sort((a,b)=>b.n-a.n||a.nombre.localeCompare(b.nombre,'es'));
+}
 VIEWS.resumen={
   mount(el){el.innerHTML='<div id="rs" class="wrap" style="padding:0"></div>';this.update();},
   update(){
@@ -19,6 +41,11 @@ VIEWS.resumen={
     const open=[...S.ordenes.values()].filter(ORD_OPEN);
     const urg=open.filter(o=>o.prioridad==='urgente').length;
     const ins=can('ordenesTodas')&&S.loaded.ordenes?instResumen():null;
+    const evol=veTotales()?clientesEvol(meses):null;
+    const maxEv=evol?Math.max(1,...evol.map(e=>Math.max(e.altas,e.bajas))):1;
+    const netoEv=evol?evol.reduce((s,e)=>s+e.altas-e.bajas,0):0;
+    const tecs=can('ordenesTodas')&&S.loaded.ordenes&&S.ajustes.tecnicos.length?ordenesPorTec(cur):null;
+    const maxTec=tecs?Math.max(1,...tecs.map(t=>t.n)):1;
     debtors.sort((a,b)=>b.b.deuda-a.b.deuda);
     const cd=cortesData();
     const steps=[['Crear los planes de velocidad',S.planes.size>0,'planes'],['Crear los perfiles del equipo',S.ajustes.perfiles.length>0,'ajustes'],['Cargar o importar los clientes',S.clientes.size>0,'clientes']];
@@ -36,6 +63,11 @@ VIEWS.resumen={
       <div class="kpis three"><div class="kpi${cd.cortar.length?' bad':''}"><span class="n">${cd.cortar.length}</span><span class="l">Para cortar</span></div><div class="kpi"><span class="n">${cd.reconectar.length}</span><span class="l">Para reconectar</span></div><div class="kpi"><span class="n">${cd.promesas.length}</span><span class="l">Promesas vigentes</span></div></div>
       <div class="list" style="margin-top:8px">${calendarHTML()}</div></div>
     <div class="card"><h3>Cobrado por mes</h3><div class="bars">${meses.map(m=>{const v=porMes[m]||0;return `<div class="bar${m===cur?' now':''}"><b>${v?esc(fmtMoney(v).replace(/\s/g,'')):''}</b><i style="height:${Math.max(2,Math.round(96*v/max))}px"></i><span>${esc(monthShort(m))}</span></div>`;}).join('')}</div></div>
+    ${evol?`<div class="card"><div class="head-row"><h3>Clientes: altas y bajas</h3><div class="small muted"><span class="dot ok"></span>Altas <span class="dot bad" style="margin-left:8px"></span>Bajas</div></div>
+      <div class="bars2">${evol.map(e=>`<div class="grp${e.m===cur?' now':''}" title="${esc(monthLabel(e.m))}: ${e.altas} ${e.altas===1?'alta':'altas'}, ${e.bajas} ${e.bajas===1?'baja':'bajas'}"><div class="pair"><i class="alta" style="height:${Math.max(2,Math.round(96*e.altas/maxEv))}px"></i><i class="baja" style="height:${Math.max(2,Math.round(96*e.bajas/maxEv))}px"></i></div><span>${esc(monthShort(e.m))}</span></div>`).join('')}</div>
+      <div class="hint">${netoEv>0?`+${netoEv} clientes netos`:netoEv<0?`${netoEv} clientes netos`:'Sin cambio neto'} en los últimos 6 meses.</div></div>`:''}
+    ${tecs?`<div class="card"><div class="head-row"><h3>Órdenes cerradas por técnico</h3><span class="small muted">${esc(monthLabel(cur))}</span></div>
+      <div class="hbars">${tecs.map(t=>`<div class="hbar-row"><span class="hbar-lbl">${esc(t.nombre)}</span><div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(t.n?3:0,Math.round(100*t.n/maxTec))}%"></div></div><span class="hbar-val">${t.n}</span></div>`).join('')}</div></div>`:''}
     <div class="card"><div class="head-row"><h3>Mayores deudas</h3><button class="btn small" type="button" data-go="cobranzas" data-sub="morosos">Ver todos</button></div>
       ${debtors.length?`<div class="list">${debtors.slice(0,5).map(({c,b})=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${can('telefono')?esc(c.tel||''):''}</div></div><div class="side"><b class="tnum">${fmtMoney(b.deuda)}</b><span class="chip bad">${b.vencidos} ${b.vencidos===1?'mes':'meses'}</span></div></button>`).join('')}</div>`:'<div class="hint">No hay clientes con deuda vencida.</div>'}</div>
     ${S.planes.size?`<div class="card"><h3>Clientes por plan</h3><div class="tbl-wrap"><table><thead><tr><th>Plan</th><th class="right">Activos</th><th class="right">Precio</th><th class="right">Por mes</th></tr></thead><tbody>${[...S.planes.values()].sort((a,b)=>a.bajada-b.bajada).map(p=>{const n=planCount.get(p.id)||0;return `<tr><td>${esc(p.nombre)} <span class="muted small mono">${esc(p.bajada)}/${esc(p.subida)}</span></td><td class="right tnum">${n}</td><td class="right tnum">${fmtMoney(planNow(p))}</td><td class="right tnum">${fmtMoney(n*planNow(p))}</td></tr>`;}).join('')}</tbody></table></div></div>`:''}
