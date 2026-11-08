@@ -118,6 +118,23 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .bars.tight .bar span{font-size:10px;line-height:1.15;text-align:center}
 .bars.tight .bar b{font-size:10px}
 .bars.tight .bar.now span{color:var(--ink);font-weight:700}
+/* resumen: altas y bajas de clientes por mes, una barra verde y una roja lado a lado por mes */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:1px}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+.bars2{display:flex;align-items:flex-end;gap:14px;height:150px;padding-top:6px}
+.bars2 .grp{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;min-width:0}
+.bars2 .pair{display:flex;align-items:flex-end;gap:3px;height:100%}
+.bars2 .pair i{display:block;width:12px;border-radius:4px 4px 1px 1px;min-height:2px}
+.bars2 .pair i.alta{background:var(--ok)} .bars2 .pair i.baja{background:var(--bad)}
+.bars2 .grp span{font-size:11px;color:var(--muted)}
+.bars2 .grp.now span{color:var(--ink);font-weight:700}
+/* resumen: órdenes cerradas por técnico, una barra horizontal por técnico */
+.hbars{display:flex;flex-direction:column;gap:9px}
+.hbar-row{display:flex;align-items:center;gap:8px}
+.hbar-lbl{flex:0 0 38%;max-width:160px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbar-track{flex:1;background:var(--surface-2);border-radius:5px;height:14px;overflow:hidden}
+.hbar-fill{height:100%;background:var(--accent);border-radius:5px;min-width:2px}
+.hbar-val{flex:0 0 22px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
 .in-nav{display:flex;align-items:center;gap:8px}
 .in-nav .tt{flex:1;min-width:0;text-align:center;display:flex;flex-direction:column}
 .in-nav .tt b{font-family:var(--f-display);font-size:17px;overflow-wrap:anywhere}
