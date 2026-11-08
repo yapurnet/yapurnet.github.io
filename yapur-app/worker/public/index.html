@@ -4729,10 +4729,13 @@ const puedeComentarOrden=o=>can('ordenesTodas')||(can('operarOrdenes')&&!!S.tecI
 const comentTxt=c=>dmy(String(c.ts||'').slice(0,10))+' '+String(c.ts||'').slice(11,16);
 /* saludo según la hora del celular en el momento de tocar el botón (no la fecha/hora de la orden) */
 const saludoHora=()=>{const h=new Date().getHours();return h>=6&&h<13?'¡Buen día!':h>=13&&h<20?'¡Buenas tardes!':'¡Buenas noches!';};
+/* quién firma el mensaje: si la orden ya tiene técnico, el asignado; si todavía está sin asignar, firma el que está por
+   tomarla (el que toca el botón) */
+const quienSale=o=>o.tecnico?tecLabel(o):((tecById(S.tecId)||{}).nombre||'');
 /* mensaje para avisarle al cliente que el técnico ya sale para allá, firmado con su nombre. Queda siempre editable en WhatsApp
    antes de mandarlo (nunca se envía solo), así que «domicilio/comercio» se deja así a propósito: el técnico borra el que no
    corresponda al tocar enviar, en vez de que la app tenga que adivinarlo */
-const salidaMsg=o=>`${saludoHora()} Soy el técnico ${tecLabel(o)}, de YAPUR.NET. Le aviso que ya estoy saliendo hacia su domicilio/comercio. ¡Hasta ahora!`;
+const salidaMsg=o=>`${saludoHora()} Soy el técnico ${quienSale(o)}, de YAPUR.NET. Le aviso que ya estoy saliendo hacia su domicilio/comercio. ¡Hasta ahora!`;
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
@@ -4760,7 +4763,7 @@ function orderCard(o){
     ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
-    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}${c&&c.tel&&can('telefono')&&can('operarOrdenes')&&!!S.tecId&&o.tecnico===S.tecId?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(c.tel,salidaMsg(o))}">Avisar que salgo</a>`:''}
+    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}${c&&c.tel&&can('telefono')&&can('operarOrdenes')&&!!S.tecId&&!can('ordenesTodas')&&(o.tecnico===S.tecId||!o.tecnico)?`<a class="btn primary" target="_blank" rel="noopener" data-oact="avisar" href="${waUrl(c.tel,salidaMsg(o))}">Avisar que salgo</a>`:''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
@@ -4931,6 +4934,9 @@ async function orderAction(o,act){
     }else if(act==='fin')openFinishOrder(o);
     else if(act==='cobrar')openCobro(o.clientId,'instalacion');
     else if(act==='take'){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null});toast('Orden asignada a vos');}
+    /* «Avisar que salgo» en una orden todavía sin asignar: al abrir el WhatsApp con el mensaje ya armado, de paso la toma y la
+       pasa a «en camino», igual que si hubiera tocado «Salgo para allá». Si ya era suya no hace falta tocar nada más. */
+    else if(act==='avisar'){if(!o.tecnico&&S.tecId){const t=tecById(S.tecId);await saveOrder(o,{tecnico:S.tecId,tecNombre:t?t.nombre:null,estado:'en_camino'});toast('Orden asignada a vos y marcada en camino');}}
     else if(act==='edit')openOrderForm({id:o.id});
     else if(act==='cliente')openClientForm(o.clientId);
     else if(act==='geo')openGeoQuick(o.clientId);
@@ -6945,7 +6951,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='613873fe98';
+const BUILD='765b6e3276';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
