@@ -125,9 +125,27 @@ $('#viewAsBtn').addEventListener('click',()=>{
 });
 
 /* ===== mi cuenta ===== */
+/* frase corta que acompaña «Mi cuenta», una por día (no hace falta pedirle nada al servidor): antes ahí se mostraba la
+   dirección del servidor, que quien ya está adentro de la app no necesita ver (esa sí hace falta al crear un usuario nuevo,
+   para decirle dónde entrar — eso sigue en Ajustes → Usuarios, sin tocar). */
+const FRASES_CUENTA=['Lo que armás hoy, funciona mañana sin que nadie lo note.','Gracias por sostener la red de tanta gente.',
+  'Un trabajo prolijo hoy es un problema menos mañana.','Cada cliente conforme empezó con alguien que hizo bien su parte.',
+  'No se nota todo lo que hacés, pero se siente.','Firme con lo de hoy, que ya es un montón.','Las cosas bien hechas no vuelven.',
+  'Alguien hoy tiene señal gracias a vos.','Paso a paso también se llega.','El trabajo de hoy sostiene la calma de mañana.',
+  'Lo simple y bien hecho rinde más que lo apurado.','Buen día para hacer las cosas bien, como siempre.',
+  'Cada orden cerrada es un cliente que respira tranquilo.','Gracias por estar, aunque haga calor o llueva.',
+  'Lo que hoy parece poco, en un mes es un montón.','Nadie ve el cable bien pasado, pero todos notan el que no anda.',
+  'Hecho con cuidado, dura más.','Hoy también sumó lo que hiciste.','La prolijidad de hoy ahorra el dolor de cabeza de mañana.',
+  'Un buen día de trabajo no necesita aplausos para valer.','Gracias por bancarte las subidas al poste y las vueltas largas.',
+  'Lo que se arregla bien, no vuelve a llamar.','La constancia gana más que el apuro.',
+  'Cada casa con señal es una historia que no se ve.','Hoy, como siempre: hacerlo bien es lo que queda.',
+  'Gracias por ser la cara de la empresa en la puerta de cada casa.','Lo que cuesta un poco más, después se nota mucho más.',
+  'Un día más sosteniendo la conexión de todo un pueblo.'];
+function fraseDelDia(){const d=new Date(),ini=new Date(d.getFullYear(),0,0),dia=Math.floor((d-ini)/86400000);return FRASES_CUENTA[((dia%FRASES_CUENTA.length)+FRASES_CUENTA.length)%FRASES_CUENTA.length];}
 function openAccount(){
   const me=S.me;if(!me)return;
-  openModal({title:'Mi cuenta',html:`<dl class="kv"><dt>Nombre</dt><dd>${esc(me.nombre)}</dd><dt>Usuario</dt><dd class="mono">${esc(me.usuario)}</dd><dt>Tipo</dt><dd>${esc(ROLE_NAME[me.role]||me.role)}</dd><dt>Dirección</dt><dd class="mono" style="word-break:break-all">${esc(serverUrl())}</dd></dl>
+  openModal({title:'Mi cuenta',html:`<dl class="kv"><dt>Nombre</dt><dd>${esc(me.nombre)}</dd><dt>Usuario</dt><dd class="mono">${esc(me.usuario)}</dd><dt>Tipo</dt><dd>${esc(ROLE_NAME[me.role]||me.role)}</dd></dl>
+    <p class="hint" style="margin-top:10px;font-style:italic">"${esc(fraseDelDia())}"</p>
     <form class="form" id="ac-form" novalidate><h3>Cambiar mi clave</h3>
       ${F('Clave actual','ac-act','<input id="ac-act" type="password" autocomplete="current-password">')}
       ${F('Clave nueva','ac-new','<input id="ac-new" type="password" autocomplete="new-password">','Mínimo '+(me.role==='admin'?8:6)+' caracteres.')}
