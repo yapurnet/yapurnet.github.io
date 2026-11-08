@@ -802,14 +802,19 @@ export class YapurDB extends DurableObject {
     if (!u || !u.activo) return null;
     if (Date.now() - s.last > 180 * 864e5) { this.sql.exec('DELETE FROM sessions WHERE th=?', th); return null; }
     /* el equipo de esta sesión tiene que seguir autorizado: si el administrador lo bloqueó o lo quitó, la sesión termina en el acto */
-    let dev = s.dev ? this.q1('SELECT id,uid,did,estado FROM devices WHERE id=?', s.dev) : null;
+    let dev = s.dev ? this.q1('SELECT id,uid,did,estado,ua FROM devices WHERE id=?', s.dev) : null;
     if (s.dev && (!dev || dev.estado !== 'ok')) { this.sql.exec('DELETE FROM sessions WHERE th=?', th); return null; }
     const did = request.headers.get('x-did');
-    if (dev && dev.did.startsWith('old-') && did) { this.devCompletar(dev, request, did); dev = this.q1('SELECT id,uid,did,estado FROM devices WHERE uid=? AND did=?', s.uid, did) || dev; }
+    if (dev && dev.did.startsWith('old-') && did) { this.devCompletar(dev, request, did); dev = this.q1('SELECT id,uid,did,estado,ua FROM devices WHERE uid=? AND did=?', s.uid, did) || dev; }
+    /* el modelo, el SO y la versión del APK se refrescan apenas cambia el User-Agent (se actualizó la app): si esto solo pasara
+       al loguearse, quien actualiza la app sin volver a loguearse (la sesión sigue valiendo) quedaría mostrando para siempre la
+       versión vieja en Dispositivos. No se toca un equipo todavía «old-» (sesión de antes de esta función): ese sigue mostrando
+       «Sesión anterior» hasta completarse de verdad con su identificador (devCompletar, arriba), no con solo el User-Agent. */
+    const uaNow = (request.headers.get('user-agent') || '').slice(0, 300);
+    if (dev && !dev.did.startsWith('old-') && uaNow && uaNow !== dev.ua) { const info = uaInfo(uaNow); this.sql.exec('UPDATE devices SET label=?,ua=?,app=? WHERE id=?', info.label, uaNow, info.app, dev.id); }
     if (Date.now() - s.last > 60e3) {
       this.sql.exec('UPDATE sessions SET last=?,dev=? WHERE th=?', Date.now(), dev ? dev.id : s.dev, th);
       if (dev) this.sql.exec('UPDATE devices SET visto=?,ip=?,geo=? WHERE id=?', Date.now(), (request.headers.get('cf-connecting-ip') || '').slice(0, 60), geoOf(request), dev.id);
-      if (dev && dev.did.startsWith('old-')) { const ua = (request.headers.get('user-agent') || '').slice(0, 300), info = uaInfo(ua); this.sql.exec('UPDATE devices SET label=?,ua=?,app=? WHERE id=?', info.label, ua, info.app, dev.id); }
     }
     return { user: u, th, dev: dev ? dev.id : null };
   }
