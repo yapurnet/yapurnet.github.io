@@ -14,6 +14,12 @@ const cancelTxt=o=>{if(!o||o.estado!=='cancelada')return '';const c=String(o.cie
    abierta o ya cerrada (justo el caso de una visita ya hecha a la que después hay que preguntarle algo para poder cobrarla) */
 const puedeComentarOrden=o=>can('ordenesTodas')||(can('operarOrdenes')&&!!S.tecId&&o.tecnico===S.tecId);
 const comentTxt=c=>dmy(String(c.ts||'').slice(0,10))+' '+String(c.ts||'').slice(11,16);
+/* saludo según la hora del celular en el momento de tocar el botón (no la fecha/hora de la orden) */
+const saludoHora=()=>{const h=new Date().getHours();return h>=6&&h<13?'¡Buen día!':h>=13&&h<20?'¡Buenas tardes!':'¡Buenas noches!';};
+/* mensaje para avisarle al cliente que el técnico ya sale para allá, firmado con su nombre. Queda siempre editable en WhatsApp
+   antes de mandarlo (nunca se envía solo), así que «domicilio/comercio» se deja así a propósito: el técnico borra el que no
+   corresponda al tocar enviar, en vez de que la app tenga que adivinarlo */
+const salidaMsg=o=>`${saludoHora()} Soy el técnico ${tecLabel(o)}, de YAPUR.NET. Le aviso que ya estoy saliendo hacia su domicilio/comercio. ¡Hasta ahora!`;
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
@@ -41,7 +47,7 @@ function orderCard(o){
     ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
     ${open&&c?`<div class="actions start">${geoActions(c)}${hasGeo(c)||!can('ubicacion')?'':'<button class="btn small" type="button" data-oact="geo">Cargar ubicación</button>'}</div>
       ${c.tel&&can('telefono')?`<div class="small">Cliente: <span class="mono">${esc(c.tel)}</span> · <a href="${waUrl(c.tel,'')}" target="_blank" rel="noopener">WhatsApp</a> · <button class="btn small ghost" type="button" data-copy="${esc(c.tel)}" data-copy-label="Teléfono">Copiar</button></div>`:''}`:''}
-    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}
+    ${open?`<div class="actions start">${next&&can('operarOrdenes')?`<button class="btn primary" type="button" data-oact="next">${next[1]}</button>`:''}${next&&o.estado!=='en_curso'&&can('operarOrdenes')?'<button class="btn small" type="button" data-oact="fin">Ya la terminé</button>':''}${c&&c.tel&&can('telefono')&&can('operarOrdenes')&&!!S.tecId&&o.tecnico===S.tecId?`<a class="btn small" target="_blank" rel="noopener" href="${waUrl(c.tel,salidaMsg(o))}">Avisar que salgo</a>`:''}
       ${!o.tecnico&&S.tecId&&!can('ordenesTodas')&&can('operarOrdenes')?'<button class="btn" type="button" data-oact="take">Tomar esta orden</button>':''}
       ${c&&(can('editarClientes')||can('ubicacion'))?`<button class="btn small" type="button" data-oact="cliente">${puedeCompletar(c)?'Cargar datos del abonado':'Datos del abonado'}</button>`:''}
       ${can('crearOrdenes')?'<button class="btn small" type="button" data-oact="edit">Editar orden</button>':''}
