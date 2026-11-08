@@ -26,6 +26,9 @@ const salidaMsg=o=>`${saludoHora()} Soy el técnico ${quienSale(o)}, de YAPUR.NE
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
+  /* si el que guarda es el técnico, ya se enteró de lo que acaba de pasar en esta orden: se marca visto enseguida para que el
+     servicio de notificaciones no le avise después de su propio cambio como si fuera una novedad ajena */
+  if(S.realRole==='tecnico'&&!S.preview)NET.api('POST','/api/ordenes/visto',{}).catch(()=>{});
 }
 function orderText(o,c){
   const lines=[`Orden de trabajo: ${TIPOS_ORD[o.tipo]||o.tipo}${o.prioridad==='urgente'?' (URGENTE)':''}`,`Cliente: ${c?c.nombre:'(sin cliente)'}`];
@@ -235,6 +238,9 @@ async function orderAction(o,act){
 }
 VIEWS.ordenes={
   mount(el){
+    /* al entrar a esta pestaña, el técnico marca como vistas sus novedades (orden nueva, reasignada o con un comentario):
+       así el servicio en el celular sabe que ya se enteró y no le repite la notificación por lo mismo */
+    if(S.realRole==='tecnico'&&!S.preview)NET.api('POST','/api/ordenes/visto',{}).catch(()=>{});
     const tech=!can('ordenesTodas');
     el.innerHTML=`<div class="head-row"><h2>Órdenes de trabajo</h2>${can('crearOrdenes')?'<button class="btn primary" type="button" id="or-new">Nueva orden</button>':''}</div>
       <div id="or-who"></div><div id="or-pend"></div><div class="toolbar"><div class="seg" id="or-seg"></div>
