@@ -352,13 +352,24 @@ function billChip0(c){
 function parseCoords(text){
   if(!text)return null;
   let t=String(text).trim().replace(/%2C/gi,',');
-  if(/^-?\d+,\d+\s+-?\d+,\d+$/.test(t))t=t.replace(/,/g,'.');
-  const m=t.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/)
-    ||t.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)
-    ||t.match(/[?&](?:q|ll|query|destination|center)=\+?(-?\d+(?:\.\d+)?),\s*\+?(-?\d+(?:\.\d+)?)/)
-    ||t.match(/(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
-  if(!m)return null;
-  let lat=parseFloat(m[1]),lng=parseFloat(m[2]);
+  /* Maps a veces muestra «Acerca de» con coma decimal (formato argentino): -28,4698100, -62,8369850.
+     Si TODO el texto es ese patrón (coma decimal en cada número, separados por coma y/o espacio), se
+     reinterpretan las comas como punto decimal antes de seguir. */
+  if(/^-?\d+,\d+[,;\s]+-?\d+,\d+$/.test(t))t=t.replace(/(\d),(\d)/g,'$1.$2');
+  /* grados, minutos y segundos (lo que Maps muestra arriba de «Acerca de»): 28°28'11.3"S 62°50'13.2"W */
+  const dms=t.match(/(\d{1,3})\s*°\s*(\d{1,2})\s*['’′]\s*([\d.]+)\s*(?:["”″])?\s*([NS])[,;\s]+(\d{1,3})\s*°\s*(\d{1,2})\s*['’′]\s*([\d.]+)\s*(?:["”″])?\s*([EW])/i);
+  let lat,lng;
+  if(dms){
+    lat=(parseFloat(dms[1])+parseFloat(dms[2])/60+parseFloat(dms[3])/3600)*(/S/i.test(dms[4])?-1:1);
+    lng=(parseFloat(dms[5])+parseFloat(dms[6])/60+parseFloat(dms[7])/3600)*(/W/i.test(dms[8])?-1:1);
+  }else{
+    const m=t.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/)
+      ||t.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)
+      ||t.match(/[?&](?:q|ll|query|destination|center)=\+?(-?\d+(?:\.\d+)?),\s*\+?(-?\d+(?:\.\d+)?)/)
+      ||t.match(/(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
+    if(!m)return null;
+    lat=parseFloat(m[1]);lng=parseFloat(m[2]);
+  }
   if(!isFinite(lat)||!isFinite(lng))return null;
   let fixed=false;
   if(lat>0&&lng>0&&lat>=21&&lat<=56&&lng>=53&&lng<=74){lat=-lat;lng=-lng;fixed=true;}
