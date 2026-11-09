@@ -152,7 +152,7 @@ function bindGeoField(root){
     const g=read();
     if(g.empty){hint.className='hint';hint.textContent='En Google Maps mantené apretado el punto y copiá los números que aparecen arriba. También sirve pegar el link que manda el cliente por WhatsApp.';}
     else if(g.invalid){hint.className='hint bad';hint.textContent=g.short?'Los links cortos (maps.app.goo.gl) no traen coordenadas. Abrilo en Maps y copiá los números.':'No se reconoce. Pegá dos números separados por coma, por ejemplo -27.7345, -62.4678.';}
-    else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
+    else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.swapped?'. Estaban al revés (primero longitud, después latitud); se acomodaron solas.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
   };
   inp.addEventListener('input',draw);draw();
   const btn=$('#cf-gps',root),st=$('#cf-gps-st',root);

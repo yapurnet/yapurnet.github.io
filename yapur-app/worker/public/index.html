@@ -758,8 +758,13 @@ function parseCoords(text){
   let fixed=false;
   if(lat>0&&lng>0&&lat>=21&&lat<=56&&lng>=53&&lng<=74){lat=-lat;lng=-lng;fixed=true;}
   if(Math.abs(lat)>90||Math.abs(lng)>180)return null;
+  /* si vino con latitud y longitud al revés (algunos links de Maps las listan long,lat), y dado vuelta sí cae en Argentina,
+     se da vuelta solo: es más probable que se haya pegado al revés a que el cliente esté fuera del país. */
+  const esLat=v=>v<=-21&&v>=-56,esLng=v=>v<=-53&&v>=-74;
+  let swapped=false;
+  if(!(esLat(lat)&&esLng(lng))&&esLat(lng)&&esLng(lat)){[lat,lng]=[lng,lat];swapped=true;}
   const inAR=lat<=-21&&lat>=-56&&lng<=-53&&lng>=-74;
-  return {lat:+lat.toFixed(6),lng:+lng.toFixed(6),fixed,outside:!inAR};
+  return {lat:+lat.toFixed(6),lng:+lng.toFixed(6),fixed,swapped,outside:!inAR};
 }
 const hasGeo=o=>!!o&&o.lat!==null&&o.lat!==undefined&&o.lat!==''&&o.lng!==null&&o.lng!==undefined&&o.lng!==''&&isFinite(parseFloat(o.lat))&&isFinite(parseFloat(o.lng));
 const llStr=o=>parseFloat(o.lat).toFixed(6)+','+parseFloat(o.lng).toFixed(6);
@@ -1284,7 +1289,7 @@ function bindGeoField(root){
     const g=read();
     if(g.empty){hint.className='hint';hint.textContent='En Google Maps mantené apretado el punto y copiá los números que aparecen arriba. También sirve pegar el link que manda el cliente por WhatsApp.';}
     else if(g.invalid){hint.className='hint bad';hint.textContent=g.short?'Los links cortos (maps.app.goo.gl) no traen coordenadas. Abrilo en Maps y copiá los números.':'No se reconoce. Pegá dos números separados por coma, por ejemplo -27.7345, -62.4678.';}
-    else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
+    else{hint.className='hint '+(g.outside?'bad':'ok');hint.textContent='Se guarda '+g.lat+', '+g.lng+(g.fixed?'. Se corrigió el signo: en Argentina son negativos.':'')+(g.swapped?'. Estaban al revés (primero longitud, después latitud); se acomodaron solas.':'')+(g.outside?'. Queda fuera de Argentina, revisalo.':'.');}
   };
   inp.addEventListener('input',draw);draw();
   const btn=$('#cf-gps',root),st=$('#cf-gps-st',root);
@@ -7006,7 +7011,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='910a42d5f8';
+const BUILD='58431bfee9';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

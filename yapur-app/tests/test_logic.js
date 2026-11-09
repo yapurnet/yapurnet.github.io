@@ -13,6 +13,8 @@ g=parseCoords('-27,7345 -62,4678');t('coma decimal con espacio',g&&g.lat===-27.7
 g=parseCoords('40.4168, -3.7038');t('fuera de Argentina marcado',g&&g.outside,g);
 t('texto invalido',parseCoords('hola')===null);
 t('link corto no resuelve',parseCoords('https://maps.app.goo.gl/abc123')===null);
+g=parseCoords('-62.8300, -28.4600');t('long y lat al revés se acomodan solas',g&&g.lat===-28.46&&g.lng===-62.83&&g.swapped&&!g.outside,g);
+g=parseCoords('-27.7345, -62.4678');t('en el orden correcto no marca swapped',g&&!g.swapped,g);
 // whatsapp
 t('wa numero',waNumber('3844 56-2605')==='5493844562605',waNumber('3844 56-2605'));
 t('wa con +54 9',waNumber('+54 9 3844 58-9351')==='5493844589351',waNumber('+54 9 3844 58-9351'));
