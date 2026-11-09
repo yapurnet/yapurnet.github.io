@@ -363,8 +363,13 @@ function parseCoords(text){
   let fixed=false;
   if(lat>0&&lng>0&&lat>=21&&lat<=56&&lng>=53&&lng<=74){lat=-lat;lng=-lng;fixed=true;}
   if(Math.abs(lat)>90||Math.abs(lng)>180)return null;
+  /* si vino con latitud y longitud al revés (algunos links de Maps las listan long,lat), y dado vuelta sí cae en Argentina,
+     se da vuelta solo: es más probable que se haya pegado al revés a que el cliente esté fuera del país. */
+  const esLat=v=>v<=-21&&v>=-56,esLng=v=>v<=-53&&v>=-74;
+  let swapped=false;
+  if(!(esLat(lat)&&esLng(lng))&&esLat(lng)&&esLng(lat)){[lat,lng]=[lng,lat];swapped=true;}
   const inAR=lat<=-21&&lat>=-56&&lng<=-53&&lng>=-74;
-  return {lat:+lat.toFixed(6),lng:+lng.toFixed(6),fixed,outside:!inAR};
+  return {lat:+lat.toFixed(6),lng:+lng.toFixed(6),fixed,swapped,outside:!inAR};
 }
 const hasGeo=o=>!!o&&o.lat!==null&&o.lat!==undefined&&o.lat!==''&&o.lng!==null&&o.lng!==undefined&&o.lng!==''&&isFinite(parseFloat(o.lat))&&isFinite(parseFloat(o.lng));
 const llStr=o=>parseFloat(o.lat).toFixed(6)+','+parseFloat(o.lng).toFixed(6);
