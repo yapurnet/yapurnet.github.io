@@ -74,12 +74,12 @@ async function latPermiso(){
 async function ubicLatido(){
   if(!LAT.ok||LAT.busy||!NET.online||!UB.st||!UB.st.acepto||!ubDentro())return;
   if(UB.nat&&latNativoNuevo())return;   /* el servicio del APK nuevo manda el suyo */
-  if(Date.now()-LAT.ts<50e3)return;
+  if(Date.now()-LAT.ts<Math.max(50e3,(UB.freno||0)*1e3))return;
   LAT.busy=true;LAT.ts=Date.now();
   try{
     const body={via:'web'},p=await latPermiso(),bat=await latBateria();
     if(p!==null)body.perm=p;if(bat!==null)body.bat=bat;
-    await NET.api('POST','/api/ubicacion/latido',body,{noKick:true,timeout:15000});
+    ubFreno(await NET.api('POST','/api/ubicacion/latido',body,{noKick:true,timeout:15000}));
   }catch(e){/* sin conexión o sin aceptar: se reintenta en el próximo minuto */}
   LAT.busy=false;
 }
@@ -116,11 +116,14 @@ function ubicChip(){
   c.textContent=UB.denied?'Ubicación sin permiso':ubCortado()?'Ubicación cortada por la oficina':dentro?'Ubicación activa':'Ubicación fuera de horario';
   c.title=UB.denied?'Activá el permiso de ubicación de la app en el celular.':ubCortado()?'La oficina dio por terminado tu día: no se comparte más tu ubicación hoy.':`Se comparte con la oficina de ${trTxt(stTramos(UB.st))} h.`;
 }
+/* freno automático del servidor: si el día va camino a gastar el cupo, pide que la ubicación se mande más espaciada */
+function ubFreno(r){UB.freno=r&&r.freno&&Number(r.freno.seg)>0?Math.min(300,Number(r.freno.seg)):0;}
 async function ubicFlush(){
   if(UB.sending||!UB.queue.length||!NET.online)return;
   UB.sending=true;const pts=UB.queue.slice(0,30);
   try{
     const r=await NET.api('POST','/api/ubicacion',{pts},{noKick:true,timeout:20000});
+    ubFreno(r);
     UB.queue.splice(0,pts.length);
     if(r&&r.cortado&&!ubCortado())ubicActualizar();   /* el servidor descartó todo porque la oficina cortó el GPS: se pide el estado ya mismo */
   }catch(e){
@@ -132,7 +135,7 @@ async function ubicFlush(){
 function ubicWatch(){
   if(UB.watch!=null||UB.denied||!navigator.geolocation)return;
   UB.watch=navigator.geolocation.watchPosition(p=>{
-    const now=Date.now();if(now-UB.lastQ<45e3)return;   /* un punto por minuto alcanza */
+    const now=Date.now();if(now-UB.lastQ<Math.max(45e3,(UB.freno||0)*1e3))return;   /* un punto por minuto alcanza */
     UB.lastQ=now;
     UB.queue.push({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,ts:p.timestamp||now});
     if(UB.queue.length>60)UB.queue.shift();

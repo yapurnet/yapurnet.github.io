@@ -96,6 +96,7 @@ async function openUso(){
     <div class="hint">Cuenta el día como Cloudflare: de las 21:00 de ayer a las 21:00 de hoy (hora de Argentina). Los números son aproximados.</div>
     <dl class="kv">
       <dt>Tiempo encendido</dt><dd>${hm(j.despierto)} · <b>${pT} %</b> del tope diario (13.000 GB-s)</dd>
+      <dt>Freno de la ubicación</dt><dd>${j.freno&&j.freno.nivel?`<b>Activo (nivel ${j.freno.nivel})</b>: el día va en el ${j.freno.uso} % del cupo, así que la ubicación de los técnicos se guarda más espaciada.`:`Apagado (el día va en el ${j.freno?j.freno.uso:0} % del cupo; se activa al llegar al 60 %).`}</dd>
       <dt>Pedidos</dt><dd>${nf(j.total)} (el tope son 100.000 por día)</dd>
       <dt>Filas leídas de la base</dt><dd>${nf(j.leidas||0)} · <b>${String(pL).replace('.',',')} %</b> del tope diario (5.000.000)</dd>
       <dt>Filas escritas en la base</dt><dd>${nf(j.escritas||0)} · <b>${String(pE).replace('.',',')} %</b> del tope diario (100.000)</dd>

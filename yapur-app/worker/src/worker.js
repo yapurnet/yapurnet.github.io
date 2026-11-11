@@ -624,6 +624,8 @@ const PING_SALTOS = 5;               // en reposo el router se saltea 5 de sus c
 /* Solo se guarda lo que llega dentro del horario (por defecto de 8 a 20 h, hora de Argentina) y se borra a los 14 días.
    El horario lo controla el servidor con su propio reloj: no importa lo que diga el celular. Argentina no tiene horario de verano: siempre UTC-3. */
 const UBIC_DIAS = 14;
+/* freno automático: si el día va camino a gastar el cupo del plan gratis, la ubicación de los técnicos se guarda más espaciada (lo demás sigue igual) */
+const FRENO_SEG = [0, 60, 120, 300];   // segundos mínimos entre dos puntos de un técnico según el nivel; 300 s queda por debajo de los 10 min que hacen figurar «sin señal»
 const UBIC_MIN_MS = 20e3;            // no se guarda más de un punto cada 20 segundos por técnico
 const JORNADA_DIAS = 90;             // las horas de ingreso y fin se guardan 90 días (sin coordenadas: solo la distancia a la base)
 const JORNADA_TOL = 10;              // minutos de tolerancia para llegar tarde, si no se cambia
@@ -2129,7 +2131,9 @@ export class YapurDB extends DurableObject {
     const pts = (Array.isArray(b.pts) ? b.pts : [b]).filter(isPlain).slice(0, 30);
     pts.forEach(x => { const t = Number(x.ts); x._ts = isFinite(t) && t <= now + 60e3 && t >= now - 15 * 60e3 ? t : now; });
     pts.sort((x, y) => x._ts - y._ts);
-    let n = 0, fuera = 0, cortados = 0;
+    let n = 0, fuera = 0, cortados = 0, frenados = 0;
+    const nivel = this.frenoNivel().nivel;
+    if (!this.ubicUlt) this.ubicUlt = new Map();
     const cortes = {};   // día → hora del corte de la oficina (o null)
     for (const x of pts) {
       const lat = Number(x.lat), lng = Number(x.lng);
@@ -2138,16 +2142,17 @@ export class YapurDB extends DurableObject {
       if (!(dia in cortes)) cortes[dia] = this.ubicCorteDe(u.id, dia);
       if (cortes[dia] && x._ts >= cortes[dia]) { cortados++; continue; }   // la oficina le cortó el GPS: lo que llegue desde esa hora se descarta
       if (!this.ubicDentro(x._ts, ubicTramosDe(pl, dia))) { fuera++; continue; }
+      if (nivel && this.ubicUlt.get(u.id) > x._ts - FRENO_SEG[nivel] * 1e3) { frenados++; continue; }   // freno del cupo: se saltea sin leer ni escribir en la base
       if (this.q1('SELECT 1 x FROM ubic WHERE uid=? AND ts>? AND ts<?', u.id, x._ts - UBIC_MIN_MS, x._ts + UBIC_MIN_MS)) continue;   // ya hay uno a menos de 20 s (también sirve para los puntos que llegan tarde)
       const acc = Number(x.acc);
       this.sql.exec('INSERT OR REPLACE INTO ubic(uid,ts,lat,lng,acc) VALUES(?,?,?,?,?)', u.id, x._ts, Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6, isFinite(acc) && acc >= 0 ? Math.min(Math.round(acc), 99999) : null);
-      n++;
+      n++; this.ubicUlt.set(u.id, x._ts);
       { const ck = u.id + '|' + arDayStart(dia), cc = this.ubicMem.get(ck); if (cc && x._ts <= cc.last) this.ubicMem.delete(ck); }   // un punto que llega tarde: se vuelve a leer el día
       this.jornadaAuto(u, x._ts, lat, lng, Number(x.acc));
     }
     this.mantenimiento();   // borrar lo viejo recorre toda la tabla de posiciones: corre cada varias horas, no con cada posición
     const hoy = arTime(now).fecha, corteHoy = hoy in cortes ? cortes[hoy] : this.ubicCorteDe(u.id, hoy), tramos = ubicTramosCorte(h.tramos, arDayStart(hoy), corteHoy);
-    return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
+    return { ok: true, guardados: n, freno: { nivel, seg: FRENO_SEG[nivel] }, frenados, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
   }
   /* ----- latido: lo que el celular dice de sí mismo, sin posición ni nada fuera de horario -----
      Cada minuto, dentro del horario, la app (o el servicio del APK) manda si la ubicación está prendida, si la app tiene permiso y cuánta batería queda.
@@ -2182,7 +2187,7 @@ export class YapurDB extends DurableObject {
     else if (!off && ab) { ab.h = now; cambio = true; }
     if (cambio) this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', evK, JSON.stringify(ev.slice(-30)));
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubiclat:' + u.id, JSON.stringify({ ts: now, ...mg, via: b.via === 'apk' ? 'apk' : 'web', off }));
-    return { ok: true, guardado: true };
+    return { ok: true, guardado: true, freno: { nivel: this.frenoNivel().nivel, seg: FRENO_SEG[this.frenoNivel().nivel] } };
   }
   ubicMotivo(lat, estado, ahora, iniTr, apag) { return ubicMotivoDe(lat, estado, ahora, iniTr, apag); }
   /* lo liviano que consulta la oficina cada minuto: quién lleva ≥15 min sin señal en este momento */
@@ -2892,6 +2897,16 @@ export class YapurDB extends DurableObject {
     u.flush = Date.now(); u.sucio = false;
     this.usoCur = [];   // lo que costó anotar el contador no se cuenta a sí mismo
   }
+  /* qué tan avanzado va el cupo del día (0 a 1, el mayor de pedidos, filas leídas, filas escritas y tiempo despierto) y el nivel de freno que le toca */
+  frenoNivel() {
+    const t = Date.now();
+    if (this.env.FRENO_FORZAR != null) return { t, p: 0, nivel: Math.max(0, Math.min(3, Number(this.env.FRENO_FORZAR) || 0)) };   // solo para pruebas
+    if (this.frenoC && t - this.frenoC.t < 30e3) return this.frenoC;
+    const dia = new Date(t).toISOString().slice(0, 10), u = this.uso && this.uso.dia === dia ? this.uso : null;
+    let p = 0;
+    if (u) { const req = Object.values(u.n).reduce((x, n) => x + n, 0); p = Math.max(req / 1e5, u.fr / 5e6, u.fw / 1e5, (u.aw * 0.125) / 13000); }
+    return (this.frenoC = { t, p, nivel: p >= 0.95 ? 3 : p >= 0.8 ? 2 : p >= 0.6 ? 1 : 0 });
+  }
   usoVer() {
     this.usoFilas('(al ver el consumo)');
     this.usoGuardar();
@@ -2901,7 +2916,8 @@ export class YapurDB extends DurableObject {
     pedidos.sort((x, y) => (y.fl + y.fe * 50 + y.n) - (x.fl + x.fe * 50 + x.n));
     const total = Object.values(u.n).reduce((x, n) => x + n, 0);
     let ws = 0; try { ws = this.ctx.getWebSockets().length; } catch (e) { /* sin WebSocket */ }
-    return { dia, total, pedidos: pedidos.slice(0, 30), despierto: Math.round(u.aw), gbs: Math.round(u.aw * 0.125), leidas: u.fr, escritas: u.fw, ws, sse: this.streams.size, routersPing: this.pingRouters().length, ahora: Date.now() };
+    const fr = this.frenoNivel();
+    return { dia, freno: { nivel: fr.nivel, uso: Math.round(fr.p * 100) }, total, pedidos: pedidos.slice(0, 30), despierto: Math.round(u.aw), gbs: Math.round(u.aw * 0.125), leidas: u.fr, escritas: u.fw, ws, sse: this.streams.size, routersPing: this.pingRouters().length, ahora: Date.now() };
   }
 
   async api(request, url, raw) {
@@ -3200,6 +3216,29 @@ export class YapurDB extends DurableObject {
       }
     }
 
+    /* antes de dar de alta a alguien: ¿ya hay fichas parecidas? Es solo una pista (una misma persona puede tener varias conexiones); no devuelve DNI ni teléfono */
+    if (p === '/api/clientes/parecidos' && m === 'POST') {
+      const a = await this.needAuth(request), pf = effPerms(a.user);
+      if (!(pf.editarClientes || pf.altaCampo)) throw httpErr(403, 'Tu usuario no puede dar de alta clientes.');
+      const b = readBody(raw, 2e3), nm = String(b.nombre || '').slice(0, 120), dn = String(b.dni || '').replace(/\D/g, ''), dr = String(b.dir || '').slice(0, 120);
+      const nz = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      const toks = s => nz(s).split(' ').filter(w => w.length > 1), tn = toks(nm), nd = nz(dr).replace(/\s/g, '');
+      const out = [];
+      for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+        let its; try { its = JSON.parse(r.data).items || {}; } catch (e) { continue; }
+        for (const id of Object.keys(its)) {
+          const c = its[id]; if (!isPlain(c)) continue;
+          const why = [], cd = String(c.dni || '').replace(/\D/g, '');
+          if (dn.length >= 7 && cd && (cd === dn || (cd.length === 11 && cd.slice(2, 10) === dn) || (dn.length === 11 && dn.slice(2, 10) === cd))) why.push('dni');
+          const ct = toks(c.nombre);
+          if (tn.length >= 2 && ct.length >= 2 && (tn.every(w => ct.includes(w)) || ct.every(w => tn.includes(w)))) why.push('nombre');
+          if (nd.length >= 6 && nz(c.dir).replace(/\s/g, '') === nd) why.push('dir');
+          if (why.length) out.push({ id: pf.clientesTodos ? id : null, nombre: String(c.nombre || ''), dir: String(c.dir || ''), loc: String(c.loc || ''), estado: String(c.estado || ''), why });
+        }
+      }
+      out.sort((x, y) => y.why.length - x.why.length);
+      return send(200, { lista: out.slice(0, 5), mas: Math.max(0, out.length - 5) });
+    }
     if (p === '/api/dispositivos' && m === 'GET') return send(200, this.dispView(await this.needAdmin(request)));
     if (p === '/api/dispositivos' && m === 'PATCH') {
       const a = await this.needAdmin(request), b = readBody(raw, 1e3);

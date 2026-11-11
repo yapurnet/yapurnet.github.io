@@ -40,6 +40,16 @@ async function call(method, p, body, token) {
     t('sin el permiso no puede dar de alta', r.s >= 400, r);
     r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cN1: { precio: 5 } } } }, T);
     t('sobre el cliente ya creado sigue sin poder cambiar la facturación', r.s >= 400, r);
+    /* fichas parecidas: pista al dar de alta (una misma persona puede tener varias conexiones) */
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cX: { nombre: 'Pachilla María Carolina', dni: '27-23373806-4', dir: 'Centro 1', loc: 'Añatuya', estado: 'activo' } } } }, A);
+    r = await call('POST', '/api/clientes/parecidos', { nombre: 'carolina pachilla', dni: '23373806', dir: 'Otra calle 5' }, T);
+    t('el técnico ve que ya hay una ficha con ese nombre y documento (sin DNI ni id)', r.s === 200 && r.j.lista.length === 1 && r.j.lista[0].why.includes('dni') && r.j.lista[0].why.includes('nombre') && r.j.lista[0].id === null && !JSON.stringify(r.j).includes('23373806'), r.j);
+    r = await call('POST', '/api/clientes/parecidos', { nombre: 'Pachilla Maria', dni: '', dir: 'centro 1' }, A);
+    t('el administrador recibe el id para poder juntarlas en una cuenta', r.s === 200 && r.j.lista.length === 1 && /^cX$/.test(r.j.lista[0].id), r.j);
+    r = await call('POST', '/api/clientes/parecidos', { nombre: 'Juan Gomez', dni: '11111111', dir: 'Nada 1' }, T);
+    t('sin coincidencias, lista vacía', r.s === 200 && r.j.lista.length === 0, r.j);
+    r = await call('POST', '/api/clientes/parecidos', { nombre: 'Juan Gomez' }, T2);
+    t('sin el permiso de alta no se puede consultar', r.s === 403, r);
     r = await call('GET', '/api/doc/clientes/c01', undefined, A);
     t('la oficina ve el cliente por instalar', r.j.data.items.cN1 && r.j.data.items.cN1.estado === 'pendiente' && !r.j.data.items.cN2 && !r.j.data.items.cN3, r.j.data && Object.keys(r.j.data.items));
   } catch (e) { failN++; console.log('FAIL excepción', e); }
