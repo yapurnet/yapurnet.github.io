@@ -591,6 +591,11 @@ Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test
 - Los secretos de firma (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) son los mismos que ya usa FAVL; no hay que cargar nada nuevo.
 
 
+## Historial del cliente
+
+En la ficha, «Historial del cliente» junta en una sola línea de tiempo (lo más nuevo arriba): alta, cortes, reconexiones, bajas, cambios de plan, pagos (los anulados se marcan), promesas de pago y órdenes (creadas y realizadas). Los pagos y promesas los ve quien ve cobranzas; el detalle del cambio de plan, quien ve planes.
+Los cortes, reconexiones, bajas y cambios de plan **se registran desde esta versión** (campo `hist` del cliente, los últimos 80): lo anterior no se puede reconstruir, salvo el último corte, la última reconexión y la baja, que ya estaban guardados. Quien no es administrador u oficina solo puede sumar renglones al historial, nunca cambiar ni borrar los anteriores.
+
 ## Panel «Hoy» y APK 2.17
 
 - **Hoy** (arriba del Resumen, para quien ve cobros y todas las órdenes): cobrado hoy sin contar anulados, órdenes abiertas por técnico (con las urgentes y las que no tienen técnico), instalaciones «pendientes» esperando activación (la más vieja primero) y clientes para cortar. Tocar un cliente abre su ficha.

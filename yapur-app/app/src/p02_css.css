@@ -326,3 +326,6 @@ button.pelo:hover{border-color:var(--accent-line)}
 .pd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}
 
 .hoy-sec{margin-top:14px}.hoy-sec>b{display:block;margin-bottom:6px}
+.linea{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:var(--surface)}.linea summary{cursor:pointer}
+.tl{list-style:none;margin:10px 0 0;padding:0 0 0 12px;border-left:2px solid var(--line)}.tl li{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;padding:5px 0;font-size:14px}
+.tl-f{color:var(--muted);font-variant-numeric:tabular-nums}.tl-t{overflow-wrap:anywhere}.tl-mal .tl-t{color:var(--bad,#b3261e)}

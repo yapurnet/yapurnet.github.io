@@ -209,6 +209,22 @@ function guard(u, p, coll, existing, patch, ctx) {
         return 'Tu usuario no puede cambiar los datos de facturación del cliente.';
       }
       if ('promesas' in nw && !same(nw.promesas, prev.promesas) && !p.promesas) return 'Tu usuario no puede dar promesas de pago.';
+      /* el historial del cliente solo se agranda: lo que ya estaba no se toca, y se suman pocos renglones con la forma {f, t, d?} */
+      if ('hist' in nw && !same(nw.hist, prev.hist)) {
+        const h = nw.hist, hp = Array.isArray(prev.hist) ? prev.hist : [];
+        if (!Array.isArray(h) || h.length > 80) return 'Historial del cliente inválido.';
+        for (const e of h) {
+          if (!isPlain(e) || !/^\d{4}-\d{2}-\d{2}$/.test(e.f || '') || typeof e.t !== 'string' || e.t.length > 20 || (e.d != null && (typeof e.d !== 'string' || e.d.length > 120))) return 'Historial del cliente inválido.';
+        }
+        let ok = false;   // lo anterior queda igual (salvo los más viejos, que salen al llegar a 80) y se suman hasta 3 renglones
+        if (h.length >= Math.min(hp.length, 80)) for (let a = 0; a <= 3 && !ok; a++) {
+          const m = h.length - a;
+          if (m > hp.length || m < Math.min(hp.length, 77)) continue;
+          ok = true;
+          for (let q = 0; q < m; q++) if (!same(h[q], hp[hp.length - m + q])) { ok = false; break; }
+        }
+        if (!ok) return 'El historial del cliente no se puede modificar.';
+      }
     }
   } else if (coll === 'red') {
     return guardRed(u, p, old, items);
