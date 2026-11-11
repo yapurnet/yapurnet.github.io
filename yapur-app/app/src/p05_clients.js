@@ -514,6 +514,7 @@ function openClientForm(id){
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
   const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
+    ${!old?'<div class="notice info" id="cf-dup" hidden></div>':''}
     ${alta?'<div class="hint">Queda como «por instalar» y se crea una orden de instalación a tu nombre. La oficina completa el plan y la facturación.</div>':''}
     ${!old&&full?`<details class="qsec" id="cf-rep"><summary>Completar con el reporte del técnico</summary><div class="form" style="margin-top:10px">
       ${F('Pegá el texto que mandó el técnico','cf-rep-txt','<textarea id="cf-rep-txt" rows="5" autocomplete="off" placeholder="NOMBRE: Ana Ester Paz&#10;DNI: 28354900&#10;IP: 10.20.43.9&#10;PAGO: (Efectivo) 65mil pesos"></textarea>')}
@@ -555,6 +556,28 @@ function openClientForm(id){
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`;
   openModal({title:old?'Editar cliente':'Nuevo cliente',html,onMount(el){
     bindNodoField(el,'cf');
+    /* ¿ya hay fichas parecidas? Es una pista, no un freno: una misma persona puede tener varias conexiones (se juntan en una cuenta unificada) */
+    let dupSel=null;
+    const dupBox=$('#cf-dup',el);
+    if(dupBox&&!old){
+      let last='';
+      const pinta=lista=>{
+        if(dupSel){dupBox.hidden=false;dupBox.innerHTML=`<span><b>Otra conexión de ${esc(dupSel.nombre)}.</b>${dupSel.id&&full?' Se junta con su cuenta y se cobran juntas.':' La oficina la junta con su cuenta al activarla.'}</span> <button class="btn small ghost" type="button" id="dup-no">Quitar</button>`;
+          $('#dup-no',dupBox).addEventListener('click',()=>{dupSel=null;last='';pinta(lista);});return;}
+        if(!lista||!lista.length){dupBox.hidden=true;return;}
+        dupBox.hidden=false;
+        dupBox.innerHTML=`<div><b>Ya hay fichas parecidas.</b> Una misma persona puede tener varias conexiones; fijate si es la misma.</div>`+lista.map((m,i)=>`<div class="head-row" style="margin-top:6px"><div><div style="font-weight:700">${esc(m.nombre)}</div><div class="small muted">${esc(m.dir)}${m.loc?', '+esc(m.loc):''} · ${esc(ESTADOS[m.estado]||m.estado)} · coincide ${m.why.map(w=>({dni:'el documento',nombre:'el nombre',dir:'la dirección'})[w]).join(' y ')}</div></div><button class="btn small" type="button" data-dup="${i}">Es otra conexión de esta persona</button></div>`).join('')+'<div class="actions start" style="margin-top:8px"><button class="btn small ghost" type="button" id="dup-otro">Es otra persona</button></div>';
+        $$('[data-dup]',dupBox).forEach(b=>b.addEventListener('click',()=>{const m=lista[Number(b.dataset.dup)];dupSel={id:m.id,nombre:m.nombre};pinta(lista);}));
+        $('#dup-otro',dupBox).addEventListener('click',()=>{dupBox.hidden=true;});
+      };
+      const mira=async()=>{
+        const nombre=v('cf-nombre')||'',dni=v('cf-dni')||'',dir=v('cf-dir')||'',key=nombre+'|'+dni+'|'+dir;
+        if(key===last||dupSel)return;last=key;
+        if(nombre.length<4&&docDigits(dni).length<7&&dir.length<6){dupBox.hidden=true;return;}
+        try{const j=await NET.api('POST','/api/clientes/parecidos',{nombre,dni,dir},{noKick:true,timeout:8000});if(!dupSel)pinta(j.lista);}catch(e){/* sin señal: se sigue sin la pista */}
+      };
+      ['cf-nombre','cf-dni','cf-dir'].forEach(i=>{const n=$('#'+i,el);if(n)n.addEventListener('blur',mira);});
+    }
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const scChk=$('#cf-sc',el);if(scChk){const sync=()=>{$('#cf-sc-box',el).hidden=!scChk.checked;const w=$('#cf-sc-warn',el);if(w)w.hidden=!scChk.checked;};scChk.addEventListener('change',sync);sync();}
@@ -645,9 +668,14 @@ function openClientForm(id){
       }
       try{
         let nuevo=null;
+        if(!old&&dupSel){
+          const hd=dupSel.id&&full?cuentaHead(S.clientes.get(dupSel.id)):null;
+          if(hd){patch.cuenta=hd.id;patch.ciclo=cicloOf(hd);}
+          else patch.notas=(patch.notas?patch.notas+' · ':'')+'Posible otra conexión de «'+dupSel.nombre+'»: revisar la cuenta unificada.';
+        }
         if(old)await saveClient(old,patch);
         else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},alta?{estado:'pendiente'}:{},patch));nuevo=nid;
-          if(alta){const cre=todayStr(),t=tecById(S.tecId);await putItem('ordenes',orderShard(cre.slice(0,7)),newId(),{estado:'pendiente',creado:cre,mod:Date.now(),clientId:nid,tipo:'instalacion',tecnico:S.tecId||null,tecNombre:t?t.nombre:null,fecha:cre,prioridad:'normal',notas:'Instalación ocasional dada de alta en la calle.'});}}
+          if(alta){const cre=todayStr(),t=tecById(S.tecId);await putItem('ordenes',orderShard(cre.slice(0,7)),newId(),{estado:'pendiente',creado:cre,mod:Date.now(),clientId:nid,tipo:'instalacion',tecnico:S.tecId||null,tecNombre:t?t.nombre:null,fecha:cre,prioridad:'normal',notas:'Instalación ocasional dada de alta en la calle.'+(dupSel?' Posible otra conexión de «'+dupSel.nombre+'».':'')});}}
         toast('Cliente guardado');closeModal();
         if(nuevo&&repPago)cobrarTrasAlta(nuevo,repPago);
       }catch(err){dbError(err);}
