@@ -183,6 +183,34 @@ async function saveClient(c,patch){
   await putItem('clientes',clientShard(c.id),c.id,obj);
   return obj;
 }
+/* Línea de tiempo: todo lo que le pasó al cliente, lo más nuevo primero. Junta lo que ya está guardado (alta, pagos, órdenes, promesas, baja) con el registro de cortes,
+   reconexiones y cambios de plan (c.hist, que se anota desde que existe esta función). */
+function clienteLinea(c){
+  const ev=[],verPlata=can('cobrar')||can('caja');
+  const add=(f,txt,tipo,extra)=>{if(/^\d{4}-\d{2}-\d{2}/.test(f||''))ev.push({f:f.slice(0,10),o:f,txt,tipo,extra:extra||''});};
+  add(c.alta,'Alta del cliente','alta');
+  const hist=Array.isArray(c.hist)?c.hist:[];
+  for(const h of hist)add(h.f,(HIST_TIPOS[h.t]||h.t)+(h.d&&(h.t!=='plan'||can('verPlan')||can('precios'))?': '+h.d:''),h.t==='corte'||h.t==='baja'?'mal':'est');
+  /* si el corte o la reconexión vigentes son anteriores al registro, se muestran igual */
+  if(c.corteMora&&c.estado==='suspendido'&&!hist.some(h=>h.t==='corte'&&h.f===c.corteMora))add(c.corteMora,HIST_TIPOS.corte,'mal');
+  if(c.reconectado&&!hist.some(h=>h.t==='reconexion'&&h.f===c.reconectado))add(c.reconectado,HIST_TIPOS.reconexion,'est');
+  if(c.bajaFecha&&!hist.some(h=>h.t==='baja'&&h.f===c.bajaFecha))add(c.bajaFecha,HIST_TIPOS.baja+(c.bajaMotivo?': '+c.bajaMotivo:''),'mal');
+  if(verPlata)for(const p of (S.payByClient.get(c.id)||[]))add(p.fecha+' '+(p.hora||''),(CONCEPTOS[p.concepto]||p.concepto||'Pago')+(p.per&&p.concepto==='mensualidad'?' '+p.per:'')+' · '+fmtMoney(Number(p.monto)||0)+(p.metodo?' · '+p.metodo:''),'pago',p.anulado?'anulado':'');
+  if(can('promesas')||verPlata)for(const h of (Array.isArray(c.promesas)?c.promesas:[]))add(h.f,'Promesa de pago hasta el '+dmy(h.h)+(h.x?' (anulada)':''),'prom');
+  for(const o of S.ordenes.values()){
+    if(o.clientId!==c.id)continue;
+    const t=TIPOS_ORD[o.tipo]||o.tipo||'Orden';
+    add(o.creado,'Orden de '+t.toLowerCase()+(o.tecNombre?' · '+o.tecNombre:''),'ord',o.estado==='cancelada'?'cancelada':'');
+    if(o.estado==='hecha'&&o.cierre)add(o.cierre,t+' realizada'+(o.tecNombre?' por '+o.tecNombre:''),'ord');
+  }
+  ev.sort((a,b)=>b.o.localeCompare(a.o));
+  return ev;
+}
+function clienteLineaHTML(c){
+  const ev=clienteLinea(c);if(!ev.length)return '';
+  const row=e=>`<li class="tl-${e.tipo}"><span class="tl-f">${esc(dmy(e.f))}</span><span class="tl-t">${esc(e.txt)}${e.extra?` <span class="chip">${esc(e.extra)}</span>`:''}</span></li>`;
+  return `<details class="linea"><summary><b>Historial del cliente</b> <span class="small muted">${ev.length} ${ev.length===1?'movimiento':'movimientos'}</span></summary><ul class="tl">${ev.slice(0,60).map(row).join('')}</ul>${ev.length>60?`<div class="hint">Se muestran los 60 más nuevos.</div>`:''}</details>`;
+}
 function openClient(id){
   const c=S.clientes.get(id);if(!c||!clientVisible(c)){toast('No se encontró el cliente','bad');return;}
   const pl=planVis(c),b=billing(c);
@@ -210,6 +238,7 @@ function openClient(id){
     ${comodatoBlock(c)}
     <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&!porInstalar(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl&&can('verPlan')?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
+    ${clienteLineaHTML(c)}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
     ${ords.length?`<div><h3>Órdenes</h3><div class="list" style="margin-top:8px">${ords.map(o=>`<div class="item" style="cursor:default"><div><div class="t">${esc(TIPOS_ORD[o.tipo]||o.tipo)}</div><div class="s">${esc(dmy(o.fecha))} ${o.notas?'· '+esc(o.notas):''}</div>${o.estado==='cancelada'?`<div class="s muted">${esc(cancelTxt(o))}</div>`:''}</div><div class="side"><span class="chip">${esc(EST_ORD[o.estado]||o.estado)}</span></div></div>`).join('')}</div></div>`:''}`;
   openModal({title:'Ficha del cliente',html,onMount(el){

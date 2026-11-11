@@ -121,8 +121,33 @@ function dbError(e){
   else if(e&&e.status&&e.message)toast(e.message,'bad');
   else toast('No se pudo guardar. Revisá la conexión y reintentá.','bad');
 }
+/* Historial del cliente: cada cambio de estado (corte, reconexión, baja…) o de plan queda anotado con su fecha en c.hist = [{f,t,d}] (los 80 últimos).
+   Se anota acá, en el único lugar por donde pasan todas las modificaciones de clientes, comparando con lo que había. */
+const HIST_TIPOS={corte:'Corte por falta de pago',reconexion:'Reconexión',activacion:'Servicio activado',baja:'Baja del servicio',reactivacion:'Reactivado',plan:'Cambio de plan'};
+function histEventos(old,nw){
+  const ev=[],f=todayStr();
+  if(!old||!nw)return ev;
+  if((old.estado||'')!==(nw.estado||'')){
+    const t=nw.estado==='suspendido'?'corte':nw.estado==='baja'?'baja':nw.estado==='activo'?(old.estado==='suspendido'?'reconexion':old.estado==='baja'?'reactivacion':'activacion'):'';
+    if(t)ev.push({f,t});
+  }
+  if((old.planId||null)!==(nw.planId||null)&&old.estado!=='pendiente'&&(old.planId||nw.planId))ev.push({f,t:'plan',d:planNameH(old.planId)+' → '+planNameH(nw.planId)});
+  return ev;
+}
+const planNameH=id=>{const p=id&&S.planes.get(id);return p?p.nombre:'sin plan';};
 async function putMany(coll,docId,items){
   if(!S.db)throw {code:'unavailable'};
+  if(coll==='clientes'){
+    const out={};
+    for(const id in items){
+      const nw=items[id],old=S.clientes.get(id);
+      if(nw&&typeof nw==='object'&&old&&!('hist' in nw&&nw.hist!==old.hist)){
+        const ev=histEventos(old,nw);
+        out[id]=ev.length?Object.assign({},nw,{hist:(Array.isArray(old.hist)?old.hist:[]).concat(ev).slice(-80)}):(Array.isArray(old.hist)&&!('hist' in nw)?Object.assign({},nw,{hist:old.hist}):nw);
+      }else out[id]=nw;
+    }
+    items=out;
+  }
   await S.db.collection(coll).doc(docId).update({items});
 }
 const putItem=(coll,docId,id,obj)=>putMany(coll,docId,{[id]:obj});
