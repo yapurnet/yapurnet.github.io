@@ -84,7 +84,7 @@ async def main():
         await pg.click('#fe-go')
         await pg.wait_for_selector('#fe-print', timeout=10000)
         txt = await pg.evaluate("document.querySelector('.fe').innerText")
-        check('la factura muestra letra B, número, total, CAE y razón social', 'B' in txt and '00003-00000001' in txt and '12.100' in txt and 'CAE' in txt and 'YAPUR Miguel Matias' in txt, txt[:300])
+        check('la factura muestra letra B, número, total, CAE y razón social', 'B' in txt and 'Punto de Venta: 00003' in txt and 'Comp. Nro: 00000001' in txt and '12.100' in txt and 'CAE' in txt and 'YAPUR Miguel Matias' in txt, txt[:300])
         check('es de prueba y lo dice', 'SIN VALIDEZ' in txt)
         check('lleva el código QR', await pg.locator('.fe svg path').count() == 1)
         check('B: muestra el IVA contenido (2.100)', '2.100' in txt, txt)
