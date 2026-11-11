@@ -4140,19 +4140,23 @@ async function openUso(){
   const nf=n=>Number(n).toLocaleString('es-AR');
   const hm=s=>Math.floor(s/3600)+' h '+pad(Math.floor(s%3600/60))+' min';
   const pT=Math.round(j.gbs/13000*100),pP=Math.round(j.total/1000)/100;   /* 13.000 GB-s de tiempo y 100.000 pedidos por día */
-  const filas=j.pedidos.map(x=>`<tr><td class="mono small" style="overflow-wrap:anywhere">${esc(x.k)}</td><td style="text-align:right">${nf(x.n)}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">Todavía no hay datos de hoy.</td></tr>';
+  const pct=(n,tope)=>Math.round(n/tope*1000)/10;   /* 5.000.000 filas leídas y 100.000 escritas por día */
+  const pL=pct(j.leidas||0,5e6),pE=pct(j.escritas||0,1e5);
+  const filas=j.pedidos.map(x=>`<tr><td class="mono small" style="overflow-wrap:anywhere">${esc(x.k)}</td><td style="text-align:right">${nf(x.n)}</td><td style="text-align:right">${nf(x.fl||0)}</td><td style="text-align:right">${nf(x.fe||0)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Todavía no hay datos de hoy.</td></tr>';
   const sseAviso=j.sse>0?`<div class="notice warn">Hay <b>${j.sse}</b> pantalla${j.sse===1?'':'s'} conectada${j.sse===1?'':'s'} por el método viejo (SSE): mientras estén así, el servidor no se duerme nunca y gasta tiempo las 24 horas. Se corrige solo al volver a abrir la app.</div>`:'';
   openModal({title:'Consumo del servidor · hoy',wide:true,html:`
     <div class="hint">Cuenta el día como Cloudflare: de las 21:00 de ayer a las 21:00 de hoy (hora de Argentina). Los números son aproximados.</div>
     <dl class="kv">
       <dt>Tiempo encendido</dt><dd>${hm(j.despierto)} · <b>${pT} %</b> del tope diario (13.000 GB-s)</dd>
       <dt>Pedidos</dt><dd>${nf(j.total)} (el tope son 100.000 por día)</dd>
+      <dt>Filas leídas de la base</dt><dd>${nf(j.leidas||0)} · <b>${String(pL).replace('.',',')} %</b> del tope diario (5.000.000)</dd>
+      <dt>Filas escritas en la base</dt><dd>${nf(j.escritas||0)} · <b>${String(pE).replace('.',',')} %</b> del tope diario (100.000)</dd>
       <dt>Pantallas conectadas ahora</dt><dd>${j.ws} por WebSocket${j.sse?' · '+j.sse+' por SSE':''}</dd>
       <dt>Routers con pruebas de conexión</dt><dd>${j.routersPing}</dd>
     </dl>
     ${sseAviso}
     <h3 style="margin-top:12px">Qué pidió más</h3>
-    <div class="tbl-wrap"><table><tbody>${filas}</tbody></table></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Pedido</th><th style="text-align:right">Veces</th><th style="text-align:right">Filas leídas</th><th style="text-align:right">Filas escritas</th></tr></thead><tbody>${filas}</tbody></table></div>
     <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`});
 }
 
@@ -7306,7 +7310,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='e5e3fddd7d';
+const BUILD='9f2ec5a2bf';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

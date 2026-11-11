@@ -585,6 +585,9 @@ export default {
 const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
 const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
+const ESQUEMA_V = '2';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
+const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
+const USO_FLUSH_MS = 5e3;            // el contador de consumo se anota en la base como mucho cada 5 segundos
 const PING_SALTOS = 5;               // en reposo el router se saltea 5 de sus corridas de 10 s: consulta una vez por minuto
 
 /* ================= ubicación de los técnicos en horario laboral ================= */
@@ -733,7 +736,10 @@ function jornadaHoras(f, o) {
 export class YapurDB extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
+    /* cada consulta pasa por acá para sumar las filas que leyó y escribió (el plan gratis limita las dos por día; el consumo se ve en Ajustes → «Ver el consumo de hoy») */
+    const sqlReal = ctx.storage.sql;
+    this.usoCur = [];
+    this.sql = { exec: (...a) => { const c = sqlReal.exec(...a); if (this.usoCur.length < 4000) this.usoCur.push(c); return c; } };
     this.env = env;
     this.streams = new Set();   /* solo las pantallas viejas por SSE; las nuevas son WebSocket que dejan dormir al servidor (conexiones()) */
     this.tickets = new Map();
@@ -744,12 +750,14 @@ export class YapurDB extends DurableObject {
     this.snapState = null;
     this.snapBusy = false;
     this.USERS = new Map();
+    this.ubicMem = new Map();   /* posiciones del día de cada técnico ya leídas (ver ubicPuntos) */
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS docs(coll TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, upd INTEGER NOT NULL, PRIMARY KEY(coll,id)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL, role TEXT NOT NULL, tel TEXT DEFAULT '', permisos TEXT, activo INTEGER NOT NULL DEFAULT 1, salt TEXT, hash TEXT, created INTEGER, last_login INTEGER);
       CREATE TABLE IF NOT EXISTS sessions(th TEXT PRIMARY KEY, uid TEXT NOT NULL, created INTEGER, last INTEGER);
       CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, uid TEXT NOT NULL, did TEXT NOT NULL, label TEXT, ua TEXT, app TEXT, ip TEXT, geo TEXT, estado TEXT NOT NULL DEFAULT 'pend', creado INTEGER, visto INTEGER, UNIQUE(uid,did));
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+      CREATE TABLE IF NOT EXISTS usodia(dia TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
       CREATE TABLE IF NOT EXISTS pings(id TEXT PRIMARY KEY, cid TEXT NOT NULL, ip TEXT NOT NULL, nodo TEXT, uid TEXT NOT NULL, ts INTEGER NOT NULL, router TEXT, tomado INTEGER, hecho INTEGER, sent INTEGER, rec INTEGER, avg REAL, estado TEXT NOT NULL DEFAULT 'pend') WITHOUT ROWID;
@@ -763,11 +771,15 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS contratos_log(id TEXT PRIMARY KEY, cto TEXT NOT NULL, ts INTEGER NOT NULL, uid TEXT, uname TEXT, acc TEXT NOT NULL, det TEXT);
       CREATE INDEX IF NOT EXISTS contratos_log_cto ON contratos_log(cto);
     `);
-    for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
-    this.sql.exec('DELETE FROM sessions WHERE last<?', Date.now() - 180 * 864e5);
-    try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
-    for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
-    this.sql.exec('DELETE FROM pings WHERE ts<?', Date.now() - 2 * 864e5);
+    /* Las columnas agregadas con ALTER TABLE se aplican una sola vez: cada ALTER que falla porque la columna ya existe igual lee unas 30 filas del esquema,
+       y antes se probaban siete en cada despertar del servidor. */
+    const esq = this.q1("SELECT v FROM meta WHERE k='esquema'");
+    if (!esq || esq.v !== ESQUEMA_V) {
+      for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+      try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
+      for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+      this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('esquema',?)", ESQUEMA_V);
+    }
     /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
        cuando ese teléfono vuelva a pedir algo con la versión nueva, se completa con los datos reales del equipo */
     for (const r of this.q('SELECT th,uid,created,last FROM sessions WHERE dev IS NULL')) {
@@ -775,14 +787,33 @@ export class YapurDB extends DurableObject {
       this.sql.exec('INSERT INTO devices(id,uid,did,label,ua,app,ip,geo,estado,creado,visto) VALUES(?,?,?,?,?,?,?,?,?,?,?)', id, r.uid, 'old-' + r.th.slice(0, 20), 'Sesión anterior (sin datos del equipo)', '', '', '', '', 'ok', r.created || Date.now(), r.last || Date.now());
       this.sql.exec('UPDATE sessions SET dev=? WHERE th=?', id, r.th);
     }
-    this.sql.exec('DELETE FROM fails WHERE t<?', Date.now() - 864e5);
-    this.sql.exec('DELETE FROM ubic WHERE ts<?', Date.now() - UBIC_DIAS * 864e5);
-    this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
-    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(Date.now() - JORNADA_DIAS * 864e5).fecha);
-    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubicev:%' AND substr(k,-10)<?", arTime(Date.now() - UBIC_DIAS * 864e5).fecha);
+    this.mantenimiento();
     this.loadUsers();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
+  }
+
+  /* Limpieza de lo viejo: sesiones, pruebas de conexión, intentos fallidos, posiciones y horas de los técnicos, marcas.
+     Antes corría en cada despertar del servidor (y una vez de cada cien posiciones). Borrar «todo lo anterior a tal fecha» obliga a recorrer la tabla entera, y las posiciones
+     de los técnicos crecen todos los días: con el servidor durmiéndose y despertando cientos de veces por día, esa limpieza gastaba sola el cupo de lecturas del plan gratis
+     (5 millones de filas por día). Ahora corre como mucho cada MANT_CADA_MS; los demás despertares leen una sola fila (la marca de la última vez). */
+  mantenimiento() {
+    const ahora = Date.now();
+    if (this.mantTs && ahora - this.mantTs >= 0 && ahora - this.mantTs < MANT_CADA_MS) return;
+    const r = this.q1("SELECT v FROM meta WHERE k='mant'");
+    this.mantTs = r ? Number(r.v) || 0 : 0;
+    if (this.mantTs && ahora - this.mantTs >= 0 && ahora - this.mantTs < MANT_CADA_MS) return;
+    this.sql.exec('DELETE FROM sessions WHERE last<?', ahora - 180 * 864e5);
+    this.sql.exec('DELETE FROM pings WHERE ts<?', ahora - 2 * 864e5);
+    this.sql.exec('DELETE FROM fails WHERE t<?', ahora - 864e5);
+    this.sql.exec('DELETE FROM ubic WHERE ts<?', ahora - UBIC_DIAS * 864e5);
+    this.ubicMem.clear();
+    this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(ahora - JORNADA_DIAS * 864e5).fecha);
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(ahora - JORNADA_DIAS * 864e5).fecha);
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubicev:%' AND substr(k,-10)<?", arTime(ahora - UBIC_DIAS * 864e5).fecha);
+    this.sql.exec('DELETE FROM usodia WHERE dia<?', new Date(ahora - 4 * 864e5).toISOString().slice(0, 10));
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('mant',?)", String(ahora));
+    this.mantTs = ahora;
   }
 
   q(sql, ...a) { return this.sql.exec(sql, ...a).toArray(); }
@@ -2032,7 +2063,7 @@ export class YapurDB extends DurableObject {
     if (ts <= t0 + tr[0][0] * 3600e3) throw httpErr(400, 'Esa hora es anterior al comienzo de su horario de hoy (' + tr[0][0] + ':00).');
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubiccorte:' + t.id + ':' + dia, String(ts));
     const borrados = (this.q1('SELECT COUNT(*) n FROM ubic WHERE uid=? AND ts>=?', t.id, ts) || {}).n || 0;
-    if (borrados) this.sql.exec('DELETE FROM ubic WHERE uid=? AND ts>=?', t.id, ts);
+    if (borrados) { this.sql.exec('DELETE FROM ubic WHERE uid=? AND ts>=?', t.id, ts); this.ubicMem.clear(); }
     /* su jornada de hoy termina en el corte (salvo que la oficina ya haya cargado las horas a mano: eso manda) */
     let jornada = 'sin_jornada';
     const f = this.jornadaFilaHoras(t.id, dia);
@@ -2075,13 +2106,10 @@ export class YapurDB extends DurableObject {
       const acc = Number(x.acc);
       this.sql.exec('INSERT OR REPLACE INTO ubic(uid,ts,lat,lng,acc) VALUES(?,?,?,?,?)', u.id, x._ts, Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6, isFinite(acc) && acc >= 0 ? Math.min(Math.round(acc), 99999) : null);
       n++;
+      { const ck = u.id + '|' + arDayStart(dia), cc = this.ubicMem.get(ck); if (cc && x._ts <= cc.last) this.ubicMem.delete(ck); }   // un punto que llega tarde: se vuelve a leer el día
       this.jornadaAuto(u, x._ts, lat, lng, Number(x.acc));
     }
-    if (Math.random() < 0.01) {
-      this.sql.exec('DELETE FROM ubic WHERE ts<?', now - UBIC_DIAS * 864e5); this.sql.exec('DELETE FROM jornada WHERE dia<?', arTime(now - JORNADA_DIAS * 864e5).fecha);
-      this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubiccorte:%' AND substr(k,-10)<?", arTime(now - JORNADA_DIAS * 864e5).fecha);
-      this.sql.exec("DELETE FROM meta WHERE k LIKE 'ubicev:%' AND substr(k,-10)<?", arTime(now - UBIC_DIAS * 864e5).fecha);
-    }
+    this.mantenimiento();   // borrar lo viejo recorre toda la tabla de posiciones: corre cada varias horas, no con cada posición
     const hoy = arTime(now).fecha, corteHoy = hoy in cortes ? cortes[hoy] : this.ubicCorteDe(u.id, hoy), tramos = ubicTramosCorte(h.tramos, arDayStart(hoy), corteHoy);
     return { ok: true, guardados: n, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
   }
@@ -2139,6 +2167,16 @@ export class YapurDB extends DurableObject {
     out.sin.sort((a, b) => b.min - a.min);
     return out;
   }
+  /* Las posiciones de un técnico en un día. La oficina las pide cada minuto con la pantalla «Técnicos» abierta, y leer todas (cientos por técnico) en cada pedido gastaba
+     el cupo de lecturas: se guardan en memoria y cada pedido lee solo las que llegaron después de la última (el servidor, mientras está despierto). */
+  ubicPuntos(uid, t0, t1) {
+    const k = uid + '|' + t0;
+    let c = this.ubicMem.get(k);
+    if (!c) { c = { rows: [], last: t0 - 1 }; this.ubicMem.set(k, c); if (this.ubicMem.size > 80) this.ubicMem.delete(this.ubicMem.keys().next().value); }
+    const nuevos = this.q('SELECT ts,lat,lng FROM ubic WHERE uid=? AND ts>? AND ts<? ORDER BY ts', uid, c.last, t1);
+    if (nuevos.length) { for (const r of nuevos) c.rows.push(r); c.last = nuevos[nuevos.length - 1].ts; }
+    return c.rows;
+  }
   ubicLista(dia) {
     const pl = this.ubicPlan(), ahora = Date.now(), hoy = arTime(ahora).fecha;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(arDayStart(dia))) dia = hoy;
@@ -2149,7 +2187,7 @@ export class YapurDB extends DurableObject {
     const minAhora = arTime(ahora).min / 60, trAct = esHoy && dentro ? trHoy.find(t => minAhora >= t[0] && minAhora < t[1]) : null, iniTr = trAct ? t0 + trAct[0] * 3600e3 : 0;
     const tecnicos = [...this.USERS.values()].filter(u => u.role === 'tecnico' && u.activo).map(u => {
       const ultima = this.q1('SELECT ts,lat,lng,acc FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts DESC LIMIT 1', u.id, t0, t1) || null;
-      const todos = this.q('SELECT ts,lat,lng FROM ubic WHERE uid=? AND ts>=? AND ts<? ORDER BY ts', u.id, t0, t1);
+      const todos = this.ubicPuntos(u.id, t0, t1);
       const paso = Math.max(1, Math.ceil(todos.length / 240));
       const ruta = todos.filter((_, i) => i % paso === 0 || i === todos.length - 1).map(r => [r.ts, r.lat, r.lng]);
       const acepto = this.ubicAcepto(u.id), corte = this.ubicCorteDe(u.id, dia);
@@ -2326,41 +2364,71 @@ export class YapurDB extends DurableObject {
       const status = e.status || 500;
       if (status >= 500) console.error(e && e.stack || e);
       return send(status, { error: status >= 500 ? 'Error interno del servidor.' : e.message, code: e.code || (status === 401 ? 'unauthenticated' : status === 403 ? 'permission_denied' : status === 413 ? 'quota_exceeded' : status === 429 ? 'resource_exhausted' : 'invalid_argument') });
+    } finally {
+      try { this.usoFin(this.usoClave(request.method, new URL(request.url).pathname)); } catch (e) { /* el contador nunca rompe un pedido */ }
     }
   }
 
-  /* ----- consumo del día: cuántos pedidos de cada tipo llegaron y cuánto tiempo estuvo encendida la base de datos -----
+  /* ----- consumo del día: cuántos pedidos de cada tipo llegaron, cuántas filas leyeron y escribieron, y cuánto tiempo estuvo encendida la base de datos -----
      Sirve para ver, sin entrar a Cloudflare, qué gasta el cupo del plan gratis. El tiempo es una estimación: después de cada pedido la base sigue
-     encendida unos 10 segundos; si el siguiente llega antes, solo se suma el hueco. Se anota en la base cada ~90 s (lo que llegó entre una anotación
-     y que la base se durmiera puede perderse: los números son aproximados). El día cuenta como cuenta Cloudflare (UTC: arranca a las 21:00 hs de Argentina). */
-  usoNota(m, p) {
+     encendida unos 10 segundos; si el siguiente llega antes, solo se suma el hueco. Se anota en la base al terminar los pedidos (como mucho cada 5 s, y una alarma
+     anota lo que falte si la base se va a dormir): los números son aproximados. El día cuenta como cuenta Cloudflare (UTC: arranca a las 21:00 hs de Argentina). */
+  usoClave(m, p) { return m + ' ' + p.replace(/\/(?:[0-9a-f]{8,}|g[0-9a-f]{14}|r[0-9a-f]{10})(?=\/|$)/g, '/:id').slice(0, 60); }
+  usoDia() {
     const t = Date.now(), dia = new Date(t).toISOString().slice(0, 10);
     let u = this.uso;
     if (!u || u.dia !== dia) {
       this.usoGuardar();
-      const r = this.q1('SELECT v FROM meta WHERE k=?', 'uso:' + dia);
+      const r = this.q1('SELECT v FROM usodia WHERE dia=?', dia);
       let j = null; try { j = r && JSON.parse(r.v); } catch (e) { /* sin datos de hoy */ }
-      u = this.uso = isPlain(j) && isPlain(j.n) ? { dia, n: j.n, aw: Number(j.aw) || 0, t: Number(j.t) || 0, flush: t, sucio: false } : { dia, n: {}, aw: 0, t: 0, flush: t, sucio: false };
+      const ok = isPlain(j) && isPlain(j.n);
+      u = this.uso = { dia, n: ok ? j.n : {}, f: ok && isPlain(j.f) ? j.f : {}, fr: ok ? Number(j.fr) || 0 : 0, fw: ok ? Number(j.fw) || 0 : 0, aw: ok ? Number(j.aw) || 0 : 0, t: ok ? Number(j.t) || 0 : 0, flush: 0, sucio: false };
     }
-    const k = m + ' ' + p.replace(/\/(?:[0-9a-f]{8,}|g[0-9a-f]{14}|r[0-9a-f]{10})(?=\/|$)/g, '/:id').slice(0, 60);
+    return u;
+  }
+  usoNota(m, p) {
+    const t = Date.now(), u = this.usoDia(), k = this.usoClave(m, p);
+    if (this.usoCur.length) this.usoFilas('(al despertar y otros)');   // lo que se leyó al despertar el servidor, antes de este pedido
     if (u.n[k] || Object.keys(u.n).length < 80) u.n[k] = (u.n[k] || 0) + 1;
     if (u.t) u.aw += Math.min((t - u.t) / 1000, 10.5);
     u.t = t; u.sucio = true;
-    if (t - u.flush > 90e3) this.usoGuardar();
   }
+  /* suma las filas que leyeron y escribieron las consultas hechas desde el último recuento (el plan gratis limita las dos por día) y las anota a nombre del pedido */
+  usoFilas(k) {
+    const cur = this.usoCur; this.usoCur = [];
+    let r = 0, w = 0;
+    for (const c of cur) { r += Number(c.rowsRead) || 0; w += Number(c.rowsWritten) || 0; }
+    if (!r && !w) return;
+    const u = this.usoDia();
+    u.fr += r; u.fw += w; u.sucio = true;
+    if (u.f[k] || Object.keys(u.f).length < 80) { const a = u.f[k] || (u.f[k] = [0, 0]); a[0] += r; a[1] += w; }
+  }
+  /* al terminar cada pedido: se cuentan sus filas y, si hace falta, se anota el contador (a lo sumo cada USO_FLUSH_MS; si el servidor se duerme antes, una alarma lo anota) */
+  usoFin(k) {
+    this.usoFilas(k);
+    const u = this.uso;
+    if (!u || !u.sucio) return;
+    if (Date.now() - u.flush >= USO_FLUSH_MS) this.usoGuardar();
+    else if (!this.usoAlarma) { this.usoAlarma = true; try { this.ctx.storage.setAlarm(Date.now() + USO_FLUSH_MS).catch(() => { this.usoAlarma = false; }); } catch (e) { this.usoAlarma = false; } }
+  }
+  async alarm() { this.usoAlarma = false; this.usoFilas('(alarma)'); this.usoGuardar(); }
   usoGuardar() {
     const u = this.uso;
     if (!u || !u.sucio) return;
-    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'uso:' + u.dia, JSON.stringify({ n: u.n, aw: Math.round(u.aw), t: u.t }));
-    this.sql.exec("DELETE FROM meta WHERE k LIKE 'uso:%' AND k<?", 'uso:' + new Date(Date.now() - 4 * 864e5).toISOString().slice(0, 10));
+    this.sql.exec('INSERT OR REPLACE INTO usodia(dia,v) VALUES(?,?)', u.dia, JSON.stringify({ n: u.n, f: u.f, fr: u.fr, fw: u.fw, aw: Math.round(u.aw), t: u.t }));
     u.flush = Date.now(); u.sucio = false;
+    this.usoCur = [];   // lo que costó anotar el contador no se cuenta a sí mismo
   }
   usoVer() {
+    this.usoFilas('(al ver el consumo)');
     this.usoGuardar();
-    const dia = new Date().toISOString().slice(0, 10), u = this.uso && this.uso.dia === dia ? this.uso : { n: {}, aw: 0 };
-    const pedidos = Object.entries(u.n).map(([k, n]) => ({ k, n })).sort((x, y) => y.n - x.n).slice(0, 30), total = Object.values(u.n).reduce((x, n) => x + n, 0);
+    const dia = new Date().toISOString().slice(0, 10), u = this.uso && this.uso.dia === dia ? this.uso : { n: {}, f: {}, fr: 0, fw: 0, aw: 0 };
+    const pedidos = Object.entries(u.n).map(([k, n]) => ({ k, n, fl: (u.f[k] || [0, 0])[0], fe: (u.f[k] || [0, 0])[1] }));
+    for (const [k, a] of Object.entries(u.f)) if (!(k in u.n)) pedidos.push({ k, n: 0, fl: a[0], fe: a[1] });
+    pedidos.sort((x, y) => (y.fl + y.fe * 50 + y.n) - (x.fl + x.fe * 50 + x.n));
+    const total = Object.values(u.n).reduce((x, n) => x + n, 0);
     let ws = 0; try { ws = this.ctx.getWebSockets().length; } catch (e) { /* sin WebSocket */ }
-    return { dia, total, pedidos, despierto: Math.round(u.aw), gbs: Math.round(u.aw * 0.125), ws, sse: this.streams.size, routersPing: this.pingRouters().length, ahora: Date.now() };
+    return { dia, total, pedidos: pedidos.slice(0, 30), despierto: Math.round(u.aw), gbs: Math.round(u.aw * 0.125), leidas: u.fr, escritas: u.fw, ws, sse: this.streams.size, routersPing: this.pingRouters().length, ahora: Date.now() };
   }
 
   async api(request, url, raw) {
