@@ -10,6 +10,11 @@ const NET=(function(){
   const base='';
   /* identificador de ESTE equipo: se genera una vez y se conserva aunque se cierre la sesión; el servidor lo usa para saber desde qué equipos entra cada persona */
   const DID_OK=/^[A-Za-z0-9_-]{16,64}$/;
+  /* llegada desde el otro servidor (enlace «Abrir el respaldo»): trae el identificador de equipo y la sesión, así no hay que volver a pedir aprobación ni a entrar. Se saca de la dirección enseguida. */
+  try{
+    const h=/^#yr=([A-Za-z0-9_-]{16,64})\.([A-Za-z0-9_-]{20,200})$/.exec(location.hash||'');
+    if(h){lsSet('did',h[1]);lsSet('tok',h[2]);lsSet('me','');history.replaceState(null,'',location.pathname+location.search);}
+  }catch(e){}
   let did=lsGet('did')||'';
   if(!DID_OK.test(did)){
     try{const a=new Uint8Array(18);crypto.getRandomValues(a);did=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
@@ -223,6 +228,10 @@ const NET=(function(){
     started=true;
   }
   async function init(){
+    if(token&&!me){   /* sesión traída del otro servidor: todavía no sabemos quién es */
+      try{const j=await api('GET','/api/me',undefined,{timeout:15000,noKick:true});me=j.me;lsSet('me',JSON.stringify(me));}
+      catch(e){if(!e.network){token='';lsSet('tok','');}}
+    }
     if(token&&me){
       const cached=await loadCache();
       if(cached){
@@ -327,6 +336,7 @@ const NET=(function(){
     resync:()=>fullSync().catch(()=>{}),   /* vuelve a pedir todo al servidor (por ejemplo, cuando le dan un permiso nuevo y ahora le corresponden más datos) */
     get respaldo(){return resp;},
     get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
+    enlaceA:url=>{const u=String(url||'').replace(/\/+$/,'')+'/';return token?u+'#yr='+did+'.'+token:u;},
     openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},
     db:dbApi,
     on:(k,f)=>{handlers[k].push(f);},

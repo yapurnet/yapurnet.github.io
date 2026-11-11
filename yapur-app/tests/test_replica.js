@@ -60,6 +60,17 @@ const EQUIPOS = [{ t: 'ONU', d: 'Huawei HG8145V5', s: '48575443AABBCCDD', n: 1, 
     const lleg = await hasta(async () => (await call(bB, 'POST', '/api/login', { usuario: 'ofi', clave: 'laura1' })).s === 200, 25000);
     t('B recibió la copia completa: los usuarios de A pueden entrar con sus mismas claves', lleg === true);
     const TB = (await call(bB, 'POST', '/api/login', { usuario: 'mauro', clave: 'claveSegura1' })).j.token;
+    /* ---- equipos y sesiones viajan con los usuarios: quien ya estaba adentro entra al respaldo sin volver a identificarse ---- */
+    const OD = (await call(bA, 'POST', '/api/login', { usuario: 'ofi', clave: 'laura1', did: 'dev-ofi-oficina-pc-0001' })).j.token;
+    const ses = await hasta(async () => (await call(bB, 'GET', '/api/me', undefined, OD)).s === 200, 25000);
+    t('la sesión abierta en A también vale en B (sin volver a entrar)', ses === true);
+    r = await call(bB, 'GET', '/api/dispositivos', undefined, TB);
+    t('B conoce el equipo de la oficina que A tenía registrado', r.s === 200 && r.j.lista.filter(x => x.usuario === 'ofi').length >= 2, r);
+    r = await call(bB, 'GET', '/api/me', undefined, TB);
+    t('la sesión abierta directamente en B se conserva al llegar las copias', r.s === 200, r);
+    await call(bA, 'POST', '/api/logout', {}, OD);
+    const cer = await hasta(async () => (await call(bB, 'GET', '/api/me', undefined, OD)).s === 401, 25000);
+    t('si se cierra la sesión en A, deja de valer también en B', cer === true);
     r = await call(bB, 'GET', '/api/doc/clientes/c01', undefined, TB);
     t('B tiene los clientes de A', r.s === 200 && r.j.data && r.j.data.items && r.j.data.items.cA && r.j.data.items.cA.nombre === 'Cejas Rosa', r);
     r = await call(bB, 'GET', '/api/status');

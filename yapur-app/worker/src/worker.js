@@ -1463,7 +1463,7 @@ export class YapurDB extends DurableObject {
 
   /* ----- copias ----- */
   /* copia completa como texto JSON (los documentos se copian tal cual, sin abrirlos) */
-  exportJSON() {
+  exportJSON(rep) {
     const docs = this.q('SELECT coll,id,data FROM docs ORDER BY coll,id').map(r => '{"coll":' + JSON.stringify(r.coll) + ',"id":' + JSON.stringify(r.id) + ',"data":' + r.data + '}');
     const users = this.q('SELECT * FROM users').map(r => JSON.stringify({ id: r.id, usuario: r.usuario, nombre: r.nombre, role: r.role, tel: r.tel, permisos: r.permisos ? JSON.parse(r.permisos) : null, activo: r.activo, salt: r.salt, hash: r.hash, created: r.created }));
     /* los contratos firmados (con su firma) y su registro viajan en toda copia; la plantilla también */
@@ -1471,7 +1471,8 @@ export class YapurDB extends DurableObject {
     const clog = this.q('SELECT * FROM contratos_log ORDER BY ts').map(r => JSON.stringify(r));
     const tpl = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
     const cmm = this.q1("SELECT v FROM meta WHERE k='comodato_modelos'");
-    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + '],"contratos":[' + contratos.join(',') + '],"contratos_log":[' + clog.join(',') + '],"contrato_tpl":' + (tpl ? tpl.v : 'null') + ',"comodato_modelos":' + (cmm ? cmm.v : 'null') + '}';
+    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + '],"contratos":[' + contratos.join(',') + '],"contratos_log":[' + clog.join(',') + '],"contrato_tpl":' + (tpl ? tpl.v : 'null') + ',"comodato_modelos":' + (cmm ? cmm.v : 'null')
+      + (rep ? ',"devices":' + JSON.stringify(this.q('SELECT id,uid,did,label,ua,app,ip,geo,estado,creado,visto FROM devices')) + ',"sessions":' + JSON.stringify(this.q('SELECT th,uid,created,last,dev FROM sessions')) : '') + '}';
   }
   async snapshot(name) {
     const gz = await gzip(this.exportJSON());
@@ -2427,12 +2428,16 @@ export class YapurDB extends DurableObject {
   repVigilar(a) {
     const q = a[0];
     if (this.repMute || typeof q !== 'string') return;
-    const m = /^\s*(INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+(docs|users|contratos_log|contratos|meta)\b/i.exec(q);
+    const m = /^\s*(INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+(docs|users|contratos_log|contratos|meta|devices|sessions)\b/i.exec(q);
     if (!m) return;
     const op = /^\s*UPDATE/i.test(q) ? 'u' : /^\s*DELETE/i.test(q) ? 'd' : 'i', t = m[2].toLowerCase();
     if (t === 'docs') {
       if (op === 'd' && !/WHERE\s+coll\s*=\s*\?\s+AND\s+id\s*=\s*\?/i.test(q)) return this.repTodo();
       this.repMarcar('d|' + a[1] + '|' + a[2]);
+    } else if (t === 'devices' || t === 'sessions') {
+      /* equipos aprobados y sesiones abiertas viajan con los usuarios (así nadie tiene que volver a pedir aprobación ni a entrar en el respaldo); lo que cambia en cada pedido (última vez visto) no se copia */
+      if (op === 'u' && /^\s*UPDATE\s+(sessions\s+SET\s+last\b|devices\s+SET\s+(label|visto)\b)/i.test(q)) return;
+      this.repMarcar('u|');
     } else if (t === 'users') {
       if (op === 'u' && /^\s*UPDATE\s+users\s+SET\s+last_login\b/i.test(q)) return;   /* la última entrada de cada uno no se copia */
       this.repMarcar('u|');
@@ -2524,7 +2529,11 @@ export class YapurDB extends DurableObject {
         const r = this.q1('SELECT data,upd FROM docs WHERE coll=? AND id=?', a, b);
         if (r) { (o.docs || (o.docs = [])).push({ c: a, i: b, d: r.data, u: r.upd }); bytes += r.data.length; } else (o.borrar || (o.borrar = [])).push([a, b]);
       } else if (t === 'u') {
-        if (!o.users) o.users = this.q('SELECT id,usuario,nombre,role,tel,permisos,activo,salt,hash,created FROM users');
+        if (!o.users) {
+          o.users = this.q('SELECT id,usuario,nombre,role,tel,permisos,activo,salt,hash,created FROM users');
+          o.devs = this.q('SELECT id,uid,did,label,ua,app,ip,geo,estado,creado,visto FROM devices');
+          o.ses = this.q('SELECT th,uid,created,last,dev FROM sessions');
+        }
       } else if (t === 'k') {
         const r = this.q1('SELECT * FROM contratos WHERE id=?', a);
         if (r) { (o.contratos || (o.contratos = [])).push(r); bytes += (r.firma || '').length + (r.texto || '').length + 2000; }
@@ -2566,7 +2575,7 @@ export class YapurDB extends DurableObject {
   async repEnviarCompleto() {
     const corte = Math.max(Date.now(), (this.repSeqN || 0) + 1);
     this.repSeqN = corte;   /* lo que cambie desde ahora lleva una marca mayor y no se pierde al limpiar la cola */
-    const cuerpo = '{"epoca":' + this.rep.epoca + ',"completo":true,"copia":' + this.exportJSON() + '}';
+    const cuerpo = '{"epoca":' + this.rep.epoca + ',"completo":true,"copia":' + this.exportJSON(true) + '}';
     const r = await this.repLlamar('/api/replica/aplicar', cuerpo, 'POST', 90000);
     if (r.status === 200 && r.j && r.j.ok) {
       this.sql.exec('DELETE FROM repcola WHERE ts<=?', corte);
@@ -2602,6 +2611,32 @@ export class YapurDB extends DurableObject {
         u.id, u.usuario, String(u.nombre || u.usuario), u.role, String(u.tel || ''), permisos, u.activo === 0 || u.activo === false ? 0 : 1, u.salt || null, u.hash || null, Number(u.created) || Date.now(), ult.get(u.id) || null);
     }
   }
+  /* equipos y sesiones del servidor activo: se suman a los de acá y se sacan los que el activo ya no tiene.
+     Lo que se abrió directamente en este servidor (mientras está en espera) se conserva: solo se tocan las filas que vinieron de allá (se recuerdan en meta). */
+  repDispos(devs, ses) {
+    const t = v => (typeof v === 'string' ? v : '');
+    const lee = k => { const r = this.q1('SELECT v FROM meta WHERE k=?', k); try { return new Set(r ? JSON.parse(r.v) : []); } catch (e) { return new Set(); } };
+    const antD = lee('repdev'), antS = lee('repses'), nuevoD = [], nuevoS = [];
+    const dOk = devs.filter(d => isPlain(d) && t(d.id) && t(d.uid) && t(d.did) && ['ok', 'pend', 'bloq'].includes(d.estado));
+    const sOk = ses.filter(x => isPlain(x) && /^[0-9a-f]{64}$/.test(t(x.th)) && t(x.uid));
+    const dIds = new Set(dOk.map(d => d.id)), sIds = new Set(sOk.map(x => x.th));
+    for (const id of antS) if (!sIds.has(id)) this.sql.exec('DELETE FROM sessions WHERE th=?', id);
+    for (const id of antD) if (!dIds.has(id)) { this.sql.exec('DELETE FROM sessions WHERE dev=?', id); this.sql.exec('DELETE FROM devices WHERE id=?', id); }
+    for (const d of dOk) {
+      const loc = this.q1('SELECT id FROM devices WHERE uid=? AND did=?', d.uid, d.did);
+      if (loc && loc.id !== d.id) { this.sql.exec('UPDATE sessions SET dev=? WHERE dev=?', d.id, loc.id); this.sql.exec('DELETE FROM devices WHERE id=?', loc.id); }
+      this.sql.exec('INSERT OR REPLACE INTO devices(id,uid,did,label,ua,app,ip,geo,estado,creado,visto) VALUES(?,?,?,?,?,?,?,?,?,?,?)', d.id, d.uid, d.did, t(d.label), t(d.ua), t(d.app), t(d.ip), t(d.geo), d.estado, Number(d.creado) || Date.now(), Number(d.visto) || Date.now());
+      nuevoD.push(d.id);
+    }
+    for (const x of sOk) {
+      this.sql.exec('INSERT OR REPLACE INTO sessions(th,uid,created,last,dev) VALUES(?,?,?,?,?)', x.th, x.uid, Number(x.created) || Date.now(), Number(x.last) || Date.now(), x.dev ? t(x.dev) : null);
+      nuevoS.push(x.th);
+    }
+    this.sql.exec('DELETE FROM devices WHERE uid NOT IN (SELECT id FROM users)');
+    this.sql.exec('DELETE FROM sessions WHERE uid NOT IN (SELECT id FROM users)');
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'repdev', JSON.stringify(nuevoD));
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'repses', JSON.stringify(nuevoS));
+  }
   repContrato(r) {
     const t = v => (typeof v === 'string' ? v : '');
     if (!isPlain(r) || !/^k[0-9a-f]{16}$/.test(t(r.id)) || !Number.isInteger(r.num) || !t(r.cid) || !t(r.estado) || !t(r.motivo) || !t(r.titular) || !t(r.equipos) || !t(r.texto) || !t(r.firma) || !t(r.hash) || !Number.isFinite(r.ts)) return;
@@ -2629,7 +2664,7 @@ export class YapurDB extends DurableObject {
           this.sql.exec('DELETE FROM docs WHERE coll=? AND id=?', x[0], x[1]);
           cambios.push([x[0], x[1], null]);
         }
-        if (Array.isArray(b.users)) this.repUsuarios(b.users);
+        if (Array.isArray(b.users)) { this.repUsuarios(b.users); if (Array.isArray(b.devs)) this.repDispos(b.devs, Array.isArray(b.ses) ? b.ses : []); }
         for (const r of Array.isArray(b.contratos) ? b.contratos : []) this.repContrato(r);
         for (const l of Array.isArray(b.clog) ? b.clog : []) this.repLog(l);
         if (isPlain(b.meta)) for (const k of ['contrato_tpl', 'comodato_modelos']) if (typeof b.meta[k] === 'string') this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, b.meta[k]);
@@ -2661,6 +2696,7 @@ export class YapurDB extends DurableObject {
           this.sql.exec('INSERT OR REPLACE INTO docs(coll,id,data,upd) VALUES(?,?,?,?)', d.coll, String(d.id), JSON.stringify(d.data), Date.now());
         }
         this.repUsuarios(Array.isArray(copia.users) ? copia.users : []);
+        if (Array.isArray(copia.devices)) this.repDispos(copia.devices, Array.isArray(copia.sessions) ? copia.sessions : []);
         this.sql.exec('DELETE FROM contratos');
         this.sql.exec('DELETE FROM contratos_log');
         for (const r of Array.isArray(copia.contratos) ? copia.contratos : []) this.repContrato(r);
