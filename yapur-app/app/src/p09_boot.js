@@ -21,6 +21,32 @@ function ordenesPorTec(cur){
   }
   return S.ajustes.tecnicos.map(t=>({nombre:t.nombre,n:cnt.get(t.id)||0})).sort((a,b)=>b.n-a.n||a.nombre.localeCompare(b.nombre,'es'));
 }
+/* «Hoy»: lo primero que ve la oficina al entrar. Qué se cobró, quién tiene trabajo abierto, qué instalaciones esperan que alguien las active y a quién hay que cortar. */
+function tableroHoy(today,cd){
+  const pagosHoy=[...S.pagos.values()].filter(p=>!p.anulado&&p.fecha===today);
+  const cobrado=pagosHoy.reduce((s,p)=>s+(Number(p.monto)||0),0);
+  const porTec=new Map();let libres=0,urg=0;
+  for(const o of S.ordenes.values()){
+    if(!ORD_OPEN(o))continue;
+    if(o.prioridad==='urgente')urg++;
+    if(!o.tecnico){libres++;continue;}
+    const e=porTec.get(o.tecnico)||{n:0,u:0,nombre:(tecById(o.tecnico)||{}).nombre||o.tecNombre||'Técnico'};
+    e.n++;if(o.prioridad==='urgente')e.u++;porTec.set(o.tecnico,e);
+  }
+  const tecs=[...porTec.values()].sort((a,b)=>b.n-a.n||a.nombre.localeCompare(b.nombre,'es'));
+  const ahora=Date.now();
+  const pend=[...S.clientes.values()].filter(c=>c.estado==='pendiente').map(c=>({c,dias:c.creado?Math.max(0,Math.floor((ahora-c.creado)/864e5)):0})).sort((a,b)=>b.dias-a.dias||norm(a.c.nombre).localeCompare(norm(b.c.nombre)));
+  const diasTxt=d=>d<=0?'de hoy':d===1?'hace 1 día':'hace '+d+' días';
+  const cortar=cd.cortar;
+  return `<div class="card" id="rs-hoy"><div class="head-row"><h3>Hoy</h3><span class="small muted">${esc(today.split('-').reverse().join('/'))}</span></div>
+    <div class="kpis three"><div class="kpi"><span class="n">${esc(fmtMoney(cobrado))}</span><span class="l">Cobrado hoy · ${pagosHoy.length} ${pagosHoy.length===1?'cobro':'cobros'}</span></div>
+      <div class="kpi tap" data-go="ordenes" role="button" tabindex="0"><span class="n">${tecs.reduce((s,t)=>s+t.n,0)+libres}</span><span class="l">Órdenes abiertas${urg?' · '+urg+' urgentes':''}</span></div>
+      <div class="kpi${cortar.length?' bad':''}${can('caja')?' tap':''}"${can('caja')?' data-go="cobranzas" data-sub="cortes" role="button" tabindex="0"':''}><span class="n">${cortar.length}</span><span class="l">Para cortar</span></div></div>
+    <div class="hoy-sec"><b>Órdenes abiertas por técnico</b>${tecs.length||libres?`<div class="list">${tecs.map(t=>`<div class="per"><span class="grow">${esc(t.nombre)}</span><span class="chip">${t.n}${t.u?' · '+t.u+' urgente'+(t.u===1?'':'s'):''}</span></div>`).join('')}${libres?`<div class="per"><span class="grow muted">Sin técnico asignado</span><span class="chip bad">${libres}</span></div>`:''}</div>`:'<div class="hint">No hay órdenes abiertas.</div>'}</div>
+    <div class="hoy-sec"><b>Instalaciones por activar</b>${pend.length?`<div class="list">${pend.slice(0,5).map(({c,dias})=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${esc(c.nombre||'Sin nombre')}</div><div class="s">${esc(c.dir||'')}</div></div><div class="small muted">${diasTxt(dias)}</div></button>`).join('')}</div>${pend.length>5?`<div class="hint">y ${pend.length-5} más en <button class="btn small" type="button" data-go="clientes">Clientes</button></div>`:''}`:'<div class="hint">No hay clientes esperando activación.</div>'}</div>
+    ${cortar.length?`<div class="hoy-sec"><b>Para cortar</b><div class="list">${cortar.slice(0,5).map(({c,s})=>`<button class="item" type="button" data-open-client="${esc(c.id)}"><div><div class="t">${esc(c.nombre)}</div><div class="s">${esc(c.dir||'')}</div></div><div class="small muted">vencido desde ${esc(s.desde||'')}</div></button>`).join('')}</div>${cortar.length>5?`<div class="hint">y ${cortar.length-5} más${can('caja')?' en <button class="btn small" type="button" data-go="cobranzas" data-sub="cortes">Cobranzas</button>':''}</div>`:''}</div>`:''}
+  </div>`;
+}
 VIEWS.resumen={
   mount(el){el.innerHTML='<div id="rs" class="wrap" style="padding:0"></div>';this.update();},
   update(){
@@ -50,7 +76,7 @@ VIEWS.resumen={
     const cd=cortesData();
     const steps=[['Crear los planes de velocidad',S.planes.size>0,'planes'],['Crear los perfiles del equipo',S.ajustes.perfiles.length>0,'ajustes'],['Cargar o importar los clientes',S.clientes.size>0,'clientes']];
     const setup=steps.some(s=>!s[1])?`<div class="card"><h2>Para empezar</h2><div class="list">${steps.map(([l,d,t],i)=>`<div class="per"><span class="grow"><b>${i+1}. ${l}</b></span>${d?'<span class="chip ok">Hecho</span>':(t==='planes'||t==='ajustes')&&!isAdmin()?'<span class="chip">Lo hace el administrador</span>':`<button class="btn small primary" type="button" data-go="${t}">Ir</button>`}</div>`).join('')}</div></div>`:'';
-    root.innerHTML=`${setup}<div class="kpis">
+    root.innerHTML=`${setup}${veTotales()&&can('ordenesTodas')&&S.loaded.ordenes?tableroHoy(today,cd):''}<div class="kpis">
       <div class="kpi"><span class="n">${act}</span><span class="l">Clientes activos${susp?' · '+susp+' suspendidos':''}</span></div>
       <div class="kpi"><span class="n">${fmtMoney(hoy)}</span><span class="l">Cobrado hoy</span></div>
       <div class="kpi"><span class="n">${fmtMoney(mes)}</span><span class="l">Cobrado en ${esc(monthLabel(cur))}</span></div>

@@ -591,5 +591,10 @@ Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test
 - Los secretos de firma (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) son los mismos que ya usa FAVL; no hay que cargar nada nuevo.
 
 
+## Panel «Hoy» y APK 2.17
+
+- **Hoy** (arriba del Resumen, para quien ve cobros y todas las órdenes): cobrado hoy sin contar anulados, órdenes abiertas por técnico (con las urgentes y las que no tienen técnico), instalaciones «pendientes» esperando activación (la más vieja primero) y clientes para cortar. Tocar un cliente abre su ficha.
+- **APK Gestión desde la versión 2.17**: respeta el freno automático (espacia posiciones y latidos según lo que pide el servidor, nunca más de 5 minutos) y, si el servidor principal contesta que llegó a su tope, aprende la dirección del respaldo y manda las posiciones ahí (vuelve al principal cuando el otro deja de responder). «Abrir el respaldo» se abre dentro de la misma app. Mientras el respaldo esté en espera no recibe posiciones; sirve una vez activado. Los técnicos tienen que instalar la versión nueva.
+
 ## Freno automático del consumo
 Cuando el día va camino a gastar el cupo del plan gratis de Cloudflare (el mayor entre pedidos, filas leídas, filas escritas y tiempo encendido, medido como en «Consumo del servidor»), el servidor espacia la ubicación de los técnicos: **60 % → un punto cada 60 s, 80 % → cada 2 min, 95 % → cada 5 min** (5 min es lo máximo, para no figurar «sin señal»). Lo demás (cobros, órdenes, clientes) no se toca. La app web además se espacia sola porque el servidor se lo pide. El APK instalado manda su ubicación por su cuenta una vez por minuto: el servidor descarta lo que sobra sin tocar la base (ahorra lecturas y escrituras, pero igual cuenta el pedido); para que también el APK mande menos habría que sacar una versión nueva. El estado se ve en «Consumo del servidor».
