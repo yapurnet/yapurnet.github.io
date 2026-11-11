@@ -388,9 +388,9 @@ function comodatoLimpio(v) {
 }
 /* la «firma» de una lista de equipos: dos listas con los mismos equipos (en cualquier orden) dan el mismo texto */
 const eqSig = arr => comodatoLimpio(arr).map(e => [e.t, e.d, e.s, e.n, e.e, e.o].map(x => String(x).toLowerCase()).join('|')).sort().join(';');
-/* Historial de migraciones de tecnología (antena → fibra): solo se agregan renglones. Nadie puede cambiar ni borrar los que ya están,
+/* Historial de migraciones de tecnología (antena → fibra o fibra → antena, con el domicilio nuevo si se mudó): solo se agregan renglones. Nadie puede cambiar ni borrar los que ya están,
    y los nuevos llevan quién lo hizo y la hora del servidor (no la del celular). El administrador puede corregir todo, como en el resto de la ficha. */
-const MIG_KEYS = ['f', 'ts', 'de', 'a', 'ipAnt', 'ip', 'nodoAnt', 'eqAnt', 'ret', 'por', 'obs'];
+const MIG_KEYS = ['f', 'ts', 'de', 'a', 'ipAnt', 'ip', 'nodoAnt', 'eqAnt', 'ret', 'por', 'obs', 'domAnt', 'dom'];
 const MIG_TECS = ['fibra', 'wireless'];
 function guardMigraciones(u, nw, prev) {
   if (!('migraciones' in nw)) return null;
@@ -401,7 +401,7 @@ function guardMigraciones(u, nw, prev) {
   for (let i = antes.length; i < lista.length; i++) {
     const m = lista[i];
     if (!isPlain(m) || Object.keys(m).some(k => !MIG_KEYS.includes(k))) return mal;
-    for (const [k, n] of [['f', 10], ['de', 10], ['a', 10], ['ipAnt', 80], ['ip', 80], ['nodoAnt', 80], ['eqAnt', 80], ['por', 60], ['obs', 200]]) if (k in m && (typeof m[k] !== 'string' || m[k].length > n)) return mal;
+    for (const [k, n] of [['f', 10], ['de', 10], ['a', 10], ['ipAnt', 80], ['ip', 80], ['nodoAnt', 80], ['eqAnt', 80], ['por', 60], ['obs', 200], ['domAnt', 160], ['dom', 160]]) if (k in m && (typeof m[k] !== 'string' || m[k].length > n)) return mal;
     if (!/^\d{4}-\d\d-\d\d$/.test(m.f || '') || !MIG_TECS.includes(m.de) || !MIG_TECS.includes(m.a) || m.de === m.a) return mal;
     if ('ret' in m) {
       if (!Array.isArray(m.ret) || m.ret.length > 12) return mal;

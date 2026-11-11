@@ -1,5 +1,5 @@
-# Migrar un cliente de antena a fibra óptica: el técnico anota la IP de la antena y la de la fibra, la ONU (modelo y MAC) y qué equipos retira,
-# y queda un historial en la ficha. Chromium real contra el servidor de verdad (workerd).
+# Migrar un cliente de antena a fibra óptica (y de fibra a antena, en una mudanza a un lugar sin fibra): el técnico anota la IP de antes y la de ahora,
+# el domicilio nuevo si se mudó, el equipo nuevo (modelo y MAC) y qué equipos retira, y queda un historial en la ficha. Chromium real contra el servidor de verdad (workerd).
 import asyncio, json, os, sys, time, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
@@ -60,26 +60,30 @@ async def main():
     ant = [{'t': 'Antena', 'd': 'CPE Ubiquiti LiteBeam Gen2', 's': '24:A4:3C:01:02:AB', 'n': 1, 'e': 'nuevo', 'o': ''},
            {'t': 'Fuente o adaptador', 'd': 'Inyector de corriente PoE', 's': '', 'n': 1, 'e': 'nuevo', 'o': ''},
            {'t': 'Router Wi-Fi', 'd': 'TP-Link Archer C6', 's': '50:D4:F7:A1:B2:C3', 'n': 1, 'e': 'usado', 'o': 'del cliente'}]
+    fib = [{'t': 'ONU', 'd': 'Huawei HG8145V5', 's': '2C:3A:E8:99:88:77', 'n': 1, 'e': 'nuevo', 'o': ''},
+           {'t': 'Fuente o adaptador', 'd': 'Fuente de corriente de la ONU', 's': '', 'n': 1, 'e': 'nuevo', 'o': ''},
+           {'t': 'Router Wi-Fi', 'd': 'TP-Link Archer C6', 's': '50:D4:F7:11:22:33', 'n': 1, 'e': 'usado', 'o': 'del cliente'}]
     for cid, extra in [('cUno', {'nombre': 'Cejas Rosa', 'codigo': '77', 'tec': 'wireless', 'ip': '10.20.43.9', 'nodo': 'Torre Leo', 'equipo': '24:A4:3C:01:02:AB', 'usuario': 'cejas', 'comodato': ant}),
                        ('cDos', {'nombre': 'Ya Tiene Fibra', 'codigo': '78', 'tec': 'fibra', 'ip': '192.168.100.4'}),
-                       ('cTres', {'nombre': 'Sin Tecnología', 'codigo': '79'})]:
+                       ('cTres', {'nombre': 'Sin Tecnología', 'codigo': '79'}),
+                       ('cCuatro', {'nombre': 'Se Muda', 'codigo': '80', 'tec': 'fibra', 'ip': '192.168.100.30', 'usuario': 'semuda', 'equipo': '2C:3A:E8:99:88:77', 'lat': -28.4601, 'lng': -62.8301, 'ref': 'Casa celeste', 'comodato': fib})]:
         api('PATCH', '/api/doc/clientes/' + shard(cid), {'data': {'items': {cid: dict(base, **extra)}}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         ctx = await nuevo(br, 390, 844)
         pt = await login(ctx, 'tec', 'fernando1')
-        await pt.wait_for_function('S.clientes.size === 3', timeout=10000)
+        await pt.wait_for_function('S.clientes.size === 4', timeout=10000)
 
         # 1) la ficha de un cliente por antena o sin la tecnología cargada ofrece migrar; la de uno que ya figura en fibra, no
         await pt.evaluate("openClient('cUno')"); await pt.wait_for_selector('.cm-block')
         ft = await pt.inner_text('.sheet')
-        check('la ficha del cliente por antena muestra su tecnología y su IP, y el botón «Migrar a fibra óptica»', 'Antena wireless' in ft and '10.20.43.9' in ft and await pt.query_selector('[data-act=migrar]') is not None, ft[:400])
+        check('la ficha del cliente por antena muestra su tecnología y su IP, y el botón «Migrar a fibra óptica»', 'Antena wireless' in ft and '10.20.43.9' in ft and await pt.query_selector('[data-act=migrar]') is not None and await pt.query_selector('[data-act=migrar-ant]') is None, ft[:400])
         await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cDos')")
         await pt.wait_for_selector('.sheet')
-        check('uno que ya está en fibra no tiene el botón (ni el bloque, si no hay historial)', await pt.query_selector('[data-act=migrar]') is None)
+        check('uno que ya está en fibra no ofrece migrar a fibra, pero sí pasarlo a antena (si se muda a un lugar sin fibra)', await pt.query_selector('[data-act=migrar]') is None and await pt.query_selector('[data-act=migrar-ant]') is not None)
         await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cTres')")
         await pt.wait_for_selector('.sheet')
-        check('uno que todavía no tiene la tecnología cargada sí lo ofrece (hoy es la mayoría de los clientes)', await pt.query_selector('[data-act=migrar]') is not None)
+        check('uno que todavía no tiene la tecnología cargada ofrece las dos cosas (hoy es la mayoría de los clientes)', await pt.query_selector('[data-act=migrar]') is not None and await pt.query_selector('[data-act=migrar-ant]') is not None)
         await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cUno')"); await pt.wait_for_selector('[data-act=migrar]')
 
         # 2) el formulario trae lo que ya se sabe
@@ -131,6 +135,34 @@ async def main():
         await pt.wait_for_function("document.querySelector('.sheet').innerText.includes('Pasó a fibra')", timeout=8000)
         c3 = cliente_srv(TA, 'cTres')
         check('pasa a fibra; el historial dice que venía de antena y la MAC/serie queda como se escribió (en mayúsculas)', c3['tec'] == 'fibra' and c3['ip'] == '192.168.100.90' and c3['migraciones'][0]['de'] == 'wireless' and 'ipAnt' not in c3['migraciones'][0] and c3['equipo'] == 'HWTC1A2B3C4D' and [e['t'] for e in c3['comodato']] == ['ONU', 'Fuente o adaptador'], c3)
+
+        # 4c) un cliente de fibra que se muda a un lugar sin fibra: pasa a antena, con el domicilio y la ubicación nuevos
+        await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cCuatro')"); await pt.wait_for_selector('[data-act=migrar-ant]')
+        check('el cliente de fibra ofrece «Pasar a antena (mudanza)» y no «Migrar a fibra»', await pt.query_selector('[data-act=migrar]') is None and 'Pasar a antena' in await pt.inner_text('[data-act=migrar-ant]'))
+        await pt.click('[data-act=migrar-ant]'); await pt.wait_for_selector('#mgform')
+        lbl = await pt.inner_text('#mgform')
+        check('el formulario habla de la fibra de hoy y la antena de ahora; la IP de hoy viene cargada y la nueva vacía', 'IP de la fibra (hoy)' in lbl and 'IP que va a tener con la antena' in lbl and await pt.input_value('#mg-ipa') == '192.168.100.30' and await pt.input_value('#mg-ip') == '', lbl[:300])
+        check('el domicilio nuevo está escondido hasta tildar «Se mudó» y no hay caja NAP (la antena no sale de una)', await pt.is_hidden('#mg-mudw') and await pt.query_selector('#cf-nap') is None)
+        check('la antena viene con el modelo de la lista y ya vienen tildados para retirar la ONU y su fuente (no el router del cliente)', await pt.input_value('#mg-m') == 'CPE Ubiquiti LiteBeam Gen2' and [await i.is_checked() for i in await pt.query_selector_all('[data-ret]')] == [True, True, False])
+        await pt.click('#mgform button[type=submit]'); await toast(pt, 'Falta la IP que va a tener con la antena')
+        await pt.fill('#mg-ip', '10.20.43.77'); await pt.check('#mg-mud')
+        check('al tildar «Se mudó» aparecen el domicilio, la referencia y la ubicación (vacía, no la de la casa vieja)', await pt.is_visible('#mg-dir') and await pt.input_value('#mg-dir') == '' and await pt.input_value('#cf-geo') == '' and await pt.input_value('#mg-loc') == 'Añatuya')
+        await pt.click('#mgform button[type=submit]'); await toast(pt, 'Falta la calle y el número del domicilio nuevo')
+        await pt.fill('#mg-dir', 'Calle 12 N° 450'); await pt.fill('#mg-loc', 'Colonia Dora'); await pt.fill('#mg-ref', 'Portón verde'); await pt.fill('#cf-geo', '-28.5001, -62.9002')
+        await shot(pt, 'mudanza-form.png')
+        await pt.click('#mgform button[type=submit]'); await toast(pt, 'Escribí la MAC de la antena')
+        check('nada de esto guardó algo: el cliente sigue en fibra', cliente_srv(TA, 'cCuatro')['tec'] == 'fibra')
+        await pt.fill('#mg-s', '24a43c0a0b0c'); await pt.fill('#mg-obs', 'la fibra no llega a la casa nueva')
+        await pt.click('#mgform button[type=submit]'); await pt.wait_for_selector('#mgform', state='detached', timeout=8000)
+        await pt.wait_for_function("document.querySelector('.sheet').innerText.includes('Se mudó y pasó')", timeout=8000)
+        c4 = cliente_srv(TA, 'cCuatro')
+        check('pasa a antena con la IP nueva y el domicilio, la referencia y la ubicación nuevos', c4['tec'] == 'wireless' and c4['ip'] == '10.20.43.77' and c4['dir'] == 'Calle 12 N° 450' and c4['loc'] == 'Colonia Dora' and c4['ref'] == 'Portón verde' and abs(c4['lat'] + 28.5001) < 1e-6 and abs(c4['lng'] + 62.9002) < 1e-6 and c4['equipo'] == '24:A4:3C:0A:0B:0C' and not c4.get('nap'), c4)
+        check('en comodato se retira la ONU y su fuente, queda el router del cliente y entran la antena (con su MAC) y su inyector', [(e['t'], e['d'], e['s']) for e in c4['comodato']] == [('Router Wi-Fi', 'TP-Link Archer C6', '50:D4:F7:11:22:33'), ('Antena', 'CPE Ubiquiti LiteBeam Gen2', '24:A4:3C:0A:0B:0C'), ('Fuente o adaptador', 'Inyector de corriente PoE', '')], c4['comodato'])
+        m4 = c4['migraciones'][0]
+        check('el historial dice de qué a qué pasó, las dos IP, el domicilio de antes y de ahora y lo que se retiró', m4['de'] == 'fibra' and m4['a'] == 'wireless' and m4['ipAnt'] == '192.168.100.30' and m4['ip'] == '10.20.43.77' and m4['domAnt'] == 'Calle 9 N° 123, Añatuya' and m4['dom'] == 'Calle 12 N° 450, Colonia Dora' and m4['por'] == 'Fernando Paz' and [e['t'] for e in m4['ret']] == ['ONU', 'Fuente o adaptador'] and m4['obs'] == 'la fibra no llega a la casa nueva', m4)
+        f4 = await pt.inner_text('.sheet')
+        check('la ficha muestra la mudanza y ya no ofrece pasar a antena (sí volver a fibra)', 'Se mudó y pasó a antena wireless el' in f4 and 'Calle 9 N° 123, Añatuya' in f4 and 'Calle 12 N° 450, Colonia Dora' in f4 and await pt.query_selector('[data-act=migrar-ant]') is None and await pt.query_selector('[data-act=migrar]') is not None, f4[:800])
+        await shot(pt, 'mudanza-ficha.png')
         await ctx.close()
 
         # 5) un técnico sin permiso de datos técnicos no ve el botón
@@ -138,9 +170,9 @@ async def main():
         api('PATCH', '/api/doc/clientes/' + shard('cDos'), {'data': {'items': {'cDos': dict(base, nombre='Ya Tiene Fibra', codigo='78', tec='wireless', ip='10.20.43.50')}}}, TA)
         ctx2 = await nuevo(br, 390, 844)
         p2 = await login(ctx2, 'tec2', 'marcos123')
-        await p2.wait_for_function('S.clientes.size === 3', timeout=10000)
+        await p2.wait_for_function('S.clientes.size === 4', timeout=10000)
         await p2.evaluate("openClient('cDos')"); await p2.wait_for_selector('.sheet')
-        check('sin el permiso de ubicación y datos técnicos no se ofrece migrar', await p2.query_selector('[data-act=migrar]') is None)
+        check('sin el permiso de ubicación y datos técnicos no se ofrece migrar ni pasar a antena', await p2.query_selector('[data-act=migrar]') is None and await p2.query_selector('[data-act=migrar-ant]') is None and await p2.query_selector('.mg-block') is None)
         await ctx2.close()
         await br.close()
     check('sin errores de consola', not ERR, ERR[:3])
