@@ -1320,8 +1320,8 @@ export class YapurDB extends DurableObject {
   }
   arcaConfig(b) {
     const c = this.arcaCfg();
-    const pv = Number(b.pv), amb = b.amb === 'prod' ? 'prod' : 'homo';
-    if (!Number.isInteger(pv) || pv < 1 || pv > 99999) throw httpErr(400, 'El punto de venta tiene que ser un número (el que creaste en ARCA para web services).');
+    const sinPv = b.pv == null || b.pv === '' || b.pv === 0, pv = sinPv ? (c.pv || null) : Number(b.pv), amb = b.amb === 'prod' ? 'prod' : 'homo';
+    if (!sinPv && (!Number.isInteger(pv) || pv < 1 || pv > 99999)) throw httpErr(400, 'El punto de venta tiene que ser un número (el que creaste en ARCA para web services).');
     if (amb !== (c.amb || 'homo')) this.sql.exec("DELETE FROM meta WHERE k LIKE 'arca_tk:%'");
     c.pv = pv; c.amb = amb;
     this.arcaGuardar(c);

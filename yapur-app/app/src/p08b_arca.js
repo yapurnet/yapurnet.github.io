@@ -62,7 +62,7 @@ async function arcaAjustesMount(el){
     catch(err){cg.disabled=false;aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
   $('#arca-pv-g',el).addEventListener('click',async()=>{
-    try{await NET.api('PUT','/api/arca',{pv:Number($('#arca-pv',el).value),amb:$('#arca-amb',el).value});toast('Guardado');rec();}
+    try{await NET.api('PUT','/api/arca',{pv:$('#arca-pv',el).value?Number($('#arca-pv',el).value):null,amb:$('#arca-amb',el).value});toast('Guardado');rec();}
     catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
   const pb=$('#arca-probar',el);
