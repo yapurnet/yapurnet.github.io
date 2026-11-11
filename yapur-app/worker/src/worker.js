@@ -1428,7 +1428,7 @@ export class YapurDB extends DurableObject {
       const ult = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0)).getUTCDate();
       const urls = this.arcaUrls(c), t = await this.arcaTicket(c);
       const r = await ARCA.emitir(urls, t, em.cuit, { tipo, pv: c.pv, concepto: 2, docTipo, docNro, condIva, fecha: hoy, desde: mes + '-01', hasta: mes + '-' + String(ult).padStart(2, '0'), vto: hoy, total, asociado: nc ? { tipo: orig.tipo, pv: orig.pv, nro: orig.nro } : null });
-      const fe = { tipo, pv: c.pv, nro: r.nro, cae: r.cae, vto: r.vto, fecha: hoy, total: r.total, neto: r.neto, iva: r.iva, docTipo, docNro, condIva, nombre, cuit: em.cuit, amb: c.amb || 'homo', por: u.id, ts: Date.now() };
+      const fe = { tipo, pv: c.pv, nro: r.nro, cae: r.cae, vto: r.vto, fecha: hoy, total: r.total, neto: r.neto, iva: r.iva, docTipo, docNro, condIva, nombre, cuit: em.cuit, desde: mes + '-01', hasta: mes + '-' + String(ult).padStart(2, '0'), vp: hoy, amb: c.amb || 'homo', por: u.id, ts: Date.now() };
       const out = nc ? Object.assign({}, orig, { nc: fe }) : fe;
       this.arcaMarcar(docId, ks, out);
       this.snapshotSoon();
