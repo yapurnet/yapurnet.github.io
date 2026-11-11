@@ -398,6 +398,28 @@ function guardComodato(p, nw, prev) {
   }
   return null;
 }
+/* Los modelos de equipos que el técnico elige de una lista al cargar el comodato (así solo escribe la MAC). Los edita el administrador en Ajustes.
+   De arranque están los que ya usa la empresa: la ONU de fibra, la antena de siempre con su inyector PoE y la fuente de la ONU. */
+const COMODATO_MODELOS_DEF = [
+  { t: 'ONU', d: 'Huawei HG8145V5' },
+  { t: 'Antena', d: 'CPE Ubiquiti LiteBeam Gen2' },
+  { t: 'Fuente o adaptador', d: 'Inyector de corriente PoE' },
+  { t: 'Fuente o adaptador', d: 'Fuente de corriente de la ONU' }
+];
+const COMODATO_MODELOS_MAX = 60;
+function modelosLimpio(v) {
+  const out = [], visto = new Set();
+  for (const it of (Array.isArray(v) ? v : []).slice(0, COMODATO_MODELOS_MAX * 2)) {
+    if (!isPlain(it) || !COMODATO_TIPOS.includes(it.t)) continue;
+    const d = lim(it.d, 80);
+    if (d.length < 2) continue;
+    const k = it.t + '|' + d.toLowerCase();
+    if (visto.has(k)) continue;
+    visto.add(k); out.push({ t: it.t, d });
+    if (out.length >= COMODATO_MODELOS_MAX) break;
+  }
+  return out;
+}
 const CONTRATO_ESTADOS = ['vigente', 'revision', 'archivado', 'rechazado', 'borrado'];
 const CONTRATO_MOTIVOS = { alta: 'Alta', titularidad: 'Cambio de titularidad', equipos: 'Cambio de equipos' };
 const CONTRATO_VARS = ['empresa', 'empresa_cuit', 'empresa_domicilio', 'representante', 'lugar', 'fecha', 'numero', 'titular', 'dni', 'domicilio', 'telefono', 'cliente_n', 'tecnologia', 'equipos'];
@@ -1367,7 +1389,8 @@ export class YapurDB extends DurableObject {
     const contratos = this.q('SELECT * FROM contratos ORDER BY num').map(r => JSON.stringify(r));
     const clog = this.q('SELECT * FROM contratos_log ORDER BY ts').map(r => JSON.stringify(r));
     const tpl = this.q1("SELECT v FROM meta WHERE k='contrato_tpl'");
-    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + '],"contratos":[' + contratos.join(',') + '],"contratos_log":[' + clog.join(',') + '],"contrato_tpl":' + (tpl ? tpl.v : 'null') + '}';
+    const cmm = this.q1("SELECT v FROM meta WHERE k='comodato_modelos'");
+    return '{"app":"yapur-gestion","v":1,"ts":' + Date.now() + ',"docs":[' + docs.join(',') + '],"users":[' + users.join(',') + '],"contratos":[' + contratos.join(',') + '],"contratos_log":[' + clog.join(',') + '],"contrato_tpl":' + (tpl ? tpl.v : 'null') + ',"comodato_modelos":' + (cmm ? cmm.v : 'null') + '}';
   }
   async snapshot(name) {
     const gz = await gzip(this.exportJSON());
@@ -1432,6 +1455,7 @@ export class YapurDB extends DurableObject {
       this.sql.exec('INSERT OR IGNORE INTO contratos_log(id,cto,ts,uid,uname,acc,det) VALUES(?,?,?,?,?,?,?)', l.id, l.cto, l.ts, l.uid ? t(l.uid) : null, t(l.uname).slice(0, 60), t(l.acc).slice(0, 30), l.det ? t(l.det).slice(0, 300) : null);
     }
     if (isPlain(body.contrato_tpl) && typeof body.contrato_tpl.texto === 'string' && !this.q1("SELECT 1 x FROM meta WHERE k='contrato_tpl'")) this.sql.exec("INSERT INTO meta(k,v) VALUES('contrato_tpl',?)", JSON.stringify(body.contrato_tpl));
+    if (isPlain(body.comodato_modelos) && Array.isArray(body.comodato_modelos.lista) && !this.q1("SELECT 1 x FROM meta WHERE k='comodato_modelos'")) this.sql.exec("INSERT INTO meta(k,v) VALUES('comodato_modelos',?)", JSON.stringify({ lista: modelosLimpio(body.comodato_modelos.lista), mod: Number(body.comodato_modelos.mod) || null, modPor: String(body.comodato_modelos.modPor || '').slice(0, 60) }));
   }
   /* restaura una copia de este servidor o la exportada desde la versión anterior (artefacto de Claude) */
   async restore(body) {
@@ -1522,6 +1546,25 @@ export class YapurDB extends DurableObject {
     const t = { texto, ver: (Number(old.ver) || 0) + 1, final, empresa, mod: Date.now(), modPor: String(u.nombre || u.usuario || '').slice(0, 60) };
     this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('contrato_tpl',?)", JSON.stringify(t));
     return this.contratoPlantillaVer(u);
+  }
+  /* modelos de equipos para elegir al cargar el comodato: los guardados por el administrador o, si nunca los tocó, los de arranque */
+  comodatoModelos() {
+    const r = this.q1("SELECT v FROM meta WHERE k='comodato_modelos'");
+    let m = null; try { m = r ? JSON.parse(r.v) : null; } catch (e) { m = null; }
+    return isPlain(m) && Array.isArray(m.lista) ? Object.assign({}, m, { lista: modelosLimpio(m.lista) }) : { lista: COMODATO_MODELOS_DEF.map(x => Object.assign({}, x)) };
+  }
+  comodatoModelosVer(u) {
+    if (!effPerms(u).comodato) throw httpErr(403, 'Tu usuario no puede cargar los equipos en comodato.', 'permission_denied');
+    const m = this.comodatoModelos();
+    return { modelos: m.lista, tipos: COMODATO_TIPOS, mod: m.mod || null, modPor: m.modPor || '' };
+  }
+  comodatoModelosGuardar(u, b) {
+    if (!isPlain(b) || !Array.isArray(b.modelos)) throw httpErr(400, 'Datos inválidos.');
+    const lista = modelosLimpio(b.modelos);
+    const old = this.comodatoModelos();
+    if (same(old.lista, lista)) return this.comodatoModelosVer(u);
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('comodato_modelos',?)", JSON.stringify({ lista, mod: Date.now(), modPor: String(u.nombre || u.usuario || '').slice(0, 60) }));
+    return this.comodatoModelosVer(u);
   }
   contratoLog(cto, u, acc, det) {
     this.sql.exec('INSERT INTO contratos_log(id,cto,ts,uid,uname,acc,det) VALUES(?,?,?,?,?,?,?)', 'l' + hex(rnd(8)), cto, Date.now(), u ? u.id : null, u ? String(u.nombre || u.usuario || '').slice(0, 60) : '', acc, det ? String(det).slice(0, 300) : null);
@@ -2487,6 +2530,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/ping/armar' && m === 'POST') return send(200, this.pingArmar((await this.needAuth(request)).user));
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
     if (p === '/api/contratos' && m === 'GET') return send(200, this.contratoLista((await this.needAuth(request)).user, url));
+    if (p === '/api/comodato/modelos' && m === 'GET') return send(200, this.comodatoModelosVer((await this.needAuth(request)).user));
+    if (p === '/api/comodato/modelos' && m === 'PUT') return send(200, this.comodatoModelosGuardar((await this.needAdmin(request)).user, readBody(raw, 2e4)));
     if (p === '/api/contrato/plantilla' && m === 'GET') return send(200, this.contratoPlantillaVer((await this.needAuth(request)).user));
     if (p === '/api/contrato/plantilla' && m === 'PUT') return send(200, this.contratoPlantillaGuardar((await this.needAdmin(request)).user, readBody(raw, 6e4)));
     if (p === '/api/contrato/vista' && m === 'POST') return send(200, this.contratoVista((await this.needAuth(request)).user, readBody(raw, 2e4)));

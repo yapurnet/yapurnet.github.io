@@ -362,6 +362,10 @@ button.pelo:hover{border-color:var(--accent-line)}
 .cm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .cm-list li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);overflow-wrap:anywhere}
 .cm-row{display:flex;flex-direction:column;gap:10px}
+.cm-mas summary{cursor:pointer;padding:6px 0}
+.cm-mas[open] summary{margin-bottom:10px}
+.cm-mas>*+*{margin-top:10px}
+.cm-modelo{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
 .ct-doc{white-space:pre-wrap;overflow-wrap:anywhere;font-family:Georgia,"Times New Roman",serif;font-size:15px;line-height:1.55;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);max-height:46vh;overflow-y:auto}
 .ct-paper .ct-doc{max-height:none;overflow:visible}
 .ct-firma{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-top:14px}
@@ -1935,40 +1939,133 @@ function comodatoBind(el,c){
 }
 
 /* ----- cargar o editar los equipos prestados ----- */
-/* Los equipos con los que arranca la lista de un cliente sin equipos cargados.
-   Antena: siempre es el mismo modelo, así que ya viene puesto. Fibra: la ONU cambia de un cliente a otro, se escribe en cada uno. */
-function cmInicial(c){
-  const f=(t,d)=>({t,d,s:'',n:1,e:'nuevo',o:''});
-  return c&&c.tec==='wireless'?[f('Antena','CPE Ubiquiti LiteBeam Gen2'),f('Fuente o adaptador','Inyector de corriente PoE')]:[f('ONU',''),f('Fuente o adaptador','Fuente de corriente de la ONU')];
+/* Los modelos se eligen de una lista (la edita el administrador en Ajustes) para que el técnico solo escriba la MAC.
+   Esta copia es la de arranque: se usa si todavía no se pudo pedir la del servidor (mismos modelos que el servidor). */
+const CM_MODELOS_DEF=[{t:'ONU',d:'Huawei HG8145V5'},{t:'Antena',d:'CPE Ubiquiti LiteBeam Gen2'},{t:'Fuente o adaptador',d:'Inyector de corriente PoE'},{t:'Fuente o adaptador',d:'Fuente de corriente de la ONU'}];
+const CM_SIN_MAC=['Fuente o adaptador','Cable de fibra'];   /* estos no tienen MAC ni serie que anotar */
+const CM_OTRO='__otro';
+S.cmModelos=null;
+const cmLista=t=>(S.cmModelos||CM_MODELOS_DEF).filter(m=>m.t===t).map(m=>m.d);
+async function cmCargarModelos(){
+  if(!can('comodato'))return;
+  try{const j=await NET.api('GET','/api/comodato/modelos',undefined,{noKick:true,timeout:6000});if(Array.isArray(j.modelos))S.cmModelos=j.modelos;}catch(e){/* sin red: valen los que ya se tenían */}
 }
-function openComodatoEditor(id){
+/* el último modelo que se eligió en este celular para cada tipo (si todavía está en la lista), o el primero de la lista */
+const cmUlt=t=>{try{return localStorage.getItem('yapur_cm_'+t)||'';}catch(e){return '';}};
+const cmUltPoner=(t,d)=>{try{localStorage.setItem('yapur_cm_'+t,d);}catch(e){}};
+function cmModeloInicial(t){const l=cmLista(t),u=cmUlt(t);return u&&l.includes(u)?u:(l[0]||'');}
+/* la MAC se anota en mayúsculas y con dos puntos si son 12 letras y números; un N° de serie se deja tal cual */
+function cmMacFmt(v){
+  const s=String(v==null?'':v).trim().toUpperCase(),h=s.replace(/[\s:.\-]/g,'');
+  return /^[0-9A-F]{12}$/.test(h)?h.match(/../g).join(':'):s;
+}
+function cmMacMal(v){
+  const s=String(v==null?'':v).trim().toUpperCase();
+  if(!/[:\-]/.test(s))return '';
+  const h=s.replace(/[\s:.\-]/g,'');
+  return /^[0-9A-F]+$/.test(h)&&h.length!==12?'La MAC tiene que tener 12 letras y números y la que escribiste tiene '+h.length+'.':'';
+}
+/* Los equipos con los que arranca la lista de un cliente sin equipos cargados.
+   Antena: siempre es el mismo modelo, así que ya viene puesto. Fibra: la ONU viene con el modelo de la lista y solo falta la MAC.
+   Si la ficha del cliente ya tiene el «equipo» (serie o MAC), se usa para no escribirlo dos veces. */
+function cmInicial(c){
+  const eq=c&&c.equipo?cmMacFmt(cmLim(c.equipo,60)):'';
+  const f=(t,d,s)=>({t,d,s:s||'',n:1,e:'nuevo',o:''});
+  return c&&c.tec==='wireless'?[f('Antena',cmModeloInicial('Antena')||'CPE Ubiquiti LiteBeam Gen2',eq),f('Fuente o adaptador','Inyector de corriente PoE')]:[f('ONU',cmModeloInicial('ONU'),eq),f('Fuente o adaptador','Fuente de corriente de la ONU')];
+}
+async function openComodatoEditor(id){
   const c=S.clientes.get(id);if(!c)return;
-  let rows=cmLimpio(c.comodato);
-  if(!rows.length)rows=cmInicial(c);
+  await cmCargarModelos();
+  let rows=cmLimpio(c.comodato).map(r=>Object.assign(r,{otro:!cmLista(r.t).includes(r.d)}));
+  if(!rows.length)rows=cmInicial(c).map(r=>Object.assign(r,{otro:!cmLista(r.t).includes(r.d)}));
   const vig=ctVig(id);
-  const rowHtml=(r,i)=>`<div class="card flat cm-row" data-i="${i}">
-    <div class="grid2">${F('Tipo','cm-t'+i,`<select id="cm-t${i}">${CM_TIPOS.map(t=>`<option${t===r.t?' selected':''}>${esc(t)}</option>`).join('')}</select>`)}${F('Cantidad','cm-n'+i,`<input id="cm-n${i}" type="number" min="1" max="99" inputmode="numeric" value="${r.n}">`)}</div>
-    ${F('Marca y modelo','cm-d'+i,`<input id="cm-d${i}" value="${esc(r.d)}" autocomplete="off" maxlength="80" placeholder="Huawei HG8145V5">`)}
-    ${F('N° de serie o MAC','cm-s'+i,`<input id="cm-s${i}" value="${esc(r.s)}" autocomplete="off" maxlength="60" placeholder="Está en la etiqueta del equipo">`)}
-    <div class="grid2">${F('Estado','cm-e'+i,`<select id="cm-e${i}"><option value="nuevo"${r.e==='nuevo'?' selected':''}>Nuevo</option><option value="usado"${r.e!=='nuevo'?' selected':''}>Usado</option></select>`)}${F('Observaciones','cm-o'+i,`<input id="cm-o${i}" value="${esc(r.o)}" autocomplete="off" maxlength="120" placeholder="Con caja, con fuente…">`)}</div>
+  const rowHtml=(r,i)=>{
+    const lista=cmLista(r.t),conMac=!CM_SIN_MAC.includes(r.t),otro=!lista.length||r.otro;
+    const serie=F(conMac?'MAC (o N° de serie)':'N° de serie (si tiene)','cm-s'+i,`<input id="cm-s${i}" class="mono" value="${esc(r.s)}" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="60" placeholder="${conMac?'Escribí la MAC que está en la etiqueta':'Opcional'}">`);
+    return `<div class="card flat cm-row" data-i="${i}">
+    <div class="grid2">${F('Tipo','cm-t'+i,`<select id="cm-t${i}">${CM_TIPOS.map(t=>`<option${t===r.t?' selected':''}>${esc(t)}</option>`).join('')}</select>`)}
+    ${lista.length?F('Modelo','cm-m'+i,`<select id="cm-m${i}">${lista.map(d=>`<option value="${esc(d)}"${!otro&&d===r.d?' selected':''}>${esc(d)}</option>`).join('')}<option value="${CM_OTRO}"${otro?' selected':''}>Otro modelo (escribirlo)</option></select>`):'<div></div>'}</div>
+    <div id="cm-dw${i}"${otro?'':' hidden'}>${F('Marca y modelo','cm-d'+i,`<input id="cm-d${i}" value="${esc(r.d)}" autocomplete="off" maxlength="80" placeholder="Huawei HG8145V5">`)}</div>
+    ${conMac?serie:''}
+    <details class="cm-mas"><summary class="small muted">Cantidad, estado y observaciones</summary>
+      <div class="grid2">${F('Cantidad','cm-n'+i,`<input id="cm-n${i}" type="number" min="1" max="99" inputmode="numeric" value="${r.n}">`)}${F('Estado','cm-e'+i,`<select id="cm-e${i}"><option value="nuevo"${r.e==='nuevo'?' selected':''}>Nuevo</option><option value="usado"${r.e!=='nuevo'?' selected':''}>Usado</option></select>`)}</div>
+      ${conMac?'':serie}
+      ${F('Observaciones','cm-o'+i,`<input id="cm-o${i}" value="${esc(r.o)}" autocomplete="off" maxlength="120" placeholder="Con caja, con fuente…">`)}</details>
     <div class="actions start"><button class="btn small danger" type="button" data-cm-del="${i}">Quitar este equipo</button></div></div>`;
-  openModal({title:'Equipos en comodato',html:`<div class="hint"><b>${esc(c.nombre)}</b> · lo que la empresa le prestó al cliente. Esto es lo que figura en el contrato.</div>
+  };
+  openModal({title:'Equipos en comodato',html:`<div class="hint"><b>${esc(c.nombre)}</b> · lo que la empresa le prestó al cliente. Elegí el modelo y escribí la MAC del equipo: es lo que figura en el contrato.</div>
     ${vig?`<div class="notice">Ya hay un contrato firmado (N° ${ctNum(vig.num)}). Si cambiás los equipos, después hay que hacer firmar un cambio de equipos.</div>`:''}
     <form class="form" id="cmform" novalidate><div id="cm-rows"></div>
     <div class="actions start"><button class="btn" type="button" id="cm-add">Agregar otro equipo</button></div>
     <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar equipos</button></div></form>`,
   onMount(el){
-    const leer=()=>rows=rows.map((r,i)=>({t:$('#cm-t'+i,el).value,d:$('#cm-d'+i,el).value,s:$('#cm-s'+i,el).value,n:Math.max(1,Math.round(Number($('#cm-n'+i,el).value))||1),e:$('#cm-e'+i,el).value,o:$('#cm-o'+i,el).value}));
+    const leer=()=>rows=rows.map((r,i)=>{
+      const m=$('#cm-m'+i,el),otro=!m||m.value===CM_OTRO;
+      return {t:$('#cm-t'+i,el).value,d:otro?$('#cm-d'+i,el).value:m.value,otro,s:$('#cm-s'+i,el).value,n:Math.max(1,Math.round(Number($('#cm-n'+i,el).value))||1),e:$('#cm-e'+i,el).value,o:$('#cm-o'+i,el).value};
+    });
     const dibujar=()=>{$('#cm-rows',el).innerHTML=rows.map(rowHtml).join('');};
     dibujar();
-    $('#cm-add',el).addEventListener('click',()=>{if(rows.length>=30)return toast('Son demasiados equipos (máximo 30)','bad');leer();rows.push({t:'ONU',d:'',s:'',n:1,e:'nuevo',o:''});dibujar();const l=$('#cm-d'+(rows.length-1),el);if(l)l.focus();});
+    $('#cm-add',el).addEventListener('click',()=>{
+      if(rows.length>=30)return toast('Son demasiados equipos (máximo 30)','bad');
+      leer();const d=cmModeloInicial('ONU');rows.push({t:'ONU',d,s:'',n:1,e:'nuevo',o:'',otro:!d});dibujar();
+      const l=$('#cm-s'+(rows.length-1),el);if(l)l.focus();
+    });
     $('#cm-rows',el).addEventListener('click',e=>{const b=e.target.closest('[data-cm-del]');if(!b)return;leer();rows.splice(Number(b.dataset.cmDel),1);dibujar();});
+    $('#cm-rows',el).addEventListener('change',e=>{
+      const id=e.target.id||'',i=Number((id.match(/(\d+)$/)||[])[1]);
+      if(/^cm-t\d+$/.test(id)){   /* otro tipo de equipo: otra lista de modelos */
+        leer();const r=rows[i],d=cmModeloInicial(r.t);r.d=d;r.otro=!d;dibujar();return;
+      }
+      if(/^cm-m\d+$/.test(id)){const w=$('#cm-dw'+i,el);w.hidden=e.target.value!==CM_OTRO;if(!w.hidden)$('#cm-d'+i,el).focus();return;}
+      if(/^cm-s\d+$/.test(id))e.target.value=cmMacFmt(e.target.value);
+    });
+    $('#cm-rows',el).addEventListener('input',e=>{if(/^cm-s\d+$/.test(e.target.id||'')){const p=e.target.selectionStart,u=e.target.value.toUpperCase();if(u!==e.target.value){e.target.value=u;try{e.target.setSelectionRange(p,p);}catch(_){}}}});
     $('#cmform',el).addEventListener('submit',async e=>{
       e.preventDefault();leer();
+      rows.forEach(r=>{r.s=cmMacFmt(r.s);});
       const list=cmLimpio(rows);
-      for(let i=0;i<list.length;i++)if(!list[i].d&&!list[i].s)return toast('Equipo '+(i+1)+': escribí la marca y modelo o el N° de serie','bad');
+      for(let i=0;i<list.length;i++){
+        const r=list[i],sinMac=CM_SIN_MAC.includes(r.t),malMac=cmMacMal(r.s);
+        const foco=sel=>{const x=$(sel+i,el);if(x){const d=x.closest('details');if(d)d.open=true;x.focus();}};
+        if(!r.d){toast('Equipo '+(i+1)+': falta el modelo','bad');foco('#cm-d');return;}
+        if(!sinMac&&!r.s){toast('Equipo '+(i+1)+' ('+r.t+'): escribí la MAC o el N° de serie','bad');foco('#cm-s');return;}
+        if(malMac){toast('Equipo '+(i+1)+': '+malMac,'bad');foco('#cm-s');return;}
+      }
       const btn=$('button[type=submit]',el);btn.disabled=true;
-      try{await saveClient(c,{comodato:list});S.clientes.set(id,Object.assign({},c,{comodato:list},{mod:Date.now()}));dataChanged('clientes');toast(list.length?'Equipos guardados':'Se quitaron los equipos');closeModal();openClient(id);}
+      try{
+        await saveClient(c,{comodato:list});S.clientes.set(id,Object.assign({},c,{comodato:list},{mod:Date.now()}));dataChanged('clientes');
+        list.forEach(r=>{if(r.d&&cmLista(r.t).includes(r.d))cmUltPoner(r.t,r.d);});
+        toast(list.length?'Equipos guardados':'Se quitaron los equipos');closeModal();openClient(id);
+      }
+      catch(err){btn.disabled=false;dbError(err);}
+    });
+  }});
+}
+
+/* ----- Ajustes (administrador): los modelos de equipos que se ofrecen al cargar el comodato ----- */
+async function openComodatoModelos(){
+  let r;try{r=await NET.api('GET','/api/comodato/modelos');}catch(err){return dbError(err);}
+  let rows=(r.modelos||[]).map(m=>({t:m.t,d:m.d}));
+  const orden=()=>{rows=rows.map((x,i)=>[x,i]).sort((a,b)=>CM_TIPOS.indexOf(a[0].t)-CM_TIPOS.indexOf(b[0].t)||a[1]-b[1]).map(x=>x[0]);};
+  orden();
+  const dibujar=el=>{
+    $('#cmm-rows',el).innerHTML=rows.length?rows.map((x,i)=>`<div class="cm-modelo" data-i="${i}"><div class="grid2">${F('Tipo','cmm-t'+i,`<select id="cmm-t${i}">${CM_TIPOS.map(t=>`<option${t===x.t?' selected':''}>${esc(t)}</option>`).join('')}</select>`)}${F('Marca y modelo','cmm-d'+i,`<input id="cmm-d${i}" value="${esc(x.d)}" autocomplete="off" maxlength="80">`)}</div>
+      <div class="actions start"><button class="btn small danger" type="button" data-cmm-del="${i}">Quitar</button></div></div>`).join(''):'<div class="hint">No hay modelos cargados: los técnicos van a tener que escribir el modelo de cada equipo.</div>';
+  };
+  openModal({title:'Modelos de equipos',html:`<div class="hint">Estos son los modelos que los técnicos eligen de una lista al cargar los equipos de un cliente, y así solo escriben la MAC. En cada tipo, el primero es el que viene puesto en un cliente nuevo (después queda el último que eligió cada técnico). Siempre pueden elegir «Otro modelo» y escribirlo.</div>
+    <form class="form" id="cmmform" novalidate><div id="cmm-rows"></div>
+    <div class="actions start"><button class="btn" type="button" id="cmm-add">Agregar un modelo</button></div>
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar modelos</button></div></form>`,
+  onMount(el){
+    const leer=()=>{rows=rows.map((x,i)=>({t:$('#cmm-t'+i,el).value,d:$('#cmm-d'+i,el).value}));};
+    dibujar(el);
+    $('#cmm-add',el).addEventListener('click',()=>{leer();rows.push({t:'ONU',d:''});dibujar(el);const i=rows.length-1,x=$('#cmm-d'+i,el);if(x)x.focus();});
+    $('#cmm-rows',el).addEventListener('click',e=>{const b=e.target.closest('[data-cmm-del]');if(!b)return;leer();rows.splice(Number(b.dataset.cmmDel),1);dibujar(el);});
+    $('#cmmform',el).addEventListener('submit',async e=>{
+      e.preventDefault();leer();
+      const lista=rows.map(x=>({t:x.t,d:cmLim(x.d,80)})).filter(x=>x.d);
+      const btn=$('button[type=submit]',el);btn.disabled=true;
+      try{const j=await NET.api('PUT','/api/comodato/modelos',{modelos:lista});S.cmModelos=j.modelos;toast('Modelos guardados');closeModal();}
       catch(err){btn.disabled=false;dbError(err);}
     });
   }});
@@ -2200,14 +2297,15 @@ async function openContratos(opt){
 
 /* ----- Ajustes: el texto del contrato (solo el administrador) ----- */
 function ctAjustesCard(){
-  return `<div class="card"><h2>Contrato de comodato</h2><p class="muted small">El texto que firman los clientes por los equipos que se les prestan. Mientras sea un borrador, los técnicos no pueden hacer firmar. Una vez firmado, un contrato no cambia nunca (aunque después edites el texto).</p>
+  return `<div class="card"><h2>Contrato de comodato</h2><p class="muted small">El texto que firman los clientes por los equipos que se les prestan. Mientras sea un borrador, los técnicos no pueden hacer firmar. Una vez firmado, un contrato no cambia nunca (aunque después edites el texto). En «Modelos de equipos» están las ONU, antenas y fuentes que los técnicos eligen de una lista: así solo escriben la MAC.</p>
     <div id="ct-aj-st" class="hint">Mirando el contrato…</div>
-    <div class="actions start"><button class="btn primary" type="button" id="ct-aj-edit">Editar el texto del contrato</button><button class="btn" type="button" id="ct-aj-list">Ver los contratos firmados</button></div></div>`;
+    <div class="actions start"><button class="btn primary" type="button" id="ct-aj-edit">Editar el texto del contrato</button><button class="btn" type="button" id="ct-aj-list">Ver los contratos firmados</button><button class="btn" type="button" id="ct-aj-mod">Modelos de equipos</button></div></div>`;
 }
 async function ctAjustesMount(el){
   const st=$('#ct-aj-st',el);if(!st)return;
   $('#ct-aj-list',el).addEventListener('click',()=>{if(can('contratosGestion'))openContratos();});
   $('#ct-aj-edit',el).addEventListener('click',()=>openContratoPlantilla(()=>ctAjustesMount.estado(el)));
+  $('#ct-aj-mod',el).addEventListener('click',openComodatoModelos);
   ctAjustesMount.estado=async el2=>{
     try{const t=await NET.api('GET','/api/contrato/plantilla');st.innerHTML=t.final?`<span class="chip ok">Texto definitivo</span> versión ${t.ver}${t.mod?' · cambiado el '+esc(ctFecha(t.mod))+(t.modPor?' por '+esc(t.modPor):''):''}`:'<span class="chip warn">Borrador</span> Todavía no es el texto definitivo: nadie puede hacer firmar a un cliente.';}
     catch(err){st.textContent='No se pudo leer el contrato.';}
@@ -7057,7 +7155,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='7abb5e8dc5';
+const BUILD='68dcce4b7d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
