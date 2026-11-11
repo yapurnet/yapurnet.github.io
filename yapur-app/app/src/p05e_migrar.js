@@ -24,7 +24,7 @@ const mgLinea=m=>{
 function migBlock(c){
   if(c.estado==='baja')return '';
   const mig=Array.isArray(c.migraciones)?c.migraciones:[];
-  const puede=c.tec==='wireless'&&(can('editarClientes')||can('ubicacion'));
+  const puede=c.tec!=='fibra'&&(can('editarClientes')||can('ubicacion'));   /* también los que todavía no tienen la tecnología cargada: hoy es la mayoría */
   if(!puede&&!mig.length)return '';
   return `<div class="card flat mg-block"><h3>Migración a fibra óptica</h3>
     ${mig.length?`<ul class="cm-list">${mig.slice().reverse().map(mgLinea).join('')}</ul>`:''}
