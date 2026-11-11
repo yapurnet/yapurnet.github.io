@@ -165,7 +165,15 @@ public class MainActivity extends Activity {
         if (sc == null) return false;
         sc = sc.toLowerCase(Locale.US);
         if (sc.equals("file")) return u.toString().startsWith("file:///android_asset/");
-        return (sc.equals("https") || sc.equals("http")) && serverHost != null && serverHost.length() > 0 && serverHost.equalsIgnoreCase(u.getHost());
+        if (!(sc.equals("https") || sc.equals("http"))) return false;
+        String h = u.getHost();
+        if (h == null) return false;
+        if (serverHost != null && serverHost.length() > 0 && serverHost.equalsIgnoreCase(h)) return true;
+        /* el servidor de respaldo (otra cuenta de Cloudflare) que el servicio aprendió del principal */
+        try {
+            String r = getSharedPreferences(UbicacionService.PREFS, Context.MODE_PRIVATE).getString(UbicacionService.P_RESPALDO, "");
+            return sc.equals("https") && r.length() > 0 && h.toLowerCase(Locale.US).endsWith(".workers.dev") && r.equalsIgnoreCase("https://" + h);
+        } catch (Exception e) { return false; }
     }
 
     /* devuelve true si el enlace ya se atendió afuera (no hay que cargarlo en la ventana) */
@@ -631,7 +639,16 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    try { openOutside(Uri.parse(url)); } catch (Exception e) { /* enlace inválido */ }
+                    try {
+                        Uri u = Uri.parse(url);
+                        /* «Abrir el respaldo»: el servidor de respaldo se abre en esta misma ventana (con la sesión que viaja en el enlace) */
+                        String h = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.US);
+                        if ("https".equalsIgnoreCase(u.getScheme()) && h.endsWith(".workers.dev") && h.length() > 12 && web != null) {
+                            getSharedPreferences(UbicacionService.PREFS, Context.MODE_PRIVATE).edit()
+                                .putString(UbicacionService.P_RESPALDO, "https://" + h).apply();
+                            web.loadUrl(url);
+                        } else openOutside(u);
+                    } catch (Exception e) { /* enlace inválido */ }
                 }
             });
             return true;

@@ -89,8 +89,15 @@ public class UbicacionService extends Service implements LocationListener {
     private static final int POR_ENVIO = 30;
     private static final int SIN_PLAN = 0, DENTRO = 1, FUERA = 2, PROBLEMA = 3;
 
+    static final String P_RESPALDO = "srv_respaldo";   // dirección del servidor de respaldo (la avisa el principal cuando llega a su tope)
+    static final String P_USA_RESPALDO = "srv_usa_resp"; // true = el servicio está trabajando contra el respaldo
+
     static volatile String token = "";
     static volatile boolean running = false;
+    private volatile String respaldoUrl = "";
+    private volatile boolean usaRespaldo = false;
+    private volatile long frenoMs = 0;     // pausa mínima entre posiciones que pide el servidor cuando su cupo diario se está terminando (0 = sin freno)
+    private long ultLatido = 0;
 
     private LocationManager lm;
     private Handler main;
@@ -139,6 +146,8 @@ public class UbicacionService extends Service implements LocationListener {
     public int onStartCommand(Intent it, int flags, int startId) {
         SharedPreferences sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (token.length() == 0) token = sp.getString(P_TOKEN, "");
+        if (respaldoUrl.length() == 0) respaldoUrl = direccionValida(sp.getString(P_RESPALDO, ""));
+        usaRespaldo = respaldoUrl.length() > 0 && sp.getBoolean(P_USA_RESPALDO, false);
         if (!running) leerHorarioGuardado(sp, it);
         /* Android exige llamar a startForeground enseguida después de startForegroundService, aunque después no haya nada que hacer:
            por eso va primero, antes de cualquier salida (si no, en algunas versiones se cierra toda la aplicación). */
@@ -293,26 +302,9 @@ public class UbicacionService extends Service implements LocationListener {
         net.execute(new Runnable() {
             @Override
             public void run() {
-                int code = -1;
-                String cuerpo = "";
-                try {
-                    HttpURLConnection c = (HttpURLConnection) new URL(Config.SERVER_URL + "/api/ubicacion/estado").openConnection();
-                    c.setRequestMethod("GET");
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(20000);
-                    c.setRequestProperty("Authorization", "Bearer " + tk);
-                    code = c.getResponseCode();
-                    if (code == 200) {
-                        InputStream in = c.getInputStream();
-                        ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                        byte[] buf = new byte[2048];
-                        int n, total = 0;
-                        while ((n = in.read(buf)) > 0 && total < 20000) { bo.write(buf, 0, n); total += n; }
-                        in.close();
-                        cuerpo = bo.toString("UTF-8");
-                    }
-                    c.disconnect();
-                } catch (Throwable t) { code = -1; }
+                Resp r = llamar("GET", "/api/ubicacion/estado", null, tk);
+                int code = r.code;
+                String cuerpo = code == 200 ? r.body : "";
                 final int rc = code;
                 final String body = cuerpo;
                 main.post(new Runnable() {
@@ -404,7 +396,7 @@ public class UbicacionService extends Service implements LocationListener {
     public void onLocationChanged(Location l) {
         if (l == null || pausado) return;
         long ahora = System.currentTimeMillis();
-        if (ahora - ultimo < ENTRE_PUNTOS_MS) return;
+        if (ahora - ultimo < Math.max(ENTRE_PUNTOS_MS, frenoMs - 5000L)) return;
         ultimo = ahora;
         long t = l.getTime();
         if (t <= 0 || Math.abs(ahora - t) > 120000L) t = ahora;
@@ -422,6 +414,96 @@ public class UbicacionService extends Service implements LocationListener {
     @Override public void onProviderEnabled(String p) { if (running && dentroDeHorario()) latido(); }
     @Override public void onProviderDisabled(String p) { if (running && dentroDeHorario()) latido(); }
 
+    /* ---------- conexión: servidor principal y, si no responde por el tope del plan gratis, el de respaldo ---------- */
+
+    private static final class Resp {
+        int code = -1;
+        String body = "";
+    }
+
+    private Resp una(String base, String metodo, String ruta, String cuerpo, String tk) {
+        Resp r = new Resp();
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(base + ruta).openConnection();
+            c.setRequestMethod(metodo);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("Authorization", "Bearer " + tk);
+            if (cuerpo != null) {
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                OutputStream os = c.getOutputStream();
+                os.write(cuerpo.getBytes(Charset.forName("UTF-8")));
+                os.close();
+            }
+            r.code = c.getResponseCode();
+            InputStream in = null;
+            try { in = r.code >= 400 ? c.getErrorStream() : c.getInputStream(); } catch (Throwable t) { in = null; }
+            if (in != null) {
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                byte[] buf = new byte[2048];
+                int n, total = 0;
+                while ((n = in.read(buf)) > 0 && total < 20000) { bo.write(buf, 0, n); total += n; }
+                in.close();
+                r.body = bo.toString("UTF-8");
+            }
+            c.disconnect();
+        } catch (Throwable t) { r.code = -1; }
+        /* un respaldo en espera (o que está pasando el trabajo) contesta 409 «respaldo_espera»: no es que la sesión no valga, solo hay que esperar */
+        if (r.code == 409 && r.body.indexOf("respaldo_espera") >= 0) r.code = -1;
+        return r;
+    }
+
+    /* solo se acepta una dirección https de workers.dev sin ruta (lo que avisa el servidor principal) */
+    private static String direccionValida(String u) {
+        if (u == null) return "";
+        try {
+            java.net.URI x = new java.net.URI(u.trim());
+            String h = x.getHost();
+            String p = x.getPath();
+            if (!"https".equalsIgnoreCase(x.getScheme()) || h == null || !h.toLowerCase(Locale.US).endsWith(".workers.dev")) return "";
+            if (p != null && p.length() > 1) return "";
+            if (x.getUserInfo() != null || x.getQuery() != null) return "";
+            return "https://" + h.toLowerCase(Locale.US) + (x.getPort() > 0 ? ":" + x.getPort() : "");
+        } catch (Throwable t) { return ""; }
+    }
+
+    private void aprenderRespaldo(String body) {
+        try {
+            String d = direccionValida(new JSONObject(body).optString("respaldo", ""));
+            if (d.length() > 0 && !d.equals(respaldoUrl)) {
+                respaldoUrl = d;
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(P_RESPALDO, d).apply();
+            }
+        } catch (Throwable t) { /* la respuesta no traía dirección */ }
+    }
+
+    /* corre en el hilo de red: prueba con el servidor que se venía usando y, si no responde (tope del plan o sin conexión con él), con el otro */
+    private Resp llamar(String metodo, String ruta, String cuerpo, String tk) {
+        boolean alt = usaRespaldo && respaldoUrl.length() > 0;
+        Resp r = una(alt ? respaldoUrl : Config.SERVER_URL, metodo, ruta, cuerpo, tk);
+        if (r.code == 503 && !alt) aprenderRespaldo(r.body);
+        if (r.code != -1 && r.code != 503) return r;
+        String otro = alt ? Config.SERVER_URL : respaldoUrl;
+        if (otro.length() == 0) return r;
+        Resp r2 = una(otro, metodo, ruta, cuerpo, tk);
+        if (r2.code == -1 || r2.code == 503) return r;
+        usaRespaldo = !alt;
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(P_USA_RESPALDO, usaRespaldo).apply();
+        return r2;
+    }
+
+    /* el servidor avisa cuando su cupo diario se está terminando: {"freno":{"nivel":2,"seg":120}} → se espacian las posiciones y los latidos */
+    private void aplicarFreno(String body) {
+        try {
+            JSONObject f = new JSONObject(body).optJSONObject("freno");
+            int seg = f == null ? 0 : f.optInt("seg", 0);
+            if (seg < 0) seg = 0;
+            if (seg > 300) seg = 300;   // nunca más de 5 minutos entre posiciones: la oficina daría al técnico por «sin señal»
+            frenoMs = seg * 1000L;
+        } catch (Throwable t) { /* sin dato: se deja como estaba */ }
+    }
+
     /* ---------- envío al servidor (siempre HTTPS: Config.SERVER_URL lo exige el build) ---------- */
 
     private void enviar() {
@@ -435,27 +517,16 @@ public class UbicacionService extends Service implements LocationListener {
         net.execute(new Runnable() {
             @Override
             public void run() {
-                int code = -1;
-                try {
-                    HttpURLConnection c = (HttpURLConnection) new URL(Config.SERVER_URL + "/api/ubicacion").openConnection();
-                    c.setRequestMethod("POST");
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(20000);
-                    c.setDoOutput(true);
-                    c.setRequestProperty("Content-Type", "application/json");
-                    c.setRequestProperty("Authorization", "Bearer " + tk);
-                    OutputStream os = c.getOutputStream();
-                    os.write(body.toString().getBytes(Charset.forName("UTF-8")));
-                    os.close();
-                    code = c.getResponseCode();
-                    c.disconnect();
-                } catch (Throwable t) { code = -1; }
+                Resp r = llamar("POST", "/api/ubicacion", body.toString(), tk);
+                final String resp = r.body;
+                int code = r.code;
                 final int rc = code;
                 main.post(new Runnable() {
                     @Override
                     public void run() {
                         enviando = false;
                         if (rc == 200) {
+                            aplicarFreno(resp);
                             for (int i = 0; i < n && !cola.isEmpty(); i++) cola.remove(0);
                         } else {
                             rechazado(rc);   // la sesión ya no vale, no es técnico o no aceptó el aviso: no se insiste
@@ -473,6 +544,9 @@ public class UbicacionService extends Service implements LocationListener {
     private void latido() {
         if (latiendo || net == null || main == null || token.length() == 0) return;
         if (!getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(P_LATIDO, false)) return;
+        long ahoraL = System.currentTimeMillis();
+        if (frenoMs > CADA_MS && ahoraL - ultLatido < frenoMs - 5000L) return;   // con freno del servidor, los latidos también se espacian
+        ultLatido = ahoraL;
         boolean gps = false, red = false, perm = false;
         try { gps = lm != null && lm.isProviderEnabled(LocationManager.GPS_PROVIDER); } catch (Throwable t) { /* sin dato: cuenta como apagado */ }
         try { red = lm != null && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER); } catch (Throwable t) { /* sin dato: cuenta como apagado */ }
@@ -495,26 +569,15 @@ public class UbicacionService extends Service implements LocationListener {
         net.execute(new Runnable() {
             @Override
             public void run() {
-                int code = -1;
-                try {
-                    HttpURLConnection c = (HttpURLConnection) new URL(Config.SERVER_URL + "/api/ubicacion/latido").openConnection();
-                    c.setRequestMethod("POST");
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(20000);
-                    c.setDoOutput(true);
-                    c.setRequestProperty("Content-Type", "application/json");
-                    c.setRequestProperty("Authorization", "Bearer " + tk);
-                    OutputStream os = c.getOutputStream();
-                    os.write(cuerpo.getBytes(Charset.forName("UTF-8")));
-                    os.close();
-                    code = c.getResponseCode();
-                    c.disconnect();
-                } catch (Throwable t) { code = -1; }
+                Resp r = llamar("POST", "/api/ubicacion/latido", cuerpo, tk);
+                final String resp = r.body;
+                int code = r.code;
                 final int rc = code;
                 main.post(new Runnable() {
                     @Override
                     public void run() {
                         latiendo = false;
+                        if (rc == 200) aplicarFreno(resp);
                         if (rc != 200 && rc != -1) rechazado(rc);   // sesión vencida o sin aceptar el aviso: igual que con las posiciones
                     }
                 });
