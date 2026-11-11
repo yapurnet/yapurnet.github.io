@@ -7598,7 +7598,7 @@ async function arcaAjustesMount(el){
     catch(err){cg.disabled=false;aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
   $('#arca-pv-g',el).addEventListener('click',async()=>{
-    try{await NET.api('PUT','/api/arca',{pv:Number($('#arca-pv',el).value),amb:$('#arca-amb',el).value});toast('Guardado');rec();}
+    try{await NET.api('PUT','/api/arca',{pv:$('#arca-pv',el).value?Number($('#arca-pv',el).value):null,amb:$('#arca-amb',el).value});toast('Guardado');rec();}
     catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
   const pb=$('#arca-probar',el);
@@ -7827,7 +7827,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='c9cf432506';
+const BUILD='5a8da7d76d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
