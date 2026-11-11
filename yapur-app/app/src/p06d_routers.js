@@ -224,40 +224,54 @@ async function regenScript(id){
   try{const j=await NET.api('POST','/api/routers/'+id+'/token',{});openRouterScript(r,j.token);}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
-/* ----- pruebas de conexión (ping a un cliente): el router consulta cada pocos segundos si alguien pidió una ----- */
+/* ----- pruebas de conexión (ping a un cliente): el router consulta si alguien pidió una (cada 10 s mientras alguien prueba, una vez por minuto el resto del tiempo) ----- */
 const rtAscii=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\x09\x0a\x20-\x7e]/g,'?');
 function rtPingEstado(r){
   if(!r.ping)return '<span class="muted">Pruebas de conexión: sin configurar</span>';
   const seg=r.pingVisto?Math.round((Date.now()-r.pingVisto)/1000):null;
-  if(seg!=null&&seg<=90)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
+  if(seg!=null&&seg<=150)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
   return '<span style="color:var(--bad)">Pruebas de conexión: el router no está consultando'+(r.pingVisto?' (última vez '+esc(rtAgo(r.pingVisto))+')':' todavía')+'</span>';
 }
 function rtPingScript(token){
   const body=`# YAPUR.NET - pruebas de conexion (ping a la IP de un cliente)
-# Cada pocos segundos pregunta a ${location.origin} si alguien pidio probar un cliente.
-# Si si, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
-:local base "${location.origin}/api/router/ping"
-:local h "Authorization: Bearer ${token}"
-:local data ""
-:do {
-  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
-  :set data ($r->"data")
-} on-error={ :set data "" }
-:if ([:len $data] > 0) do={
-  :foreach item in=[:toarray $data] do={
-    :local p [:find $item ":"]
-    :if ([:typeof $p] = "num") do={
-      :local id [:pick $item 0 $p]
-      :local ip [:pick $item ($p + 1) [:len $item]]
-      :local rec 0
-      :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
-      :do {
-        /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
-      } on-error={}
-      :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
-      :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+# Pregunta a ${location.origin} si alguien pidio probar un cliente: cada 10 segundos mientras alguien esta probando
+# y una sola vez por minuto el resto del tiempo (asi no gasta el cupo diario del sistema).
+# Si hay una prueba pedida, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
+:global yapurSalto
+:if ([:typeof $yapurSalto] != "num") do={ :set yapurSalto 0 }
+:if ($yapurSalto > 0) do={
+  :set yapurSalto ($yapurSalto - 1)
+} else={
+  :local base "${location.origin}/api/router/ping"
+  :local h "Authorization: Bearer ${token}"
+  :local data ""
+  :local salto 0
+  :do {
+    :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+    :set data ($r->"data")
+  } on-error={ :set data "" }
+  :if ([:len $data] > 0) do={
+    :foreach item in=[:toarray $data] do={
+      :local p [:find $item ":"]
+      :if ([:typeof $p] = "num") do={
+        :local id [:pick $item 0 $p]
+        :local ip [:pick $item ($p + 1) [:len $item]]
+        :local rec 0
+        :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
+        :do {
+          /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+        } on-error={}
+        :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
+        :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+      } else={
+        :if ([:pick $item 0 1] = "s") do={
+          :do { :set salto [:tonum [:pick $item 1 [:len $item]]] } on-error={ :set salto 0 }
+        }
+      }
     }
   }
+  :if ($salto > 12) do={ :set salto 12 }
+  :set yapurSalto $salto
 }`;
   return rtAscii(`:do { /system script remove [find name="yapur-ping"] } on-error={}\n/system script add name=yapur-ping policy=read,test comment="YAPUR.NET prueba de conexion de clientes" source={\n${body}\n}`);
 }
@@ -268,15 +282,15 @@ function openPingScript(r,token){
   const html=`<div class="notice info">Con esto, <b>La oficina y los técnicos</b> pueden tocar «Probar conexión» en la ficha de un cliente y ver si contesta. El router solo hace el <b>ping a la IP del cliente</b> y avisa cuántos paquetes volvieron: no lee ni cambia nada más y no lleva contraseñas.</div>
     ${step(1,'Probar que el router llega al sistema',`<p class="small muted">En WinBox: <b>Nuevo terminal</b>. Pegá esto; tiene que mostrar un texto con <span class="mono">"ok":true</span>. Si ya lo probaste con el script de clientes, salteá este paso.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtTest())}" data-copy-label="Prueba">Copiar prueba</button></div>`)}
     ${step(2,'Pegar el script',`<p class="small muted">Pegalo entero en el terminal del router. Crea un script llamado <span class="mono">yapur-ping</span> (si ya existía, lo reemplaza). Lleva el acceso de este router: no lo compartas.</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div>`)}
-    ${step(3,'Dejarlo programado',`<p class="small muted">Hace que el router pregunte cada 10 segundos si hay una prueba pedida. Pegalo en el mismo terminal.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
-    ${step(4,'Revisar que quedó andando',`<p class="small muted">En unos 10 segundos, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
+    ${step(3,'Dejarlo programado',`<p class="small muted">El router corre el script cada 10 segundos, pero el script solo le pregunta al sistema <b>una vez por minuto</b> cuando nadie está probando (y cada 10 segundos mientras alguien prueba). Pegalo en el mismo terminal. <b>Si este router ya tenía la programación, salteá este paso:</b> alcanza con pegar el script nuevo del paso 2.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
+    ${step(4,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
     <p class="small muted">¿Qué router hace la prueba? Si el <b>Nodo</b> del cliente tiene el nombre de un router con pruebas activas, lo hace ese router; si no, cualquiera que esté atendiendo. Con un solo router, es ese.</p>
     <details class="small"><summary>Si algo falla</summary><ul class="small muted">
       <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también el permiso <span class="mono">write</span>. Cambiá <span class="mono">policy=read,test</span> por <span class="mono">policy=read,write,test</span> en el script y en la programación.</li>
       <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
       <li>Para ver los pings que hizo: <span class="mono">/log print where message~"YAPUR"</span></li>
       <li>Para correrlo a mano y ver qué pasa: <span class="mono">/system script run yapur-ping</span></li>
-      <li><b>Consultas:</b> cada 10 segundos son unas 8.600 consultas por día por router. Si querés menos, cambiá <span class="mono">interval=10s</span> por <span class="mono">interval=20s</span> en la programación (las pruebas tardan un poco más).</li>
+      <li><b>Consultas:</b> en reposo son unas 1.440 por día por router (una por minuto). La primera prueba después de un rato puede tardar hasta un minuto en empezar, salvo que hayas abierto antes la ficha del cliente: ahí el router pasa a consultar cada 10 segundos y contesta enseguida.</li>
       <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-ping]</span></li></ul></details>
     <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
   openModal({title:'Pruebas de conexión · '+r.nombre,html,wide:true});

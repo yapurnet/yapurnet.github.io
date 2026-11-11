@@ -43,8 +43,9 @@ async def router_atiende(tk, rec, esperar=20, tras_tomar=None):
     t0 = time.time()
     while time.time() - t0 < esperar:
         st, txt = await asyncio.to_thread(api, 'GET', '/api/router/ping', None, tk)
-        if st == 200 and txt:
-            pid, ip = txt.split(',')[0].split(':')
+        pedidos = [x for x in txt.split(',') if ':' in x] if st == 200 else []   # («s5» es el aviso de que nadie está probando: no es una prueba)
+        if pedidos:
+            pid, ip = pedidos[0].split(':')
             if tras_tomar: await tras_tomar()
             await asyncio.to_thread(api, 'POST', f'/api/router/ping?id={pid}&sent=4&rec={rec}', None, tk, 'x')
             return pid, ip
@@ -87,6 +88,8 @@ async def main():
         tk = m.group(1)
         check('el script solo lee y hace ping, con permisos mínimos y sin contraseñas',
               'policy=read,test' in script and '/ping address=$ip' in script and 'password' not in script and '/queue' not in script and '/ppp' not in script and '/interface' not in script)
+        check('el script nuevo se saltea corridas cuando el servidor se lo pide (una consulta por minuto en reposo)', ':global yapurSalto' in script and '[:pick $item 0 1] = "s"' in script and ':set yapurSalto $salto' in script and ':if ($salto > 12)' in script, script[:900])
+        check('las llaves del script quedan parejas (si no, el router rechaza todo el pegado)', script.count('{') == script.count('}'), (script.count('{'), script.count('}')))
         check('el script va en ASCII puro (el terminal del router no respeta tildes)', all(ord(ch) < 128 for ch in script))
         prog = await pa.get_attribute('.sheet [data-copy-label=Programación]', 'data-copy')
         check('la programación corre el script cada 10 segundos', 'interval=10s' in prog and 'yapur-ping' in prog and 'policy=read,test' in prog, prog)
@@ -103,7 +106,12 @@ async def main():
         await ctxL.route('**/fonts.g*/**', lambda r: r.abort())
         pl = await login(ctxL, 'laura', 'laura1')
         await pl.wait_for_function('S.clientes.size === 3', timeout=10000)
+        st, txt = await asyncio.to_thread(api, 'GET', '/api/router/ping', None, tk)
+        check('en reposo (nadie probando) el router recibe el aviso de saltearse corridas', st == 200 and txt == 's5', (st, txt))
         await pl.evaluate("openClient('cAna')")
+        await asyncio.sleep(1.2)
+        st, txt = await asyncio.to_thread(api, 'GET', '/api/router/ping', None, tk)
+        check('al abrir la ficha de un cliente con IP el router pasa a consultar seguido', st == 200 and txt == '', (st, txt))
         await pl.wait_for_selector('#png-btn', timeout=5000)
         check('la ficha muestra «Probar conexión» y la IP que se va a probar', '10.10.0.5' in await pl.inner_text('#png-out'))
         for rec, esperado, no_debe in [(4, 'Responde · 4 de 4', 'pérdidas'), (2, 'Responde con pérdidas · 2 de 4', None), (0, 'No responde · 0 de 4', None)]:

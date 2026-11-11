@@ -990,12 +990,14 @@ const NET=(function(){
   }
   /* WebSocket: el servidor se duerme mientras nadie hace nada (el plan gratis de Cloudflare limita el tiempo que está encendido).
      Si el WebSocket no se puede abrir (una red que lo bloquea) se usa el SSE de antes. */
-  let wsFallos=0;
+  /* Si el WebSocket no se puede abrir 3 veces seguidas se pasa al SSE, pero solo por un rato (10 minutos): un SSE abierto mantiene despierto al servidor las 24 horas
+     (gasta el cupo del plan gratis aunque nadie haga nada), y una señal floja en la calle alcanza para fallar 3 veces. Cada vez que el WebSocket abre bien, la cuenta vuelve a cero. */
+  let wsFallos=0,sseDesde=0;
   function connectWS(t){
     let u;try{u=new URL(base+'/api/stream?t='+encodeURIComponent(t),location.href);u.protocol=u.protocol==='https:'?'wss:':'ws:';}catch(e){wsFallos=9;return false;}
     let abrio=false;const w=new WebSocket(u.href);
     es=w;lastMsg=Date.now();
-    w.onopen=()=>{abrio=true;};
+    w.onopen=()=>{abrio=true;wsFallos=0;};
     w.onmessage=ev=>{lastMsg=Date.now();if(ev.data==='pong')return;let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(m&&m.e)onLive(m.e,m.d);};
     w.onclose=()=>{if(es!==w)return;if(!abrio)wsFallos++;closeStream();setOnline(false);scheduleReconnect();};
     w.onerror=()=>{};
@@ -1015,14 +1017,18 @@ const NET=(function(){
     if(es||!token)return;
     if(typeof WebSocket==='function'&&wsFallos<3&&connectWS(t))return;
     const s=new EventSource(base+'/api/stream?t='+encodeURIComponent(t));
-    es=s;lastMsg=Date.now();
+    es=s;lastMsg=sseDesde=Date.now();
     const seen=()=>{lastMsg=Date.now();};
     s.addEventListener('hello',()=>onLive('hello'));
     s.addEventListener('ping',seen);
     for(const nm of ['doc','me','disp','contrato','ubic'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
     s.addEventListener('kick',()=>onLive('kick'));
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
-    esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);
+    esTimer=setInterval(()=>{
+      if(es!==s)return;
+      if(typeof WebSocket==='function'&&Date.now()-sseDesde>600000){wsFallos=0;closeStream();connectStream();return;}   /* pasaron 10 minutos en SSE: se vuelve a probar con el WebSocket */
+      if(Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}
+    },15000);
   }
   /* al volver a la app o recuperar la red: se asegura de estar al día */
   function wake(){
@@ -1437,10 +1443,14 @@ function ipUnica(t){
   const ip=m.slice(1).map(Number).join('.');
   return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
 }
+/* al abrir la ficha de un cliente con IP se avisa al servidor: el router pasa a consultar cada 10 s (en reposo lo hace una vez por minuto, para no gastar el cupo del plan gratis) y contesta enseguida cuando se toca «Probar conexión» */
+let _pingArm=0;
+function pingArmar(){const t=Date.now();if(t-_pingArm<90e3||!NET.online)return;_pingArm=t;NET.api('POST','/api/ping/armar',{},{noKick:true,timeout:8000}).catch(()=>{});}
 function pingBlock(c){
   if(!can('ping')||c.estado==='baja')return '';
   const ip=ipUnica(c.ip);
   if(!ip)return `<div class="hint" id="png-box">Para probar la conexión, el cliente tiene que tener <b>una sola IP</b> cargada en su ficha.</div>`;
+  pingArmar();
   return `<div class="card flat" id="png-box"><div class="head-row"><h3>Conexión</h3><button class="btn small" type="button" data-act="ping" id="png-btn">Probar conexión</button></div>
     <div id="png-out" class="hint" aria-live="polite">Un router de la empresa hace el ping a <span class="mono">${esc(ip)}</span> y te dice si responde.</div></div>`;
 }
@@ -1459,12 +1469,12 @@ async function pingProbar(c,el){
   const alive=()=>el.isConnected&&document.body.contains(out);
   try{
     let p=(await NET.api('POST','/api/ping',{cid:c.id})).ping;
-    const fin=Date.now()+60e3;
+    const fin=Date.now()+100e3;
     while(alive()){
       if(p.estado==='hecho'){const [cls,html]=pingResultado(p);show(cls,html);break;}
       if(p.estado==='vencido'){show('warn','El router no contestó a tiempo. Probá de nuevo en un momento.');break;}
       if(Date.now()>fin){show('warn','Tarda más de lo normal. Probá de nuevo en un momento.');break;}
-      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router…');
+      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router… (puede tardar hasta un minuto)');
       await new Promise(r=>setTimeout(r,1500));
       if(!alive())break;
       p=(await NET.api('GET','/api/ping/'+encodeURIComponent(p.id))).ping;
@@ -3696,6 +3706,8 @@ VIEWS.ajustes={
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos. Si ya tenés los clientes cargados y te faltan las IP, <b>Completar IP con archivos .rsc</b> las busca en los exports de los routers.</p>
       <div class="list" id="aj-routers"></div></div>
+    ${isAdmin()?`<div class="card"><h2>Consumo del servidor</h2><p class="muted small">El plan gratis de Cloudflare limita por día los pedidos y el tiempo que el servidor está encendido. Si algún día aparece «Sin conexión con el servidor» sin que nadie haya hecho nada, acá ves qué lo gastó.</p>
+      <div class="actions start"><button class="btn" type="button" id="aj-uso">Ver el consumo de hoy</button></div></div>`:''}
     ${isAdmin()?ctAjustesCard():''}
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
@@ -3764,6 +3776,7 @@ VIEWS.ajustes={
     });
     $('#aj-bk',el).addEventListener('click',downloadBackup);
     $('#aj-bks',el).addEventListener('click',openAutoBackups);
+    const bUso=$('#aj-uso',el);if(bUso)bUso.addEventListener('click',openUso);
     $('#aj-rs',el).addEventListener('click',()=>$('#aj-rs-file',el).click());
     $('#aj-rs-file',el).addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)restoreFromFile(f);});
     loadUsers();bindRouters(el);
@@ -3869,6 +3882,29 @@ function dispMount(el){
       toast(act==='aprobar'?'Equipo aprobado: ya puede entrar':act==='bloquear'?'Equipo bloqueado':'Equipo quitado');
     }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar':err.message,'bad');dispRefresh();}
   });
+}
+
+/* ===== consumo del servidor: qué gasta el cupo diario del plan gratis de Cloudflare ===== */
+async function openUso(){
+  let j;
+  try{j=await NET.api('GET','/api/uso');}catch(err){return toast(err.message||'No se pudo leer el consumo','bad');}
+  const nf=n=>Number(n).toLocaleString('es-AR');
+  const hm=s=>Math.floor(s/3600)+' h '+pad(Math.floor(s%3600/60))+' min';
+  const pT=Math.round(j.gbs/13000*100),pP=Math.round(j.total/1000)/100;   /* 13.000 GB-s de tiempo y 100.000 pedidos por día */
+  const filas=j.pedidos.map(x=>`<tr><td class="mono small" style="overflow-wrap:anywhere">${esc(x.k)}</td><td style="text-align:right">${nf(x.n)}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">Todavía no hay datos de hoy.</td></tr>';
+  const sseAviso=j.sse>0?`<div class="notice warn">Hay <b>${j.sse}</b> pantalla${j.sse===1?'':'s'} conectada${j.sse===1?'':'s'} por el método viejo (SSE): mientras estén así, el servidor no se duerme nunca y gasta tiempo las 24 horas. Se corrige solo al volver a abrir la app.</div>`:'';
+  openModal({title:'Consumo del servidor · hoy',wide:true,html:`
+    <div class="hint">Cuenta el día como Cloudflare: de las 21:00 de ayer a las 21:00 de hoy (hora de Argentina). Los números son aproximados.</div>
+    <dl class="kv">
+      <dt>Tiempo encendido</dt><dd>${hm(j.despierto)} · <b>${pT} %</b> del tope diario (13.000 GB-s)</dd>
+      <dt>Pedidos</dt><dd>${nf(j.total)} (el tope son 100.000 por día)</dd>
+      <dt>Pantallas conectadas ahora</dt><dd>${j.ws} por WebSocket${j.sse?' · '+j.sse+' por SSE':''}</dd>
+      <dt>Routers con pruebas de conexión</dt><dd>${j.routersPing}</dd>
+    </dl>
+    ${sseAviso}
+    <h3 style="margin-top:12px">Qué pidió más</h3>
+    <div class="tbl-wrap"><table><tbody>${filas}</tbody></table></div>
+    <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`});
 }
 
 /* ===== importar y exportar CSV ===== */
@@ -4452,40 +4488,54 @@ async function regenScript(id){
   try{const j=await NET.api('POST','/api/routers/'+id+'/token',{});openRouterScript(r,j.token);}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
-/* ----- pruebas de conexión (ping a un cliente): el router consulta cada pocos segundos si alguien pidió una ----- */
+/* ----- pruebas de conexión (ping a un cliente): el router consulta si alguien pidió una (cada 10 s mientras alguien prueba, una vez por minuto el resto del tiempo) ----- */
 const rtAscii=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\x09\x0a\x20-\x7e]/g,'?');
 function rtPingEstado(r){
   if(!r.ping)return '<span class="muted">Pruebas de conexión: sin configurar</span>';
   const seg=r.pingVisto?Math.round((Date.now()-r.pingVisto)/1000):null;
-  if(seg!=null&&seg<=90)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
+  if(seg!=null&&seg<=150)return '<span style="color:var(--ok)">Pruebas de conexión: atendiendo (hace '+seg+' s)</span>';
   return '<span style="color:var(--bad)">Pruebas de conexión: el router no está consultando'+(r.pingVisto?' (última vez '+esc(rtAgo(r.pingVisto))+')':' todavía')+'</span>';
 }
 function rtPingScript(token){
   const body=`# YAPUR.NET - pruebas de conexion (ping a la IP de un cliente)
-# Cada pocos segundos pregunta a ${location.origin} si alguien pidio probar un cliente.
-# Si si, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
-:local base "${location.origin}/api/router/ping"
-:local h "Authorization: Bearer ${token}"
-:local data ""
-:do {
-  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
-  :set data ($r->"data")
-} on-error={ :set data "" }
-:if ([:len $data] > 0) do={
-  :foreach item in=[:toarray $data] do={
-    :local p [:find $item ":"]
-    :if ([:typeof $p] = "num") do={
-      :local id [:pick $item 0 $p]
-      :local ip [:pick $item ($p + 1) [:len $item]]
-      :local rec 0
-      :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
-      :do {
-        /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
-      } on-error={}
-      :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
-      :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+# Pregunta a ${location.origin} si alguien pidio probar un cliente: cada 10 segundos mientras alguien esta probando
+# y una sola vez por minuto el resto del tiempo (asi no gasta el cupo diario del sistema).
+# Si hay una prueba pedida, le hace 4 pings y avisa cuantos contestaron. No cambia nada en el router.
+:global yapurSalto
+:if ([:typeof $yapurSalto] != "num") do={ :set yapurSalto 0 }
+:if ($yapurSalto > 0) do={
+  :set yapurSalto ($yapurSalto - 1)
+} else={
+  :local base "${location.origin}/api/router/ping"
+  :local h "Authorization: Bearer ${token}"
+  :local data ""
+  :local salto 0
+  :do {
+    :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+    :set data ($r->"data")
+  } on-error={ :set data "" }
+  :if ([:len $data] > 0) do={
+    :foreach item in=[:toarray $data] do={
+      :local p [:find $item ":"]
+      :if ([:typeof $p] = "num") do={
+        :local id [:pick $item 0 $p]
+        :local ip [:pick $item ($p + 1) [:len $item]]
+        :local rec 0
+        :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
+        :do {
+          /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+        } on-error={}
+        :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
+        :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
+      } else={
+        :if ([:pick $item 0 1] = "s") do={
+          :do { :set salto [:tonum [:pick $item 1 [:len $item]]] } on-error={ :set salto 0 }
+        }
+      }
     }
   }
+  :if ($salto > 12) do={ :set salto 12 }
+  :set yapurSalto $salto
 }`;
   return rtAscii(`:do { /system script remove [find name="yapur-ping"] } on-error={}\n/system script add name=yapur-ping policy=read,test comment="YAPUR.NET prueba de conexion de clientes" source={\n${body}\n}`);
 }
@@ -4496,15 +4546,15 @@ function openPingScript(r,token){
   const html=`<div class="notice info">Con esto, <b>La oficina y los técnicos</b> pueden tocar «Probar conexión» en la ficha de un cliente y ver si contesta. El router solo hace el <b>ping a la IP del cliente</b> y avisa cuántos paquetes volvieron: no lee ni cambia nada más y no lleva contraseñas.</div>
     ${step(1,'Probar que el router llega al sistema',`<p class="small muted">En WinBox: <b>Nuevo terminal</b>. Pegá esto; tiene que mostrar un texto con <span class="mono">"ok":true</span>. Si ya lo probaste con el script de clientes, salteá este paso.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtTest())}" data-copy-label="Prueba">Copiar prueba</button></div>`)}
     ${step(2,'Pegar el script',`<p class="small muted">Pegalo entero en el terminal del router. Crea un script llamado <span class="mono">yapur-ping</span> (si ya existía, lo reemplaza). Lleva el acceso de este router: no lo compartas.</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div>`)}
-    ${step(3,'Dejarlo programado',`<p class="small muted">Hace que el router pregunte cada 10 segundos si hay una prueba pedida. Pegalo en el mismo terminal.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
-    ${step(4,'Revisar que quedó andando',`<p class="small muted">En unos 10 segundos, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
+    ${step(3,'Dejarlo programado',`<p class="small muted">El router corre el script cada 10 segundos, pero el script solo le pregunta al sistema <b>una vez por minuto</b> cuando nadie está probando (y cada 10 segundos mientras alguien prueba). Pegalo en el mismo terminal. <b>Si este router ya tenía la programación, salteá este paso:</b> alcanza con pegar el script nuevo del paso 2.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtPingSched())}" data-copy-label="Programación">Copiar programación</button></div>`)}
+    ${step(4,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Pruebas de conexión: atendiendo»</b> (tocá <b>Actualizar</b>). Después probalo de verdad: abrí un cliente con IP cargada y tocá <b>Probar conexión</b>.</p>`)}
     <p class="small muted">¿Qué router hace la prueba? Si el <b>Nodo</b> del cliente tiene el nombre de un router con pruebas activas, lo hace ese router; si no, cualquiera que esté atendiendo. Con un solo router, es ese.</p>
     <details class="small"><summary>Si algo falla</summary><ul class="small muted">
       <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también el permiso <span class="mono">write</span>. Cambiá <span class="mono">policy=read,test</span> por <span class="mono">policy=read,write,test</span> en el script y en la programación.</li>
       <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
       <li>Para ver los pings que hizo: <span class="mono">/log print where message~"YAPUR"</span></li>
       <li>Para correrlo a mano y ver qué pasa: <span class="mono">/system script run yapur-ping</span></li>
-      <li><b>Consultas:</b> cada 10 segundos son unas 8.600 consultas por día por router. Si querés menos, cambiá <span class="mono">interval=10s</span> por <span class="mono">interval=20s</span> en la programación (las pruebas tardan un poco más).</li>
+      <li><b>Consultas:</b> en reposo son unas 1.440 por día por router (una por minuto). La primera prueba después de un rato puede tardar hasta un minuto en empezar, salvo que hayas abierto antes la ficha del cliente: ahí el router pasa a consultar cada 10 segundos y contesta enseguida.</li>
       <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-ping]</span></li></ul></details>
     <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
   openModal({title:'Pruebas de conexión · '+r.nombre,html,wide:true});
@@ -5551,7 +5601,7 @@ async function jornadaCargar(){
 function jornadaInit(){
   if(JR.started||!jrAplica())return;JR.started=true;
   jornadaCargar();
-  setInterval(()=>{if(!document.hidden)jornadaCargar();},60000);
+  setInterval(()=>{if(!document.hidden)jornadaCargar();},180000);   /* cada 3 minutos alcanza (la barra muestra horas, no segundos) y al volver a la app se pide de nuevo */
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)jornadaCargar();});
 }
 
@@ -5663,7 +5713,7 @@ async function tecCargar(){
   TU.busy=false;tecRender();
 }
 /* ----- alerta para quien ve a los técnicos: contador en la pestaña y barra arriba cuando alguien lleva 15 min o más sin señal dentro del horario -----
-   Se consulta cada minuto con la app abierta (y cada 10 fuera de horario, cuando no hay nada que avisar). Es solo una pregunta liviana: no baja ninguna posición. */
+   Se consulta cada 2 minutos con la app abierta (y cada 10 fuera de horario, cuando no hay nada que avisar). Es solo una pregunta liviana: no baja ninguna posición. */
 const TAL={sin:[],umbral:15,busy:false,avisados:{},started:false,fuera:false,ts:0,oculta:{k:'',hasta:0}};
 async function tecAlertaCargar(){
   if(TAL.busy||!can('verTecnicos')||!NET.token||document.hidden)return;
@@ -5695,7 +5745,7 @@ function tecAlertaBarra(){
 function tecAlertaInit(){
   if(TAL.started||!can('verTecnicos'))return;TAL.started=true;
   tecAlertaCargar();
-  setInterval(tecAlertaCargar,60000);
+  setInterval(tecAlertaCargar,120000);   /* la alerta salta a los 15 min sin señal: preguntar cada 2 minutos alcanza */
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tecAlertaCargar();});
 }
 
@@ -7022,7 +7072,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='7682462347';
+const BUILD='05d91a903d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

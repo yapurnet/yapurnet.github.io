@@ -54,10 +54,22 @@ const report = async (tk, q) => { const r = await fetch(BASE + '/api/router/ping
     r = await poll('r0000000000.basura');
     t('un token inventado se rechaza', r.s === 401, r);
     r = await poll(P1);
-    t('el router consulta y no hay nada pendiente: respuesta vacía', r.s === 200 && r.txt === '', r);
+    t('el router consulta y nadie está probando nada: le dice que se saltee 5 corridas (una consulta por minuto)', r.s === 200 && r.txt === 's5', r);
     await poll(P2);
     r = await call('GET', '/api/routers', undefined, A);
     t('la lista de routers muestra que atienden pruebas', r.j.routers.every(x => x.ping === true && x.pingVisto > 0), r.j.routers);
+    /* el «visto» del router no se escribe en cada consulta (cuenta como escritura en la base): dos consultas seguidas dejan la misma hora */
+    const v1 = r.j.routers.find(x => x.id === R1.router.id).pingVisto;
+    await poll(P1); await poll(P1);
+    r = await call('GET', '/api/routers', undefined, A);
+    t('consultas seguidas no vuelven a escribir la hora de «atendiendo»', r.j.routers.find(x => x.id === R1.router.id).pingVisto === v1, r.j.routers);
+    /* abrir la ficha de un cliente avisa al servidor: el router pasa a consultar seguido (sin «s5») y contesta enseguida */
+    r = await call('POST', '/api/ping/armar', {}, undefined);
+    t('armar sin sesión no se puede', r.s === 401, r);
+    r = await call('POST', '/api/ping/armar', {}, O);
+    t('al abrir la ficha de un cliente se avisa que se puede venir una prueba', r.s === 200 && r.j.ok === true, r);
+    r = await poll(P1);
+    t('con la ficha abierta el router no se saltea corridas: consulta cada 10 s', r.s === 200 && r.txt === '', r);
 
     /* ---- un pedido completo ---- */
     r = await call('POST', '/api/ping', { cid: 'cA' }, O);

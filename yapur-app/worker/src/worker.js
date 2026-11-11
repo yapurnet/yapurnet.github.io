@@ -532,6 +532,14 @@ export default {
   }
 };
 
+/* ================= cupo del plan gratis de Cloudflare =================
+   El plan gratis limita por día los pedidos, las escrituras en la base y el tiempo que el servidor está «despierto». Un servidor que recibe un pedido
+   cada pocos segundos no llega a dormirse nunca, y cada escritura de rutina (quién estuvo conectado, qué consultó un router) se suma al tope. */
+const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
+const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
+const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
+const PING_SALTOS = 5;               // en reposo el router se saltea 5 de sus corridas de 10 s: consulta una vez por minuto
+
 /* ================= ubicación de los técnicos en horario laboral ================= */
 /* Solo se guarda lo que llega dentro del horario (por defecto de 8 a 20 h, hora de Argentina) y se borra a los 14 días.
    El horario lo controla el servidor con su propio reloj: no importa lo que diga el celular. Argentina no tiene horario de verano: siempre UTC-3. */
@@ -810,9 +818,13 @@ export class YapurDB extends DurableObject {
        al loguearse, quien actualiza la app sin volver a loguearse (la sesión sigue valiendo) quedaría mostrando para siempre la
        versión vieja en Dispositivos. No se toca un equipo todavía «old-» (sesión de antes de esta función): ese sigue mostrando
        «Sesión anterior» hasta completarse de verdad con su identificador (devCompletar, arriba), no con solo el User-Agent. */
-    const uaNow = (request.headers.get('user-agent') || '').slice(0, 300);
-    if (dev && !dev.did.startsWith('old-') && uaNow && uaNow !== dev.ua) { const info = uaInfo(uaNow); this.sql.exec('UPDATE devices SET label=?,ua=?,app=? WHERE id=?', info.label, uaNow, info.app, dev.id); }
-    if (Date.now() - s.last > 60e3) {
+    /* El servicio de ubicación del APK pide con el mismo acceso pero con el User-Agent de Android a secas (sin el «YapurApp/» del WebView):
+       si ese pisara al de la app, cada pedido lo cambiaría de ida y vuelta (una escritura en la base por pedido, para nada) y la versión
+       del APK desaparecería de Dispositivos. Un User-Agent sin «YapurApp/» no pisa a uno que sí lo tiene. */
+    const uaNow = (request.headers.get('user-agent') || '').slice(0, 300), esApk = x => /YapurApp\//.test(x || '');
+    if (dev && !dev.did.startsWith('old-') && uaNow && uaNow !== dev.ua && !(esApk(dev.ua) && !esApk(uaNow))) { const info = uaInfo(uaNow); this.sql.exec('UPDATE devices SET label=?,ua=?,app=? WHERE id=?', info.label, uaNow, info.app, dev.id); }
+    /* «visto por última vez» se anota cada 5 minutos como mucho (cada anotación son dos escrituras en la base y el plan gratis limita las escrituras por día) */
+    if (Date.now() - s.last > SESION_VISTO_MS) {
       this.sql.exec('UPDATE sessions SET last=?,dev=? WHERE th=?', Date.now(), dev ? dev.id : s.dev, th);
       if (dev) this.sql.exec('UPDATE devices SET visto=?,ip=?,geo=? WHERE id=?', Date.now(), (request.headers.get('cf-connecting-ip') || '').slice(0, 60), geoOf(request), dev.id);
     }
@@ -1784,7 +1796,7 @@ export class YapurDB extends DurableObject {
   pingRouters() { return this.q('SELECT id,nombre,pvisto FROM routers WHERE pth IS NOT NULL'); }
   /* el router que corresponde al cliente: el de su «nodo» si ese router hace pruebas; si no, cualquiera que esté consultando */
   pingRouterDe(nodo) {
-    const vivo = r => r.pvisto && Date.now() - r.pvisto < 90e3, k = String(nodo || '').trim().toLowerCase(), todos = this.pingRouters();
+    const vivo = r => r.pvisto && Date.now() - r.pvisto < PING_VIVO_MS, k = String(nodo || '').trim().toLowerCase(), todos = this.pingRouters();
     const suyo = k ? todos.find(r => r.nombre.toLowerCase() === k) : null;
     if (suyo) return { suyo, ok: vivo(suyo) };
     const alguno = todos.find(vivo);
@@ -1796,7 +1808,7 @@ export class YapurDB extends DurableObject {
   }
   /* pasa a «vencido» lo que nadie atendió a tiempo */
   pingVencer() {
-    const t = Date.now(), ve = Number(this.env.PING_VENCE_MS) || 45e3;
+    const t = Date.now(), ve = Number(this.env.PING_VENCE_MS) || 90e3;   // en reposo el router pregunta una vez por minuto: tiene que alcanzar el tiempo para que la vea
     this.sql.exec("UPDATE pings SET estado='vencido', hecho=? WHERE (estado='pend' AND ts<?) OR (estado='toma' AND tomado<?)", t, t - ve, t - ve);
   }
   pingPedir(u, b) {
@@ -1827,10 +1839,25 @@ export class YapurDB extends DurableObject {
     if (!r || (r.uid !== u.id && u.role !== 'admin')) throw httpErr(404, 'No existe esa prueba.');
     return this.pingView(r);
   }
-  /* el router consulta: devuelve «id:ip,id:ip» (texto simple, fácil de leer en RouterOS) y deja marcado que las tomó */
+  /* ¿hay que consultar seguido? Sí si alguien pidió una prueba hace poco o abrió la ficha de un cliente para pedirla (ver pingArmar) */
+  pingActivo() {
+    const t = Date.now(), arm = this.q1("SELECT v FROM meta WHERE k='pingarm'");
+    if (arm && t - Number(arm.v) < PING_ARMADO_MS) return true;
+    return !!this.q1('SELECT 1 x FROM pings WHERE ts>? LIMIT 1', t - PING_ARMADO_MS);
+  }
+  /* la ficha de un cliente con IP se abrió: el router pasa a consultar cada 10 s para que, cuando se toque «Probar conexión», conteste enseguida */
+  pingArmar(u) {
+    if (!effPerms(u).ping) throw httpErr(403, 'No tenés permiso para probar la conexión de los clientes.', 'permission_denied');
+    const t = Date.now(), arm = this.q1("SELECT v FROM meta WHERE k='pingarm'");
+    if ((!arm || t - Number(arm.v) > 60e3) && this.pingRouters().length) this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('pingarm',?)", String(t));
+    return { ok: true };
+  }
+  /* el router consulta: devuelve «id:ip,id:ip» (texto simple, fácil de leer en RouterOS) y deja marcado que las tomó.
+     Si nadie está probando nada, agrega «s5»: el script nuevo del router se saltea esas 5 corridas (consulta una vez por minuto en vez de cada 10 s).
+     El script de antes no entiende «s5» y lo ignora (sigue consultando cada 10 s, pero ya no escribe en la base cada vez). */
   async routerPingPoll(request) {
     const r = await this.routerPingAuth(request);
-    this.sql.exec('UPDATE routers SET pvisto=? WHERE id=?', Date.now(), r.id);
+    if (!r.pvisto || Date.now() - r.pvisto > 25e3) this.sql.exec('UPDATE routers SET pvisto=? WHERE id=?', Date.now(), r.id);
     this.pingVencer();
     const mine = r.nombre.toLowerCase(), nombres = new Set(this.pingRouters().map(x => x.nombre.toLowerCase()));
     const out = [];
@@ -1841,6 +1868,7 @@ export class YapurDB extends DurableObject {
       out.push(p.id + ':' + p.ip);
       if (out.length >= 5) break;
     }
+    if (!out.length && !this.pingActivo()) out.push('s' + PING_SALTOS);
     return out.join(',');
   }
   /* «3ms», «3ms383us», «00:00:00.003» o «3» → milisegundos */
@@ -2229,8 +2257,43 @@ export class YapurDB extends DurableObject {
     }
   }
 
+  /* ----- consumo del día: cuántos pedidos de cada tipo llegaron y cuánto tiempo estuvo encendida la base de datos -----
+     Sirve para ver, sin entrar a Cloudflare, qué gasta el cupo del plan gratis. El tiempo es una estimación: después de cada pedido la base sigue
+     encendida unos 10 segundos; si el siguiente llega antes, solo se suma el hueco. Se anota en la base cada ~90 s (lo que llegó entre una anotación
+     y que la base se durmiera puede perderse: los números son aproximados). El día cuenta como cuenta Cloudflare (UTC: arranca a las 21:00 hs de Argentina). */
+  usoNota(m, p) {
+    const t = Date.now(), dia = new Date(t).toISOString().slice(0, 10);
+    let u = this.uso;
+    if (!u || u.dia !== dia) {
+      this.usoGuardar();
+      const r = this.q1('SELECT v FROM meta WHERE k=?', 'uso:' + dia);
+      let j = null; try { j = r && JSON.parse(r.v); } catch (e) { /* sin datos de hoy */ }
+      u = this.uso = isPlain(j) && isPlain(j.n) ? { dia, n: j.n, aw: Number(j.aw) || 0, t: Number(j.t) || 0, flush: t, sucio: false } : { dia, n: {}, aw: 0, t: 0, flush: t, sucio: false };
+    }
+    const k = m + ' ' + p.replace(/\/(?:[0-9a-f]{8,}|g[0-9a-f]{14}|r[0-9a-f]{10})(?=\/|$)/g, '/:id').slice(0, 60);
+    if (u.n[k] || Object.keys(u.n).length < 80) u.n[k] = (u.n[k] || 0) + 1;
+    if (u.t) u.aw += Math.min((t - u.t) / 1000, 10.5);
+    u.t = t; u.sucio = true;
+    if (t - u.flush > 90e3) this.usoGuardar();
+  }
+  usoGuardar() {
+    const u = this.uso;
+    if (!u || !u.sucio) return;
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'uso:' + u.dia, JSON.stringify({ n: u.n, aw: Math.round(u.aw), t: u.t }));
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'uso:%' AND k<?", 'uso:' + new Date(Date.now() - 4 * 864e5).toISOString().slice(0, 10));
+    u.flush = Date.now(); u.sucio = false;
+  }
+  usoVer() {
+    this.usoGuardar();
+    const dia = new Date().toISOString().slice(0, 10), u = this.uso && this.uso.dia === dia ? this.uso : { n: {}, aw: 0 };
+    const pedidos = Object.entries(u.n).map(([k, n]) => ({ k, n })).sort((x, y) => y.n - x.n).slice(0, 30), total = Object.values(u.n).reduce((x, n) => x + n, 0);
+    let ws = 0; try { ws = this.ctx.getWebSockets().length; } catch (e) { /* sin WebSocket */ }
+    return { dia, total, pedidos, despierto: Math.round(u.aw), gbs: Math.round(u.aw * 0.125), ws, sse: this.streams.size, routersPing: this.pingRouters().length, ahora: Date.now() };
+  }
+
   async api(request, url, raw) {
     const m = request.method, p = url.pathname;
+    this.usoNota(m, p);
     if (p === '/api/status' && m === 'GET') return send(200, { ok: true, v: VERSION, needsSetup: this.userCount() === 0, nube: 'cloudflare' });
 
     if (p === '/api/setup' && m === 'POST') {
@@ -2416,6 +2479,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/router/ping' && m === 'GET') return send(200, await this.routerPingPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
     if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
     if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
+    if (p === '/api/uso' && m === 'GET') { await this.needAdmin(request); return send(200, this.usoVer()); }
+    if (p === '/api/ping/armar' && m === 'POST') return send(200, this.pingArmar((await this.needAuth(request)).user));
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
     if (p === '/api/contratos' && m === 'GET') return send(200, this.contratoLista((await this.needAuth(request)).user, url));
     if (p === '/api/contrato/plantilla' && m === 'GET') return send(200, this.contratoPlantillaVer((await this.needAuth(request)).user));
