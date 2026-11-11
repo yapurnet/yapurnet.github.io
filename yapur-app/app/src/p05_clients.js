@@ -289,10 +289,14 @@ function ipUnica(t){
   const ip=m.slice(1).map(Number).join('.');
   return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
 }
+/* al abrir la ficha de un cliente con IP se avisa al servidor: el router pasa a consultar cada 10 s (en reposo lo hace una vez por minuto, para no gastar el cupo del plan gratis) y contesta enseguida cuando se toca «Probar conexión» */
+let _pingArm=0;
+function pingArmar(){const t=Date.now();if(t-_pingArm<90e3||!NET.online)return;_pingArm=t;NET.api('POST','/api/ping/armar',{},{noKick:true,timeout:8000}).catch(()=>{});}
 function pingBlock(c){
   if(!can('ping')||c.estado==='baja')return '';
   const ip=ipUnica(c.ip);
   if(!ip)return `<div class="hint" id="png-box">Para probar la conexión, el cliente tiene que tener <b>una sola IP</b> cargada en su ficha.</div>`;
+  pingArmar();
   return `<div class="card flat" id="png-box"><div class="head-row"><h3>Conexión</h3><button class="btn small" type="button" data-act="ping" id="png-btn">Probar conexión</button></div>
     <div id="png-out" class="hint" aria-live="polite">Un router de la empresa hace el ping a <span class="mono">${esc(ip)}</span> y te dice si responde.</div></div>`;
 }
@@ -311,12 +315,12 @@ async function pingProbar(c,el){
   const alive=()=>el.isConnected&&document.body.contains(out);
   try{
     let p=(await NET.api('POST','/api/ping',{cid:c.id})).ping;
-    const fin=Date.now()+60e3;
+    const fin=Date.now()+100e3;
     while(alive()){
       if(p.estado==='hecho'){const [cls,html]=pingResultado(p);show(cls,html);break;}
       if(p.estado==='vencido'){show('warn','El router no contestó a tiempo. Probá de nuevo en un momento.');break;}
       if(Date.now()>fin){show('warn','Tarda más de lo normal. Probá de nuevo en un momento.');break;}
-      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router…');
+      show('info',p.estado==='toma'?'El router está haciendo el ping…':'Esperando al router… (puede tardar hasta un minuto)');
       await new Promise(r=>setTimeout(r,1500));
       if(!alive())break;
       p=(await NET.api('GET','/api/ping/'+encodeURIComponent(p.id))).ping;

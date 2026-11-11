@@ -1010,6 +1010,14 @@ async function openSSE(token) {
     t('el freno de intentos sobrevive al reinicio (no se esquiva esperando)', r.s === 429, r);
     r = await call('POST', '/api/login', { usuario: 'mauro', clave: 'claveSegura1' });
     t('la clave sigue valiendo tras reiniciar', r.s === 200, r);
+    /* consumo del día: qué pidió más (sin ids sueltos en los nombres) y cuánto estuvo encendida la base */
+    const TMAURO = (await call('POST', '/api/login', { usuario: 'mauro', clave: 'claveSegura1' })).j.token;
+    r = await call('GET', '/api/uso', undefined, TMAURO);
+    t('el administrador ve el consumo del día: pedidos por tipo y tiempo encendido', r.s === 200 && r.j.total >= 3 && r.j.pedidos.some(x => x.k === 'POST /api/login' && x.n >= 1) && r.j.despierto >= 0 && r.j.gbs >= 0 && r.j.ws >= 0 && r.j.sse >= 0 && r.j.routersPing >= 0, r.j);
+    r = await call('GET', '/api/uso', undefined, TPL);
+    t('un técnico no ve el consumo del servidor', r.s === 403 || r.s === 401, r);
+    r = await call('GET', '/api/uso');
+    t('sin sesión tampoco', r.s === 401, r);
     t('sin errores en el registro del servidor', !/Uncaught|\bERROR\b|✘/.test(srv.log()), srv.log().split('\n').filter(l => /Uncaught|ERROR|✘/.test(l)).slice(0, 5));
   } catch (e) {
     failN++; console.log('FAIL excepción', e);

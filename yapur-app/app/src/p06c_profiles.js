@@ -212,6 +212,8 @@ VIEWS.ajustes={
     <div class="card"><div class="head-row"><h2>Routers MikroTik</h2><div class="tags"><button class="btn small" type="button" id="aj-refr">Actualizar</button><button class="btn small" type="button" id="aj-rsc">Completar IP con archivos .rsc</button><button class="btn primary" type="button" id="aj-newr">Agregar router</button></div></div>
       <p class="muted small">Cada router le manda al sistema la lista de sus clientes con un script de solo lectura, y de ahí los importás. El sistema <b>no entra</b> a los routers ni guarda sus claves: no puede cortar ni cambiar nada en ellos. Si ya tenés los clientes cargados y te faltan las IP, <b>Completar IP con archivos .rsc</b> las busca en los exports de los routers.</p>
       <div class="list" id="aj-routers"></div></div>
+    ${isAdmin()?`<div class="card"><h2>Consumo del servidor</h2><p class="muted small">El plan gratis de Cloudflare limita por día los pedidos y el tiempo que el servidor está encendido. Si algún día aparece «Sin conexión con el servidor» sin que nadie haya hecho nada, acá ves qué lo gastó.</p>
+      <div class="actions start"><button class="btn" type="button" id="aj-uso">Ver el consumo de hoy</button></div></div>`:''}
     ${isAdmin()?ctAjustesCard():''}
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
@@ -280,6 +282,7 @@ VIEWS.ajustes={
     });
     $('#aj-bk',el).addEventListener('click',downloadBackup);
     $('#aj-bks',el).addEventListener('click',openAutoBackups);
+    const bUso=$('#aj-uso',el);if(bUso)bUso.addEventListener('click',openUso);
     $('#aj-rs',el).addEventListener('click',()=>$('#aj-rs-file',el).click());
     $('#aj-rs-file',el).addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)restoreFromFile(f);});
     loadUsers();bindRouters(el);

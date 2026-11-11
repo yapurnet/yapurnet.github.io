@@ -376,7 +376,7 @@ async function jornadaCargar(){
 function jornadaInit(){
   if(JR.started||!jrAplica())return;JR.started=true;
   jornadaCargar();
-  setInterval(()=>{if(!document.hidden)jornadaCargar();},60000);
+  setInterval(()=>{if(!document.hidden)jornadaCargar();},180000);   /* cada 3 minutos alcanza (la barra muestra horas, no segundos) y al volver a la app se pide de nuevo */
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)jornadaCargar();});
 }
 
@@ -488,7 +488,7 @@ async function tecCargar(){
   TU.busy=false;tecRender();
 }
 /* ----- alerta para quien ve a los técnicos: contador en la pestaña y barra arriba cuando alguien lleva 15 min o más sin señal dentro del horario -----
-   Se consulta cada minuto con la app abierta (y cada 10 fuera de horario, cuando no hay nada que avisar). Es solo una pregunta liviana: no baja ninguna posición. */
+   Se consulta cada 2 minutos con la app abierta (y cada 10 fuera de horario, cuando no hay nada que avisar). Es solo una pregunta liviana: no baja ninguna posición. */
 const TAL={sin:[],umbral:15,busy:false,avisados:{},started:false,fuera:false,ts:0,oculta:{k:'',hasta:0}};
 async function tecAlertaCargar(){
   if(TAL.busy||!can('verTecnicos')||!NET.token||document.hidden)return;
@@ -520,7 +520,7 @@ function tecAlertaBarra(){
 function tecAlertaInit(){
   if(TAL.started||!can('verTecnicos'))return;TAL.started=true;
   tecAlertaCargar();
-  setInterval(tecAlertaCargar,60000);
+  setInterval(tecAlertaCargar,120000);   /* la alerta salta a los 15 min sin señal: preguntar cada 2 minutos alcanza */
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)tecAlertaCargar();});
 }
 

@@ -152,12 +152,14 @@ const NET=(function(){
   }
   /* WebSocket: el servidor se duerme mientras nadie hace nada (el plan gratis de Cloudflare limita el tiempo que está encendido).
      Si el WebSocket no se puede abrir (una red que lo bloquea) se usa el SSE de antes. */
-  let wsFallos=0;
+  /* Si el WebSocket no se puede abrir 3 veces seguidas se pasa al SSE, pero solo por un rato (10 minutos): un SSE abierto mantiene despierto al servidor las 24 horas
+     (gasta el cupo del plan gratis aunque nadie haga nada), y una señal floja en la calle alcanza para fallar 3 veces. Cada vez que el WebSocket abre bien, la cuenta vuelve a cero. */
+  let wsFallos=0,sseDesde=0;
   function connectWS(t){
     let u;try{u=new URL(base+'/api/stream?t='+encodeURIComponent(t),location.href);u.protocol=u.protocol==='https:'?'wss:':'ws:';}catch(e){wsFallos=9;return false;}
     let abrio=false;const w=new WebSocket(u.href);
     es=w;lastMsg=Date.now();
-    w.onopen=()=>{abrio=true;};
+    w.onopen=()=>{abrio=true;wsFallos=0;};
     w.onmessage=ev=>{lastMsg=Date.now();if(ev.data==='pong')return;let m;try{m=JSON.parse(ev.data);}catch(e){return;}if(m&&m.e)onLive(m.e,m.d);};
     w.onclose=()=>{if(es!==w)return;if(!abrio)wsFallos++;closeStream();setOnline(false);scheduleReconnect();};
     w.onerror=()=>{};
@@ -177,14 +179,18 @@ const NET=(function(){
     if(es||!token)return;
     if(typeof WebSocket==='function'&&wsFallos<3&&connectWS(t))return;
     const s=new EventSource(base+'/api/stream?t='+encodeURIComponent(t));
-    es=s;lastMsg=Date.now();
+    es=s;lastMsg=sseDesde=Date.now();
     const seen=()=>{lastMsg=Date.now();};
     s.addEventListener('hello',()=>onLive('hello'));
     s.addEventListener('ping',seen);
     for(const nm of ['doc','me','disp','contrato','ubic'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
     s.addEventListener('kick',()=>onLive('kick'));
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
-    esTimer=setInterval(()=>{if(es===s&&Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}},15000);
+    esTimer=setInterval(()=>{
+      if(es!==s)return;
+      if(typeof WebSocket==='function'&&Date.now()-sseDesde>600000){wsFallos=0;closeStream();connectStream();return;}   /* pasaron 10 minutos en SSE: se vuelve a probar con el WebSocket */
+      if(Date.now()-lastMsg>70000){closeStream();setOnline(false);connectStream();}
+    },15000);
   }
   /* al volver a la app o recuperar la red: se asegura de estar al día */
   function wake(){
