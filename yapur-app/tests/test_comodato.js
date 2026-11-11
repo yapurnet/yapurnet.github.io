@@ -102,6 +102,18 @@ const DNI_TXT = '20.111.222';
     cb = await cl();
     t('la oficina puede sumar otro renglón (vuelta a antena) y queda con su nombre y la hora del servidor', r.s === 200 && cb.migraciones.length === 2 && cb.migraciones[1].por === 'ofi' && cb.migraciones[1].ts > 1e12 && cb.migraciones[0].por === 'tec1', cb.migraciones);
 
+    /* ---- mudanza a un lugar sin fibra: de fibra a antena, con el domicilio nuevo anotado en el historial ---- */
+    const M2 = { f: '2026-11-12', ts: 1, de: 'fibra', a: 'wireless', ipAnt: '192.168.100.4', ip: '10.20.43.9', dom: 'Calle 12 N° 450, Añatuya', domAnt: 'Calle 9 N° 123, Añatuya', ret: [{ t: 'ONU', d: 'Huawei HG8145V5', s: '2C:3A:E8:11:AA:BB' }], por: 'inventado' };
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { tec: 'wireless', ip: '10.20.43.9', dir: 'Calle 12 N° 450', nap: null, napPuerto: null, lat: -28.46, lng: -62.83, migraciones: cb.migraciones.concat([M2]) } } } }, T1);
+    cb = await cl();
+    t('el técnico pasa al cliente a antena y anota el domicilio nuevo en el historial', r.s === 200 && cb.tec === 'wireless' && cb.dir === 'Calle 12 N° 450' && cb.migraciones.length === 3 && cb.migraciones[2].dom === 'Calle 12 N° 450, Añatuya' && cb.migraciones[2].domAnt === 'Calle 9 N° 123, Añatuya' && cb.migraciones[2].de === 'fibra' && cb.migraciones[2].por === 'tec1', r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: cb.migraciones.concat([Object.assign({}, M2, { de: 'wireless', a: 'fibra', dom: 'x'.repeat(161) })]) } } } }, T1);
+    t('un domicilio demasiado largo en el historial se rechaza', r.s === 403 && /historial/.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: cb.migraciones.concat([Object.assign({}, M2, { de: 'wireless', a: 'fibra', dom: 7 })]) } } } }, T1);
+    t('ni uno que no es texto', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: cb.migraciones.slice(0, 2).concat([Object.assign({}, cb.migraciones[2], { dom: 'Otra calle 1' })]) } } } }, T1);
+    t('y un domicilio ya anotado no se puede cambiar', r.s === 403 && /no se puede modificar/.test(r.j.error), r);
+
     /* ---- modelos de equipos que el técnico elige de una lista (así solo escribe la MAC) ---- */
     r = await call('GET', '/api/comodato/modelos', undefined, T1);
     const modDef = (r.j.modelos || []).map(m => m.t + '|' + m.d);

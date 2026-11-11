@@ -220,6 +220,7 @@ function openClient(id){
       const a=e.target.closest('[data-act]');if(!a)return;
       if(a.dataset.act==='editar')openClientForm(c.id);
       else if(a.dataset.act==='migrar')openMigrar(c.id);
+      else if(a.dataset.act==='migrar-ant')openMigrar(c.id,'wireless');
       else if(a.dataset.act==='ubicacion')openGeoQuick(c.id);
       else if(a.dataset.act==='nap')openRed(c.nap);
       else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
