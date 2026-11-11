@@ -308,6 +308,10 @@ button.pelo:hover{border-color:var(--accent-line)}
 .cm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .cm-list li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);overflow-wrap:anywhere}
 .cm-row{display:flex;flex-direction:column;gap:10px}
+.cm-mas summary{cursor:pointer;padding:6px 0}
+.cm-mas[open] summary{margin-bottom:10px}
+.cm-mas>*+*{margin-top:10px}
+.cm-modelo{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
 .ct-doc{white-space:pre-wrap;overflow-wrap:anywhere;font-family:Georgia,"Times New Roman",serif;font-size:15px;line-height:1.55;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);max-height:46vh;overflow-y:auto}
 .ct-paper .ct-doc{max-height:none;overflow:visible}
 .ct-firma{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-top:14px}

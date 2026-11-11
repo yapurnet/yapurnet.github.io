@@ -5,6 +5,7 @@ const { start } = require('./harness');
 let BASE = '', okN = 0, failN = 0;
 const t = (name, cond, extra) => { if (cond) { okN++; console.log('ok   ' + name); } else { failN++; console.log('FAIL ' + name + (extra !== undefined ? ' -> ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 async function call(method, p, body, token) {
   const r = await fetch(BASE + p, { method, headers: Object.assign({ 'content-type': 'application/json' }, token ? { authorization: 'Bearer ' + token } : {}), body: body === undefined ? undefined : JSON.stringify(body) });
   let j = null; try { j = await r.json(); } catch (e) {}
@@ -74,6 +75,29 @@ const DNI_TXT = '20.111.222';
     t('ni puede cambiarla', r.s === 403 && /comodato/i.test(r.j.error), r);
     r = await call('GET', '/api/contratos', undefined, T2);
     t('ni ver contratos', r.s === 403, r);
+
+    /* ---- modelos de equipos que el técnico elige de una lista (así solo escribe la MAC) ---- */
+    r = await call('GET', '/api/comodato/modelos', undefined, T1);
+    const modDef = (r.j.modelos || []).map(m => m.t + '|' + m.d);
+    t('de arranque la lista trae la ONU Huawei, la antena LiteBeam, el inyector PoE y la fuente de la ONU', r.s === 200 && same(modDef, ['ONU|Huawei HG8145V5', 'Antena|CPE Ubiquiti LiteBeam Gen2', 'Fuente o adaptador|Inyector de corriente PoE', 'Fuente o adaptador|Fuente de corriente de la ONU']) && r.j.tipos.includes('ONU'), r.j);
+    r = await call('GET', '/api/comodato/modelos', undefined, T2);
+    t('un técnico sin permiso de comodato no la pide', r.s === 403, r);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: [{ t: 'ONU', d: 'ZTE F670L' }] }, T1);
+    t('un técnico no puede cambiarla', r.s === 403, r);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: [{ t: 'ONU', d: 'ZTE F670L' }] }, O);
+    t('ni la oficina (solo el administrador)', r.s === 403, r);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: 'x' }, A);
+    t('una lista mal formada se rechaza', r.s === 400, r);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: [{ t: 'ONU', d: 'Huawei HG8145V5' }, { t: 'ONU', d: '  zte   F670L ' }, { t: 'ONU', d: 'ZTE F670L' }, { t: 'Inventado', d: 'x1234' }, { t: 'ONU', d: 'x' }, { t: 'Antena', d: 'CPE Ubiquiti LiteBeam Gen2' }, 'basura', null] }, A);
+    t('el administrador la guarda: se limpian los espacios, los repetidos, los tipos que no existen y los modelos vacíos', r.s === 200 && same(r.j.modelos.map(m => m.t + '|' + m.d), ['ONU|Huawei HG8145V5', 'ONU|zte F670L', 'Antena|CPE Ubiquiti LiteBeam Gen2']) && r.j.modPor === 'Mauro', r.j);
+    r = await call('GET', '/api/comodato/modelos', undefined, T1);
+    t('el técnico ya ve la lista nueva', r.s === 200 && r.j.modelos.length === 3 && r.j.modelos[1].d === 'zte F670L', r.j);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: [] }, A);
+    t('el administrador puede dejarla vacía (el técnico escribe el modelo) y no vuelve sola la de arranque', r.s === 200 && r.j.modelos.length === 0, r.j);
+    r = await call('GET', '/api/comodato/modelos', undefined, T1);
+    t('queda vacía para el técnico', r.s === 200 && r.j.modelos.length === 0, r.j);
+    r = await call('PUT', '/api/comodato/modelos', { modelos: [{ t: 'ONU', d: 'Huawei HG8145V5' }, { t: 'ONU', d: 'ZTE F670L' }] }, A);
+    t('(se deja una lista para la copia de seguridad)', r.s === 200 && r.j.modelos.length === 2, r.j);
 
     /* ---- plantilla ---- */
     r = await call('GET', '/api/contrato/plantilla', undefined, T1);
@@ -288,7 +312,7 @@ const DNI_TXT = '20.111.222';
     /* ---- copia de seguridad: lleva los contratos, y al restaurar no se pierde ninguno ---- */
     r = await call('GET', '/api/backup', undefined, A);
     const bk = r.j;
-    t('la copia completa incluye los contratos firmados, su registro y el texto del contrato', r.s === 200 && bk.contratos.length === 5 && bk.contratos.every(c => c.firma.startsWith('data:image/png') && /^[0-9a-f]{64}$/.test(c.hash)) && bk.contratos_log.length >= 9 && bk.contrato_tpl && bk.contrato_tpl.final === true, bk.contratos && bk.contratos.length);
+    t('la copia completa incluye los contratos firmados, su registro y el texto del contrato', r.s === 200 && bk.contratos.length === 5 && bk.contratos.every(c => c.firma.startsWith('data:image/png') && /^[0-9a-f]{64}$/.test(c.hash)) && bk.contratos_log.length >= 9 && bk.contrato_tpl && bk.contrato_tpl.final === true && bk.comodato_modelos && bk.comodato_modelos.lista.length === 2, bk.contratos && bk.contratos.length);
     const hechoDespues = await call('POST', '/api/contrato/' + k3.id + '/borrar', { motivo: 'después de la copia' }, O);
     t('(después de la copia se manda a la papelera el rechazado)', hechoDespues.s === 200 && hechoDespues.j.contrato.estado === 'borrado', hechoDespues.j);
     const malo = Object.assign({}, bk.contratos[0], { id: 'k' + 'a'.repeat(16), num: 99, hash: 'f'.repeat(64), estado: 'archivado' });
@@ -305,6 +329,8 @@ const DNI_TXT = '20.111.222';
     t('la verificación detecta un contrato cuyo contenido no coincide con su código', r.s === 200 && r.j.ok === false, r);
     r = await call('GET', '/api/contrato/plantilla', undefined, A2);
     t('el texto del contrato se conserva', r.s === 200 && r.j.final === true && r.j.ver === 3, r.j);
+    r = await call('GET', '/api/comodato/modelos', undefined, A2);
+    t('los modelos de equipos se conservan al restaurar', r.s === 200 && r.j.modelos.length === 2 && r.j.modelos[1].d === 'ZTE F670L', r.j);
     sO.close(); sT.close();
     t('sin errores en el registro del servidor', !/Uncaught|\bERROR\b|✘/.test(srv.log()), srv.log().split('\n').filter(l => /Uncaught|ERROR|✘/.test(l)).slice(0, 5));
   } catch (e) {
