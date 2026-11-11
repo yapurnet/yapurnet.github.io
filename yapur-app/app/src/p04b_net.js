@@ -24,7 +24,16 @@ const NET=(function(){
   let baseSeq=0,synced=false,fresh=false,syncing=null,buffer=[],started=false;
   let es=null,esTimer=null,lastMsg=0,online=false,retry=0,retryT=null,persistT=null,dirty=new Set(),flushT=null;
   const watchers=new Set();
-  const handlers={status:[],me:[],kick:[],disp:[],contrato:[],ubic:[],sync:[]};
+  const handlers={status:[],me:[],kick:[],disp:[],contrato:[],ubic:[],sync:[],respaldo:[]};
+  /* servidor de respaldo: {rol:'activo'|'espera', url: la dirección del otro servidor, caido: este servidor no responde, limite: por el tope del día}. Se recuerda para poder avisar aunque el servidor no conteste. */
+  let resp=null;try{resp=JSON.parse(lsGet('resp')||'null');}catch(e){}
+  function setResp(p){
+    const antes=JSON.stringify(resp);
+    resp=p===null?null:Object.assign({},resp||{},p);
+    if(resp&&!resp.url&&!resp.rol)resp=null;
+    const ahora=JSON.stringify(resp);
+    if(ahora!==antes){lsSet('resp',ahora);emit('respaldo',resp);}
+  }
   const emit=(k,v)=>handlers[k].forEach(f=>{try{f(v);}catch(e){console.error(e);}});
 
   const isPlain=o=>o&&typeof o==='object'&&!Array.isArray(o);
@@ -52,8 +61,11 @@ const NET=(function(){
       const e=new Error((j&&j.error)||'No se pudo completar la operación.');
       e.status=r.status;e.code=(j&&j.code)||'invalid_argument';
       if(r.status===401&&token&&!opt.noKick)lost('Tu sesión terminó. Entrá de nuevo.');
+      if(j&&j.respaldo&&r.status===503)setResp({url:j.respaldo,caido:true,limite:!!j.limite});   /* el servidor no responde y hay otro al que ir */
+      else if(j&&j.code==='respaldo_espera')setResp({rol:'espera'});
       throw e;
     }
+    if(resp&&resp.caido)setResp({caido:false,limite:false});
     return j;
   }
   function lost(msg){
@@ -149,6 +161,7 @@ const NET=(function(){
     else if(name==='me'){try{me=m;lsSet('me',JSON.stringify(m));emit('me',m);}catch(e){}}
     else if(name==='disp'||name==='contrato'||name==='ubic'){try{emit(name,m);}catch(e){}}
     else if(name==='kick'){lost('Tu acceso fue desactivado o cambiado. Entrá de nuevo.');}
+    else if(name==='respaldo'){if(m&&m.rol)setResp({rol:m.rol});}
   }
   /* WebSocket: el servidor se duerme mientras nadie hace nada (el plan gratis de Cloudflare limita el tiempo que está encendido).
      Si el WebSocket no se puede abrir (una red que lo bloquea) se usa el SSE de antes. */
@@ -183,7 +196,7 @@ const NET=(function(){
     const seen=()=>{lastMsg=Date.now();};
     s.addEventListener('hello',()=>onLive('hello'));
     s.addEventListener('ping',seen);
-    for(const nm of ['doc','me','disp','contrato','ubic'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
+    for(const nm of ['doc','me','disp','contrato','ubic','respaldo'])s.addEventListener(nm,ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}onLive(nm,m);});
     s.addEventListener('kick',()=>onLive('kick'));
     s.onerror=()=>{if(es!==s)return;closeStream();setOnline(false);scheduleReconnect();};
     esTimer=setInterval(()=>{
@@ -218,6 +231,7 @@ const NET=(function(){
             const j=await api('GET','/api/me',undefined,{timeout:15000});
             if(!token)return;
             const changed=JSON.stringify(j.me)!==JSON.stringify(me);
+            setResp(j.respaldo?{rol:j.respaldo.rol,url:j.respaldo.url,caido:false,limite:false}:null);
             me=j.me;lsSet('me',JSON.stringify(me));if(changed)emit('me',me);
             await bring();setOnline(true);
           }catch(e){if(e.network){setOnline(false);started=true;scheduleReconnect();}else if(e.status!==401)console.error(e);}
@@ -226,6 +240,7 @@ const NET=(function(){
       }
       try{
         const j=await api('GET','/api/me',undefined,{timeout:15000});
+        setResp(j.respaldo?{rol:j.respaldo.rol,url:j.respaldo.url,caido:false,limite:false}:null);
         me=j.me;lsSet('me',JSON.stringify(me));
         await bring();setOnline(true);
         return {state:'ready'};
@@ -238,7 +253,11 @@ const NET=(function(){
     return await loginState();
   }
   async function loginState(){
-    try{const st=await status();return {state:st.needsSetup?'setup':'login'};}
+    try{
+      const st=await status();
+      if(st.respaldo&&st.respaldo.vacio)return {state:'respaldo-vacio',respaldo:st.respaldo};
+      return {state:st.needsSetup?'setup':'login',respaldo:st.respaldo||null};
+    }
     catch(e){return {state:'noserver',error:e};}
   }
 
@@ -306,6 +325,7 @@ const NET=(function(){
     native,get base(){return base;},get did(){return did;},get me(){return me;},get token(){return token;},get online(){return online;},get synced(){return synced;},
     api,init,bring,login,setup,logout,status,saveFile,
     resync:()=>fullSync().catch(()=>{}),   /* vuelve a pedir todo al servidor (por ejemplo, cuando le dan un permiso nuevo y ahora le corresponden más datos) */
+    get respaldo(){return resp;},
     get appVersion(){try{return bridge&&typeof bridge.version==='function'?String(bridge.version()||''):'';}catch(e){return '';}},
     openExternal:url=>{if(bridge&&typeof bridge.openUrl==='function')bridge.openUrl(String(url));else window.open(url,'_blank','noopener');},
     db:dbApi,

@@ -557,6 +557,16 @@ function readBody(raw, limit) {
   try { return JSON.parse(raw); } catch (e) { throw httpErr(400, 'JSON inválido.'); }
 }
 
+/* dirección del otro servidor (el de respaldo, o el principal si este es el de respaldo): solo https (o http en la propia máquina, para las pruebas) y solo el sitio, sin ruta */
+function repUrl(env) {
+  const raw = String((env && env.REPLICA_URL) || '').trim();
+  if (!raw) return null;
+  let u; try { u = new URL(raw); } catch (e) { return null; }
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname) || u.hostname.endsWith('.localhost');
+  if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) return null;
+  return u.origin;
+}
+
 /* ================= entrada: reparte el trabajo ================= */
 export default {
   async fetch(request, env) {
@@ -572,7 +582,12 @@ export default {
       catch (e) {
         const motivo = String((e && e.message) || e).replace(/\s+/g, ' ').slice(0, 200);
         console.error('YapurDB:', motivo);
-        return send(503, { error: 'La base de datos del servidor no responde: ' + motivo, code: 'unavailable' });
+        /* si el motivo es el tope del plan gratis y hay servidor de respaldo, la app avisa y ofrece abrirlo (los archivos de la app se sirven aparte y siguen cargando) */
+        const out = { error: 'La base de datos del servidor no responde: ' + motivo, code: 'unavailable' };
+        if (/exceeded|limit|free tier/i.test(motivo)) out.limite = true;
+        const rep = repUrl(env);
+        if (rep) out.respaldo = rep;
+        return send(503, out);
       }
     }
     return env.ASSETS.fetch(request);
@@ -585,9 +600,16 @@ export default {
 const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
 const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
-const ESQUEMA_V = '2';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
+const ESQUEMA_V = '3';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
 const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
 const USO_FLUSH_MS = 5e3;            // el contador de consumo se anota en la base como mucho cada 5 segundos
+/* servidor de respaldo (segunda cuenta de Cloudflare): ver «respaldo» más abajo */
+const REP_DEB_MS = 20e3;             // los cambios se mandan al respaldo 20 segundos después del primero (varios cambios seguidos viajan juntos)
+const REP_LOTE = 120;                // elementos por envío
+const REP_BYTES = 3e6;               // tamaño máximo (aprox.) de cada envío
+const REP_ESPERA_MAX = 30 * 60e3;    // si el otro servidor no responde, se reintenta cada vez más lento: como mucho cada 30 minutos
+const REP_VERIF_MS = 6 * 3600e3;     // cada 6 horas como mucho se comparan las cantidades de los dos servidores para detectar diferencias
+const REP_OK_ESPERA = /^\/api\/(login|logout|ticket|replica\/)/;   // lo único que un servidor en espera acepta además de leer
 const PING_SALTOS = 5;               // en reposo el router se saltea 5 de sus corridas de 10 s: consulta una vez por minuto
 
 /* ================= ubicación de los técnicos en horario laboral ================= */
@@ -739,7 +761,8 @@ export class YapurDB extends DurableObject {
     /* cada consulta pasa por acá para sumar las filas que leyó y escribió (el plan gratis limita las dos por día; el consumo se ve en Ajustes → «Ver el consumo de hoy») */
     const sqlReal = ctx.storage.sql;
     this.usoCur = [];
-    this.sql = { exec: (...a) => { const c = sqlReal.exec(...a); if (this.usoCur.length < 4000) this.usoCur.push(c); return c; } };
+    this.sql = { exec: (...a) => { const c = sqlReal.exec(...a); if (this.usoCur.length < 4000) this.usoCur.push(c); if (this.repVig) this.repVigilar(a); return c; } };
+    this.repVig = false;        /* true mientras este servidor es el activo y tiene un respaldo configurado: cada escritura se anota para mandarla (ver «respaldo») */
     this.env = env;
     this.streams = new Set();   /* solo las pantallas viejas por SSE; las nuevas son WebSocket que dejan dormir al servidor (conexiones()) */
     this.tickets = new Map();
@@ -778,6 +801,7 @@ export class YapurDB extends DurableObject {
       for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
       try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
       for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+      this.sql.exec('CREATE TABLE IF NOT EXISTS repcola(k TEXT PRIMARY KEY, ts INTEGER NOT NULL) WITHOUT ROWID');   /* cambios que faltan mandar al servidor de respaldo */
       this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('esquema',?)", ESQUEMA_V);
     }
     /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
@@ -789,6 +813,7 @@ export class YapurDB extends DurableObject {
     }
     this.mantenimiento();
     this.loadUsers();
+    this.repIniciar();
     /* el número de cambio nunca vuelve atrás aunque el objeto se reinicie: arranca en la hora actual (milisegundos) */
     this.SEQ = Date.now();
   }
@@ -1545,7 +1570,8 @@ export class YapurDB extends DurableObject {
     const rows = docs.map(d => ({ coll: d.coll, id: String(d.id), s: JSON.stringify(d.data) }));
     for (const r of rows) if (r.s.length > 6e5 && bytesOf(r.s) > 1.9e6) throw httpErr(413, 'Un registro de la copia (' + r.coll + '/' + r.id + ') es demasiado grande.', 'quota_exceeded');
     await this.snapshot('antes-de-restaurar-' + Date.now());
-    this.tx(() => {
+    this.repMute = true;   /* no se anota cada registro: al terminar se manda la copia completa al respaldo */
+    try { this.tx(() => {
       this.sql.exec('DELETE FROM docs');
       for (const r of rows) this.putDoc(r.coll, r.id, r.s);
       /* se conservan las cuentas de administrador actuales si la copia no trae ninguna */
@@ -1557,8 +1583,9 @@ export class YapurDB extends DurableObject {
       this.sql.exec('DELETE FROM devices WHERE uid NOT IN (SELECT id FROM users)');   // los equipos aprobados de quienes siguen existiendo se conservan
       this.restoreContratos(body);
       this.SEQ++;
-    });
+    }); } finally { this.repMute = false; }
     this.loadUsers();
+    this.repTodo();
     for (const s of this.conexiones()) { this.sse(s, 'kick', {}); this.endStream(s); }
     return { docs: rows.length, usuarios: report };
   }
@@ -2351,6 +2378,398 @@ export class YapurDB extends DurableObject {
     return this.jornadaHorasDia(t.id, dia, hoy, ahora, tramos);
   }
 
+  /* ================= respaldo: un segundo servidor en otra cuenta de Cloudflare =================
+     El plan gratis de Cloudflare limita cada cuenta por día. Para no quedarse sin sistema se puede tener un segundo servidor (otra cuenta, mismo código) que va
+     recibiendo copia de todo lo que cambia. Los dos se conocen por dos variables (REPLICA_URL: la dirección del otro, y REPLICA_KEY: una clave larga igual en los dos).
+     - Hay un solo servidor ACTIVO a la vez. El otro queda EN ESPERA: se puede mirar pero no cambiar nada, y va recibiendo los cambios.
+     - Cada escritura en la base se anota en una cola (tabla repcola) y 20 segundos después se manda lo anotado. Si el otro no responde se reintenta cada vez más despacio.
+     - «Época»: cada vez que cambia el servidor activo sube en uno. Un servidor que recibe algo de una época más nueva sabe que pasó a ser el de espera; uno que recibe
+       algo de una época vieja avisa que quedó atrás. Así nunca quedan dos activos a la vez.
+     - Traspaso ordenado (el otro responde): el que quiere pasar a activo se lo pide al activo, que primero manda lo que le falta y después se pone en espera.
+     - Traspaso de emergencia (el activo no responde, por ejemplo llegó al tope): el de espera se activa solo; cuando el otro vuelva, recibe la copia completa y queda en espera.
+     No se copian: la ubicación de los técnicos, las sesiones abiertas, los equipos autorizados, los routers ni las fotos de comprobantes. */
+  repIniciar() {
+    this.repCfg = null; this.repVig = false; this.repMute = false; this.repPend = false; this.repBusy = null; this.repEntregando = false; this.repErr = null; this.repOk = 0;
+    this.rep = { rol: 'activo', epoca: 0, full: false, ini: false, prox: 0, fallas: 0, ver: 0 };
+    this.repDeb = Number(this.env.REP_DEB_MS) || REP_DEB_MS;     /* (las pruebas acortan estos tiempos) */
+    this.repBack = Number(this.env.REP_BACK_MS) || 30e3;
+    const url = repUrl(this.env), key = String(this.env.REPLICA_KEY || '').trim();
+    if (!url || key.length < 20) return;
+    this.repCfg = { url, key };
+    const r = this.q1("SELECT v FROM meta WHERE k='rep'");
+    let j = null; try { j = r ? JSON.parse(r.v) : null; } catch (e) { j = null; }
+    if (isPlain(j)) {
+      Object.assign(this.rep, { rol: j.rol === 'espera' ? 'espera' : 'activo', epoca: Number(j.epoca) || 0, full: !!j.full, ini: !!j.ini, prox: Number(j.prox) || 0, fallas: Number(j.fallas) || 0, ver: Number(j.ver) || 0 });
+      if (isPlain(j.err)) this.repErr = j.err;
+    } else {
+      /* primera vez con respaldo configurado: un servidor vacío arranca esperando la primera copia (REPLICA_ROL=activo lo fuerza a trabajar, para una instalación nueva); uno con datos sigue activo y manda todo */
+      const forz = String(this.env.REPLICA_ROL || '').trim().toLowerCase();
+      if (forz === 'espera' || (forz !== 'activo' && this.userCount() === 0)) this.rep.rol = 'espera'; else this.rep.full = true;
+    }
+    this.repVig = this.rep.rol === 'activo';
+    if (this.repVig && !isPlain(j)) this.repGuardar();
+    if (this.repVig) this.repAgendar();   /* despertó con cambios sin mandar: se asegura de que la alarma esté puesta */
+  }
+  repGuardar() {
+    const r = this.rep;
+    this.repVig = !!this.repCfg && r.rol === 'activo';
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('rep',?)", JSON.stringify({ rol: r.rol, epoca: r.epoca, full: r.full ? 1 : 0, ini: r.ini ? 1 : 0, prox: r.prox || 0, fallas: r.fallas || 0, ver: r.ver || 0, err: this.repErr }));
+  }
+  /* ¿este servidor está en espera (o pasándole el trabajo al otro)? Entonces solo se puede mirar */
+  repEspera() { return !!this.repCfg && (this.rep.rol === 'espera' || this.repEntregando); }
+  /* cambio de rol: se anota y se avisa a las pantallas abiertas para que muestren el cartel que corresponde */
+  repRol(rol, epoca, extra) {
+    Object.assign(this.rep, { rol, epoca }, extra || {});
+    this.repGuardar();
+    for (const s of this.conexiones()) this.sse(s, 'respaldo', { rol, epoca });
+  }
+  /* cada escritura en las tablas que se copian se anota en la cola, mirando el texto de la consulta (así no hace falta tocar cada lugar que escribe) */
+  repVigilar(a) {
+    const q = a[0];
+    if (this.repMute || typeof q !== 'string') return;
+    const m = /^\s*(INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+(docs|users|contratos_log|contratos|meta)\b/i.exec(q);
+    if (!m) return;
+    const op = /^\s*UPDATE/i.test(q) ? 'u' : /^\s*DELETE/i.test(q) ? 'd' : 'i', t = m[2].toLowerCase();
+    if (t === 'docs') {
+      if (op === 'd' && !/WHERE\s+coll\s*=\s*\?\s+AND\s+id\s*=\s*\?/i.test(q)) return this.repTodo();
+      this.repMarcar('d|' + a[1] + '|' + a[2]);
+    } else if (t === 'users') {
+      if (op === 'u' && /^\s*UPDATE\s+users\s+SET\s+last_login\b/i.test(q)) return;   /* la última entrada de cada uno no se copia */
+      this.repMarcar('u|');
+    } else if (t === 'contratos') this.repMarcar('k|' + (op === 'i' ? a[1] : a[a.length - 1]));
+    else if (t === 'contratos_log') { if (op === 'i') this.repMarcar('l|' + a[1]); }
+    else if (t === 'meta') { const x = /contrato_tpl|comodato_modelos/.exec(q); if (x && op !== 'd') this.repMarcar('t|' + x[0]); }
+  }
+  repMarcar(k) {
+    if (this.repMute || !this.repVig) return;
+    this.repSeqN = Math.max(Date.now(), (this.repSeqN || 0) + 1);   /* siempre creciente: así lo que cambió mientras se mandaba no se confunde con lo ya mandado */
+    this.sql.exec('INSERT OR REPLACE INTO repcola(k,ts) VALUES(?,?)', k, this.repSeqN);
+    if (!this.repPend) { this.repPend = true; this.pedirAlarma(this.repDeb); }
+  }
+  /* algo cambió que no se puede anotar de a poco (se restauró una copia): se manda todo */
+  repTodo() {
+    if (!this.repVig) return;
+    this.sql.exec('DELETE FROM repcola');
+    this.rep.full = true; this.rep.prox = 0;
+    this.repGuardar();
+    this.repPend = true; this.pedirAlarma(this.repDeb);
+  }
+  /* pone la alarma para cuando toca el próximo envío (según lo más viejo que haya en la cola y el último fallo) */
+  repAgendar() {
+    if (!this.repVig) return;
+    const c = this.q1('SELECT COUNT(*) n, MIN(ts) m FROM repcola');
+    if (!c.n && !this.rep.full) return;
+    const t = Math.max(this.rep.full ? 0 : c.m + this.repDeb, this.rep.prox || 0);
+    this.repPend = true;
+    this.pedirAlarma(Math.max(1000, t - Date.now()));
+  }
+  /* una sola cosa a la vez hablando con el otro servidor */
+  async repExcl(fn) {
+    while (this.repBusy) { try { await this.repBusy; } catch (e) { /* el que estaba terminó mal; sigue el próximo */ } }
+    const p = fn();
+    this.repBusy = p;
+    try { return await p; } finally { if (this.repBusy === p) this.repBusy = null; }
+  }
+  async repTick() {
+    if (!this.repVig) return;
+    this.repPend = false;
+    const c = this.q1('SELECT COUNT(*) n, MIN(ts) m FROM repcola');
+    if (!c.n && !this.rep.full) return;
+    const t = Math.max(this.rep.full ? 0 : c.m + this.repDeb, this.rep.prox || 0);
+    if (t > Date.now() + 500) { this.repAgendar(); return; }
+    try {
+      await this.repExcl(async () => { if (this.rep.full) await this.repEnviarCompleto(); await this.repEnviarCola(); });
+      if (this.rep.fallas || this.rep.prox || this.repErr) { this.rep.fallas = 0; this.rep.prox = 0; this.repErr = null; if (this.repVig) this.repGuardar(); }
+    } catch (e) {
+      if (this.repVig) {
+        this.rep.fallas = (this.rep.fallas || 0) + 1;
+        this.rep.prox = Date.now() + Math.min(REP_ESPERA_MAX, this.repBack * 2 ** Math.min(this.rep.fallas, 7));
+        this.repErr = { ts: Date.now(), msg: String((e && e.message) || e).slice(0, 200) };
+        this.repGuardar();
+      }
+    }
+    this.repAgendar();
+  }
+  async repLlamar(path, cuerpo, metodo, ms) {
+    if (this.miHost && new URL(this.repCfg.url).host === this.miHost) throw new Error('REPLICA_URL apunta a este mismo servidor: tiene que ser la dirección del otro.');
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms || 25000);
+    try {
+      const r = await fetch(this.repCfg.url + path, { method: metodo || 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json', 'x-replica-key': this.repCfg.key, 'user-agent': 'YapurReplica/1' }, body: cuerpo == null ? undefined : typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
+      let j = null; try { j = await r.json(); } catch (e) { j = null; }
+      return { status: r.status, j };
+    } catch (e) {
+      throw new Error('No se pudo comunicar con el otro servidor' + (e && e.name === 'AbortError' ? ' (tardó demasiado en responder)' : ''));
+    } finally { clearTimeout(tm); }
+  }
+  /* qué hacer con lo que contestó el otro servidor: 'ok', 'completo' (pide la copia completa) o un error */
+  repResp(r) {
+    const j = r.j || {};
+    if (r.status === 200 && j.ok) return j.resync ? 'completo' : 'ok';
+    if (r.status === 409 && j.viejo) {   /* el otro ya es de una época más nueva: este quedó atrás y pasa a espera */
+      this.sql.exec('DELETE FROM repcola');
+      this.repRol('espera', Number(j.epoca) || this.rep.epoca, { full: false, ini: false, prox: 0, fallas: 0 });
+      throw new Error('El otro servidor pasó a ser el activo: este quedó en espera.');
+    }
+    if (r.status === 409 && j.necesitaCompleto) return 'completo';
+    if (r.status === 403) throw new Error('La clave de respaldo (REPLICA_KEY) no es la misma en los dos servidores.');
+    throw new Error((j && j.error) || 'El otro servidor contestó con el error ' + r.status + '.');
+  }
+  /* arma un envío con lo anotado en la cola */
+  repArmar(items) {
+    const o = {}, usados = [];
+    let bytes = 0;
+    for (const it of items) {
+      const [t, a, b] = it.k.split('|');
+      if (t === 'd') {
+        const r = this.q1('SELECT data,upd FROM docs WHERE coll=? AND id=?', a, b);
+        if (r) { (o.docs || (o.docs = [])).push({ c: a, i: b, d: r.data, u: r.upd }); bytes += r.data.length; } else (o.borrar || (o.borrar = [])).push([a, b]);
+      } else if (t === 'u') {
+        if (!o.users) o.users = this.q('SELECT id,usuario,nombre,role,tel,permisos,activo,salt,hash,created FROM users');
+      } else if (t === 'k') {
+        const r = this.q1('SELECT * FROM contratos WHERE id=?', a);
+        if (r) { (o.contratos || (o.contratos = [])).push(r); bytes += (r.firma || '').length + (r.texto || '').length + 2000; }
+      } else if (t === 'l') {
+        const r = this.q1('SELECT * FROM contratos_log WHERE id=?', a);
+        if (r) (o.clog || (o.clog = [])).push(r);
+      } else if (t === 't' && (a === 'contrato_tpl' || a === 'comodato_modelos')) {
+        const r = this.q1('SELECT v FROM meta WHERE k=?', a);
+        if (r) (o.meta || (o.meta = {}))[a] = r.v;
+      }
+      usados.push(it);
+      if (bytes > REP_BYTES) break;
+    }
+    return { cuerpo: o, usados };
+  }
+  repCuentas() {
+    return { docs: this.q1('SELECT COUNT(*) n FROM docs').n, users: this.q1('SELECT COUNT(*) n FROM users').n, contratos: this.q1('SELECT COUNT(*) n FROM contratos').n, clog: this.q1('SELECT COUNT(*) n FROM contratos_log').n };
+  }
+  /* manda toda la cola, de a lotes */
+  async repEnviarCola() {
+    for (let vuelta = 0; vuelta < 12; vuelta++) {
+      if (!this.repVig && !this.repEntregando) return;
+      const items = this.q('SELECT k,ts FROM repcola ORDER BY ts LIMIT ?', REP_LOTE);
+      if (!items.length) return;
+      const { cuerpo, usados } = this.repArmar(items);
+      const ultimo = usados.length === items.length && items.length < REP_LOTE;
+      const body = Object.assign({ epoca: this.rep.epoca }, cuerpo);
+      if (ultimo && Date.now() - (this.rep.ver || 0) > REP_VERIF_MS) body.resumen = this.repCuentas();
+      const res = this.repResp(await this.repLlamar('/api/replica/aplicar', body));
+      if (res === 'completo') { this.rep.full = true; this.repGuardar(); }   /* se anota antes de sacar lo mandado de la cola: si algo falla, la copia completa queda pendiente */
+      if (body.resumen) this.rep.ver = Date.now();
+      this.tx(() => { for (const it of usados) this.sql.exec('DELETE FROM repcola WHERE k=? AND ts<=?', it.k, it.ts); });
+      this.repOk = Date.now();
+      if (res === 'completo') await this.repEnviarCompleto();
+      else if (body.resumen) this.repGuardar();
+    }
+  }
+  /* manda la copia completa (la primera vez, después de restaurar, al volver de un traspaso de emergencia o si las cantidades no coinciden) */
+  async repEnviarCompleto() {
+    const corte = Math.max(Date.now(), (this.repSeqN || 0) + 1);
+    this.repSeqN = corte;   /* lo que cambie desde ahora lleva una marca mayor y no se pierde al limpiar la cola */
+    const cuerpo = '{"epoca":' + this.rep.epoca + ',"completo":true,"copia":' + this.exportJSON() + '}';
+    const r = await this.repLlamar('/api/replica/aplicar', cuerpo, 'POST', 90000);
+    if (r.status === 200 && r.j && r.j.ok) {
+      this.sql.exec('DELETE FROM repcola WHERE ts<=?', corte);
+      this.rep.full = false; this.rep.ver = Date.now();
+      this.repOk = Date.now();
+      this.repGuardar();
+      return;
+    }
+    this.repResp(r);
+    throw new Error('El otro servidor no aceptó la copia completa.');
+  }
+  /* el otro servidor es de verdad el nuestro: clave correcta (se compara en tiempo constante y los intentos fallidos se frenan) */
+  repAuth(request) {
+    const key = 'rep|' + this.clientIp(request);
+    if (this.repCfg && safeEq(request.headers.get('x-replica-key') || '', this.repCfg.key)) return;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos.', 'resource_exhausted');
+    this.addFail(key, 5);
+    throw httpErr(403, 'Clave de respaldo incorrecta.', 'permission_denied');
+  }
+  repPing() {
+    const r = this.q1("SELECT v FROM meta WHERE k='repin'");
+    let rec = null; try { rec = r ? JSON.parse(r.v) : null; } catch (e) { rec = null; }
+    return { ok: true, rol: this.rep.rol, epoca: this.rep.epoca, ini: this.rep.ini, recibido: rec && rec.ts || null, cuentas: this.repCuentas(), v: VERSION };
+  }
+  /* ----- recibir lo que manda el servidor activo ----- */
+  repUsuarios(lista) {
+    const ult = new Map(this.q('SELECT id,last_login FROM users').map(r => [r.id, r.last_login]));
+    this.sql.exec('DELETE FROM users');
+    for (const u of lista) {
+      if (!isPlain(u) || typeof u.id !== 'string' || !USER_RE.test(String(u.usuario || '')) || !ROLES.includes(u.role)) continue;
+      const permisos = typeof u.permisos === 'string' ? u.permisos : isPlain(u.permisos) ? JSON.stringify(u.permisos) : null;
+      this.sql.exec('INSERT INTO users(id,usuario,nombre,role,tel,permisos,activo,salt,hash,created,last_login) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+        u.id, u.usuario, String(u.nombre || u.usuario), u.role, String(u.tel || ''), permisos, u.activo === 0 || u.activo === false ? 0 : 1, u.salt || null, u.hash || null, Number(u.created) || Date.now(), ult.get(u.id) || null);
+    }
+  }
+  repContrato(r) {
+    const t = v => (typeof v === 'string' ? v : '');
+    if (!isPlain(r) || !/^k[0-9a-f]{16}$/.test(t(r.id)) || !Number.isInteger(r.num) || !t(r.cid) || !t(r.estado) || !t(r.motivo) || !t(r.titular) || !t(r.equipos) || !t(r.texto) || !t(r.firma) || !t(r.hash) || !Number.isFinite(r.ts)) return;
+    this.sql.exec('INSERT OR REPLACE INTO contratos(id,num,cid,estado,motivo,prev,prueba,tver,titular,equipos,eq,texto,firma,aclar,ts,por,pornombre,ip,ua,hash,estado_prev) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      r.id, r.num, r.cid, r.estado, r.motivo, r.prev ? t(r.prev) : null, r.prueba ? 1 : 0, Number.isInteger(r.tver) ? r.tver : null, r.titular, r.equipos, t(r.eq), r.texto, r.firma, t(r.aclar), r.ts, r.por ? t(r.por) : null, t(r.pornombre), t(r.ip), t(r.ua), r.hash, r.estado_prev ? t(r.estado_prev) : null);
+  }
+  repLog(l) {
+    const t = v => (typeof v === 'string' ? v : '');
+    if (!isPlain(l) || !/^l[0-9a-f]{16}$/.test(t(l.id)) || !/^k[0-9a-f]{16}$/.test(t(l.cto)) || !Number.isFinite(l.ts) || !t(l.acc)) return;
+    this.sql.exec('INSERT OR REPLACE INTO contratos_log(id,cto,ts,uid,uname,acc,det) VALUES(?,?,?,?,?,?,?)', l.id, l.cto, l.ts, l.uid ? t(l.uid) : null, t(l.uname).slice(0, 60), t(l.acc).slice(0, 30), l.det ? t(l.det).slice(0, 300) : null);
+  }
+  /* aplica un envío de cambios (lo anotado en la cola del activo) */
+  repAplicar(b) {
+    const cambios = [];
+    this.repMute = true;
+    try {
+      this.tx(() => {
+        for (const d of Array.isArray(b.docs) ? b.docs : []) {
+          if (!isPlain(d) || !COLS.has(d.c) || !ID_RE.test(String(d.i)) || typeof d.d !== 'string') continue;
+          this.sql.exec('INSERT OR REPLACE INTO docs(coll,id,data,upd) VALUES(?,?,?,?)', d.c, d.i, d.d, Number(d.u) || Date.now());
+          cambios.push([d.c, d.i, d.d]);
+        }
+        for (const x of Array.isArray(b.borrar) ? b.borrar : []) {
+          if (!Array.isArray(x) || !COLS.has(x[0]) || !ID_RE.test(String(x[1]))) continue;
+          this.sql.exec('DELETE FROM docs WHERE coll=? AND id=?', x[0], x[1]);
+          cambios.push([x[0], x[1], null]);
+        }
+        if (Array.isArray(b.users)) this.repUsuarios(b.users);
+        for (const r of Array.isArray(b.contratos) ? b.contratos : []) this.repContrato(r);
+        for (const l of Array.isArray(b.clog) ? b.clog : []) this.repLog(l);
+        if (isPlain(b.meta)) for (const k of ['contrato_tpl', 'comodato_modelos']) if (typeof b.meta[k] === 'string') this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, b.meta[k]);
+        this.SEQ++;
+      });
+    } finally { this.repMute = false; }
+    if (Array.isArray(b.users)) {
+      this.loadUsers();
+      for (const s of this.conexiones()) { const u = this.USERS.get(s.uid); if (!u || !u.activo) { this.sse(s, 'kick', {}); this.endStream(s); } else this.sse(s, 'me', meOf(u)); }
+    }
+    /* las pantallas abiertas en este servidor (en espera) ven los cambios en vivo */
+    if (cambios.length && this.conexiones().length) {
+      for (const [c, i, d] of cambios) {
+        let data = {}; if (d != null) { try { data = JSON.parse(d); } catch (e) { continue; } }
+        this.broadcastDoc(c, i, d == null ? 'delete' : 'set', data, ++this.SEQ);
+      }
+    }
+  }
+  /* reemplaza todo lo que se copia por una copia completa del activo (antes se guarda una copia de lo que había, por si hiciera falta volver) */
+  async repAplicarCompleto(copia) {
+    if (!isPlain(copia) || !Array.isArray(copia.docs)) throw httpErr(400, 'La copia no es válida.');
+    if (this.q1('SELECT 1 x FROM docs LIMIT 1') || this.userCount() > 0) await this.snapshot('antes-de-restaurar-' + Date.now());
+    this.repMute = true;
+    try {
+      this.tx(() => {
+        this.sql.exec('DELETE FROM docs');
+        for (const d of copia.docs) {
+          if (!d || !COLS.has(d.coll) || !ID_RE.test(String(d.id)) || !isPlain(d.data)) continue;
+          this.sql.exec('INSERT OR REPLACE INTO docs(coll,id,data,upd) VALUES(?,?,?,?)', d.coll, String(d.id), JSON.stringify(d.data), Date.now());
+        }
+        this.repUsuarios(Array.isArray(copia.users) ? copia.users : []);
+        this.sql.exec('DELETE FROM contratos');
+        this.sql.exec('DELETE FROM contratos_log');
+        for (const r of Array.isArray(copia.contratos) ? copia.contratos : []) this.repContrato(r);
+        for (const l of Array.isArray(copia.contratos_log) ? copia.contratos_log : []) this.repLog(l);
+        for (const [k, v] of [['contrato_tpl', copia.contrato_tpl], ['comodato_modelos', copia.comodato_modelos]]) {
+          if (isPlain(v)) this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, JSON.stringify(v)); else this.sql.exec('DELETE FROM meta WHERE k=?', k);
+        }
+        this.SEQ++;
+      });
+    } finally { this.repMute = false; }
+    this.loadUsers();
+    for (const s of this.conexiones()) this.endStream(s);   /* las pantallas abiertas vuelven a conectarse y a bajar todo */
+  }
+  /* lo que el otro servidor manda a /api/replica/aplicar */
+  async repRecibir(b) {
+    const su = Number(b.epoca) || 0, mi = this.rep.epoca, rol = this.rep.rol;
+    const resp = (status, o) => send(status, Object.assign({ epoca: this.rep.epoca, rol: this.rep.rol }, o));
+    if (su < mi) return resp(409, { error: 'Este servidor tiene una época más nueva: quien escribe quedó atrás.', code: 'failed_precondition', viejo: true });
+    if (rol === 'activo' && su === mi) return resp(409, { error: 'Los dos servidores figuran como activos. El de respaldo tiene que estar vacío (sin haber cargado nada) para recibir la copia.', code: 'failed_precondition', conflicto: true });
+    const completo = b.completo === true;
+    if (!completo && (su > mi || !this.rep.ini)) return resp(409, { error: 'Falta la copia completa.', code: 'failed_precondition', necesitaCompleto: true });
+    if (completo) {
+      await this.repAplicarCompleto(b.copia);
+      this.sql.exec('DELETE FROM repcola');
+      this.repRol('espera', su, { ini: true, full: false, prox: 0, fallas: 0 });
+    } else this.repAplicar(b);
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('repin',?)", JSON.stringify({ ts: Date.now() }));
+    let resync = false;
+    if (isPlain(b.resumen)) { const c = this.repCuentas(); resync = ['docs', 'users', 'contratos', 'clog'].some(k => Number(b.resumen[k]) !== c[k]); }
+    return resp(200, { ok: true, resync });
+  }
+  /* el otro servidor (en espera) quiere pasar a ser el activo: se le manda lo que falte y este queda en espera */
+  async repEntregar(b) {
+    if (this.rep.rol !== 'activo') return send(409, { error: 'Este servidor ya está en espera.', code: 'failed_precondition', rol: this.rep.rol, epoca: this.rep.epoca });
+    if (this.repEntregando) throw httpErr(409, 'Ya se está haciendo el traspaso.', 'failed_precondition');
+    this.repEntregando = true;
+    try {
+      await this.repExcl(async () => {
+        for (let i = 0; i < 3; i++) {
+          if (this.rep.full) await this.repEnviarCompleto();
+          await this.repEnviarCola();
+          if (!this.q1('SELECT 1 x FROM repcola LIMIT 1') && !this.rep.full) return;
+        }
+        throw new Error('No se pudo terminar de mandar los últimos cambios.');
+      });
+    } catch (e) {
+      this.repEntregando = false;
+      throw httpErr(502, 'El servidor activo no pudo mandar sus últimos cambios: ' + String((e && e.message) || e), 'unavailable');
+    }
+    const epoca = Math.max(this.rep.epoca, Number(b.epoca) || 0) + 1;
+    this.sql.exec('DELETE FROM repcola');
+    this.repRol('espera', epoca, { ini: true, full: false, prox: 0, fallas: 0 });
+    this.repEntregando = false;
+    return send(200, { ok: true, epoca });
+  }
+  /* el administrador pide que ESTE servidor pase a ser el activo */
+  async repActivar(forzar) {
+    if (this.rep.rol === 'activo') throw httpErr(409, 'Este servidor ya es el que está trabajando.', 'failed_precondition');
+    if (!this.rep.ini) throw httpErr(409, 'Este servidor todavía no recibió la copia del otro. Esperá a que termine de copiarse.', 'failed_precondition');
+    let r = null, motivo = '';
+    try { r = await this.repLlamar('/api/replica/entregar', { epoca: this.rep.epoca }, 'POST', 40000); } catch (e) { motivo = String((e && e.message) || e); }
+    if (r && r.status === 200 && r.j && r.j.ok) {   /* traspaso ordenado: el otro mandó todo lo que tenía y quedó en espera */
+      this.sql.exec('DELETE FROM repcola');
+      this.repRol('activo', Number(r.j.epoca) || this.rep.epoca + 1, { full: false, prox: 0, fallas: 0 });
+      this.repErr = null;
+      return { ok: true, modo: 'ordenado', epoca: this.rep.epoca };
+    }
+    if (r && r.status === 409 && r.j && r.j.rol === 'espera') {   /* el otro también estaba en espera: no hay ninguno trabajando, se activa este */
+      this.repRol('activo', Math.max(this.rep.epoca, Number(r.j.epoca) || 0) + 1, { full: true, prox: 0, fallas: 0 });
+      this.repAgendar();
+      return { ok: true, modo: 'sin_activo', epoca: this.rep.epoca };
+    }
+    if (r && r.status === 403) throw httpErr(409, 'La clave de respaldo no es la misma en los dos servidores.', 'failed_precondition');
+    if (r && r.status === 502 && !forzar) throw httpErr(409, (r.j && r.j.error) || 'El otro servidor no pudo mandar sus últimos cambios.', 'par_no_responde');
+    if (!forzar) throw httpErr(409, 'No se pudo hablar con el otro servidor' + (motivo ? ' (' + motivo + ')' : r ? ' (contestó con el error ' + r.status + ')' : '') + '. Si dejó de funcionar (por ejemplo llegó al tope del día), se puede activar este igual: se pierden, como mucho, los últimos segundos de cambios que no alcanzaron a copiarse.', 'par_no_responde');
+    this.repRol('activo', this.rep.epoca + 1, { full: true, prox: 0, fallas: 0 });   /* emergencia: cuando el otro vuelva, recibe la copia completa y queda en espera */
+    this.repAgendar();
+    return { ok: true, modo: 'emergencia', epoca: this.rep.epoca };
+  }
+  async repEstado() {
+    const c = this.repCfg;
+    const o = { configurado: !!c, tieneUrl: !!repUrl(this.env), tieneClave: String(this.env.REPLICA_KEY || '').trim().length >= 20 };
+    if (!c) return o;
+    const cola = this.q1('SELECT COUNT(*) n, MIN(ts) m FROM repcola');
+    Object.assign(o, { otro: c.url, rol: this.rep.rol, epoca: this.rep.epoca, ini: this.rep.ini, pendientes: cola.n, masViejo: cola.m || null, completoPendiente: !!this.rep.full, fallas: this.rep.fallas || 0, error: this.repErr, ultimoEnvio: this.repOk || null, proximo: this.rep.prox || null });
+    try {
+      const r = await this.repLlamar('/api/replica/ping', null, 'GET', 8000);
+      o.par = r.status === 200 && r.j ? r.j : { error: r.status === 403 ? 'La clave no es la misma en los dos servidores.' : (r.j && r.j.error) || 'Contestó con el error ' + r.status + '.' };
+    } catch (e) { o.par = { error: String((e && e.message) || e) }; }
+    return o;
+  }
+  /* rutas /api/replica/* */
+  async replicaApi(request, p, m, raw) {
+    if (!this.repCfg) throw httpErr(404, 'No existe.');
+    if (p === '/api/replica/estado' && m === 'GET') { await this.needAdmin(request); const o = await this.repEstado(); o.esMismo = new URL(this.repCfg.url).host === new URL(request.url).host; return send(200, o); }
+    if (p === '/api/replica/activar' && m === 'POST') { await this.needAdmin(request); const b = await readBody(raw, 1e4); return send(200, await this.repActivar(b.forzar === true)); }
+    if (p === '/api/replica/sincronizar' && m === 'POST') {
+      await this.needAdmin(request);
+      if (this.rep.rol !== 'activo') throw httpErr(409, 'Solo el servidor activo manda la copia.', 'failed_precondition');
+      try { await this.repExcl(async () => { await this.repEnviarCompleto(); await this.repEnviarCola(); }); } catch (e) { throw httpErr(502, String((e && e.message) || e), 'unavailable'); }
+      return send(200, { ok: true });
+    }
+    this.repAuth(request);
+    if (p === '/api/replica/ping' && m === 'GET') return send(200, this.repPing());
+    if (p === '/api/replica/aplicar' && m === 'POST') return await this.repRecibir(await readBody(raw, 26e6));
+    if (p === '/api/replica/entregar' && m === 'POST') return await this.repEntregar(await readBody(raw, 1e4));
+    throw httpErr(404, 'No existe.');
+  }
+
   /* ================= HTTP ================= */
   async fetch(request) {
     try {
@@ -2409,9 +2828,19 @@ export class YapurDB extends DurableObject {
     const u = this.uso;
     if (!u || !u.sucio) return;
     if (Date.now() - u.flush >= USO_FLUSH_MS) this.usoGuardar();
-    else if (!this.usoAlarma) { this.usoAlarma = true; try { this.ctx.storage.setAlarm(Date.now() + USO_FLUSH_MS).catch(() => { this.usoAlarma = false; }); } catch (e) { this.usoAlarma = false; } }
+    else if (!this.usoAlarma) { this.usoAlarma = true; this.pedirAlarma(USO_FLUSH_MS, () => { this.usoAlarma = false; }); }
   }
-  async alarm() { this.usoAlarma = false; this.usoFilas('(alarma)'); this.usoGuardar(); }
+  /* cada objeto tiene una sola alarma: la usan el anotado del consumo y el envío al respaldo. Se pide la más cercana; al sonar, cada tarea revisa si le toca. */
+  pedirAlarma(ms, alFallar) {
+    const t = Date.now() + ms;
+    if (this.alarmT > Date.now() && this.alarmT <= t) return;
+    this.alarmT = t;
+    try { this.ctx.storage.setAlarm(t).catch(() => { this.alarmT = 0; if (alFallar) alFallar(); }); } catch (e) { this.alarmT = 0; if (alFallar) alFallar(); }
+  }
+  async alarm() {
+    this.alarmT = 0; this.usoAlarma = false; this.usoFilas('(alarma)'); this.usoGuardar();
+    if (this.repCfg) { try { await this.repTick(); } catch (e) { console.error('Respaldo:', e && e.message); } }
+  }
   usoGuardar() {
     const u = this.uso;
     if (!u || !u.sucio) return;
@@ -2433,8 +2862,16 @@ export class YapurDB extends DurableObject {
 
   async api(request, url, raw) {
     const m = request.method, p = url.pathname;
+    this.miHost = url.host;
     this.usoNota(m, p);
-    if (p === '/api/status' && m === 'GET') return send(200, { ok: true, v: VERSION, needsSetup: this.userCount() === 0, nube: 'cloudflare' });
+    if (p === '/api/status' && m === 'GET') {
+      const vacio = this.userCount() === 0, o = { ok: true, v: VERSION, needsSetup: vacio && !this.repEspera(), nube: 'cloudflare' };
+      if (this.repCfg) o.respaldo = { rol: this.rep.rol, vacio: vacio && this.rep.rol === 'espera' };
+      return send(200, o);
+    }
+    /* un servidor en espera (o pasándole el trabajo al otro) solo deja mirar: no acepta cambios, ni siquiera el alta inicial */
+    if (this.repCfg && m !== 'GET' && m !== 'HEAD' && this.repEspera() && !REP_OK_ESPERA.test(p)) throw httpErr(409, this.repEntregando ? 'El servidor le está pasando el trabajo al otro. Esperá unos segundos y probá de nuevo.' : 'Este es el servidor de respaldo y está en espera: solo se puede mirar. Para trabajar acá, un administrador tiene que activarlo desde Ajustes.', 'respaldo_espera');
+    if (p.startsWith('/api/replica/')) return await this.replicaApi(request, p, m, raw);
 
     if (p === '/api/setup' && m === 'POST') {
       if (this.userCount() > 0) throw httpErr(403, 'El sistema ya está configurado.');
@@ -2485,7 +2922,7 @@ export class YapurDB extends DurableObject {
       if (a) this.sql.exec('DELETE FROM sessions WHERE th=?', a.th);
       return send(200, { ok: true });
     }
-    if (p === '/api/me' && m === 'GET') return send(200, { me: meOf((await this.needAuth(request)).user) });
+    if (p === '/api/me' && m === 'GET') return send(200, { me: meOf((await this.needAuth(request)).user), respaldo: this.repCfg ? { rol: this.rep.rol, url: this.repCfg.url } : undefined });
     if (p === '/api/me/clave' && m === 'POST') {
       const a = await this.needAuth(request), b = await readBody(raw, 1e4);
       if (!(await checkPw(String(b.actual || ''), a.user))) throw httpErr(403, 'La clave actual no es correcta.');
