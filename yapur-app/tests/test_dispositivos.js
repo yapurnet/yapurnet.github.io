@@ -85,6 +85,19 @@ const login = (u, c, did, ua) => call('POST', '/api/login', { usuario: u, clave:
     const p1v2 = r.j.lista.find(x => x.id === p1.id);
     t('Dispositivos ya muestra la versión nueva, sin que haya tenido que volver a entrar', p1v2 && p1v2.label === 'SM-A135M · Android 13 · App Yapur 2.16', p1v2);
 
+    /* el servicio de ubicación del APK pide con el mismo acceso pero con el User-Agent de Android a secas (sin «YapurApp/»): no tiene que pisar
+       el de la app, ni dejar la versión del APK en blanco en Dispositivos, ni escribir en la base en cada pedido (se alternan los dos todo el día) */
+    const UA_DALVIK = 'Dalvik/2.1.0 (Linux; U; Android 13; SM-A135M Build/TP1A.220624.014)';
+    for (let i = 0; i < 3; i++) {
+      await call('GET', '/api/me', undefined, T1, { 'x-did': D1, 'user-agent': UA_DALVIK });
+      await call('GET', '/api/me', undefined, T1, { 'x-did': D1, 'user-agent': UA_APK_216 });
+    }
+    await call('GET', '/api/me', undefined, T1, { 'x-did': D1, 'user-agent': UA_DALVIK });
+    r = await call('GET', '/api/dispositivos', undefined, A);
+    const p1v3 = r.j.lista.find(x => x.id === p1.id);
+    t('un pedido del servicio de ubicación (User-Agent de Android) no pisa la versión del APK', p1v3 && p1v3.label === 'SM-A135M · Android 13 · App Yapur 2.16' && p1v3.app === 'apk', p1v3);
+    await call('GET', '/api/me', undefined, T1, { 'x-did': D1, 'user-agent': UA_APK_216 });
+
     /* ---- otro equipo con la misma clave (alguien que la consiguió) ---- */
     r = await login('tec1', 'pedro1', D2, UA_WEB);
     t('con la clave del técnico desde otro equipo NO entra: queda pendiente', r.s === 403 && r.j.code === 'device_pending', r);
