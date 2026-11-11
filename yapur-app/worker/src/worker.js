@@ -6,6 +6,7 @@
    - Copia automática diaria dentro de la misma base + descarga/restauración manual.
    La app web (carpeta public/) la sirve Cloudflare directamente; este código solo atiende /api/*. */
 import { DurableObject } from 'cloudflare:workers';
+import * as ARCA from './arca.js';
 
 const VERSION = '2.0.0';
 const enc = new TextEncoder();
@@ -246,6 +247,7 @@ function guard(u, p, coll, existing, patch, ctx) {
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
       if (!isPlain(nw)) return 'Formato inválido.';
+      if ('fe' in nw && !same(nw.fe, prev && prev.fe)) return 'La factura electrónica la emite el servidor con ARCA: no se puede cargar a mano.';
       if (!prev) {
         if (u.role !== 'admin' && !p.cobrar) {
           /* quien solo cobra en la calle: instalaciones, reinstalaciones, reclamos y otros, del día y por un monto válido (nunca mensualidades ni reconexiones) */
@@ -1012,7 +1014,7 @@ export class YapurDB extends DurableObject {
     if (coll === 'pagos') return canReadPagos(u, p) ? data : null;
     if (coll === 'ajustes') {
       if (id !== 'general') return u.role === 'admin' ? data : null;
-      const d = Object.assign({}, data, { perfiles: this.perfilesView(), waActivo: this.waActivo() });
+      const d = Object.assign({}, data, { perfiles: this.perfilesView(), waActivo: this.waActivo(), arcaListo: this.arcaVer().listo, arcaProd: this.arcaCfg().amb === 'prod' });
       if (!p.precios && Array.isArray(d.servicios)) d.servicios = d.servicios.map(s => { const c = Object.assign({}, s); delete c.precio; delete c.hist; return c; });
       return d;
     }
@@ -1097,7 +1099,7 @@ export class YapurDB extends DurableObject {
     this.tx(() => {
       const existing = this.readDoc(coll, id);
       if (coll === 'ajustes') {
-        data = Object.assign({}, data); delete data.perfiles; delete data.waActivo;
+        data = Object.assign({}, data); delete data.perfiles; delete data.waActivo; delete data.arcaListo; delete data.arcaProd;
         /* una pantalla desactualizada que guarda otros ajustes no tiene que borrar los precios fijos */
         if (op === 'set' && existing) for (const k of Object.values(PRECIO_KEYS)) if (!(k in data) && k in existing) data[k] = existing[k];
       }
@@ -1296,6 +1298,145 @@ export class YapurDB extends DurableObject {
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, JSON.stringify(d));
     this.sql.exec('DELETE FROM meta WHERE k LIKE ? AND k<>?', 'wa:%', k);   // solo queda el contador de hoy
     return true;
+  }
+  /* ===== Factura electrónica ARCA =====
+     YAPUR es responsable inscripto: Factura B (consumidor final) o A (a otro inscripto), con el IVA discriminado, y notas de crédito para deshacerlas.
+     Los datos del emisor (razón social, CUIT, domicilio, Ingresos Brutos) son los mismos que ya figuran en los recibos (Ajustes → Recibo).
+     La clave privada y el certificado quedan en la base del servidor (tabla meta), nunca salen en una respuesta ni se copian al respaldo. */
+  arcaCfg() { const r = this.q1("SELECT v FROM meta WHERE k='arca'"); try { return r ? JSON.parse(r.v) : {}; } catch (e) { return {}; } }
+  arcaGuardar(c) {
+    this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('arca',?)", JSON.stringify(c));
+    /* las pantallas abiertas se enteran de que ya se puede (o no) facturar */
+    this.SEQ++;
+    this.broadcastDoc('ajustes', 'general', 'set', this.readDoc('ajustes', 'general') || {}, this.SEQ);
+  }
+  arcaEmisor() {
+    const a = this.readDoc('ajustes', 'general') || {}, r = isPlain(a.recibo) ? a.recibo : {};
+    return { razon: String(r.razon || '').trim(), cuit: String(r.cuit || '').replace(/\D/g, ''), iibb: String(r.iibb || '').trim(), dom: String(r.dom || '').trim(), inicio: String(r.inicio || '').trim() };
+  }
+  arcaVer() {
+    const c = this.arcaCfg(), em = this.arcaEmisor();
+    return { emisor: em, pv: c.pv || null, amb: c.amb || 'homo', tieneClave: !!c.priv, tieneCert: !!c.cert, certHasta: c.certHasta || null, csr: c.csr || null, listo: !!(c.priv && c.cert && c.pv && em.cuit.length === 11), mock: !!this.env.ARCA_MOCK };
+  }
+  arcaConfig(b) {
+    const c = this.arcaCfg();
+    const pv = Number(b.pv), amb = b.amb === 'prod' ? 'prod' : 'homo';
+    if (!Number.isInteger(pv) || pv < 1 || pv > 99999) throw httpErr(400, 'El punto de venta tiene que ser un número (el que creaste en ARCA para web services).');
+    if (amb !== (c.amb || 'homo')) this.sql.exec("DELETE FROM meta WHERE k LIKE 'arca_tk:%'");
+    c.pv = pv; c.amb = amb;
+    this.arcaGuardar(c);
+    return this.arcaVer();
+  }
+  async arcaClave(b) {
+    const em = this.arcaEmisor(), c = this.arcaCfg();
+    if (em.cuit.length !== 11) throw httpErr(400, 'Primero cargá el CUIT en Ajustes → Recibo (11 números).');
+    if (c.priv && !b.reemplazar) throw httpErr(409, 'Ya hay una clave creada. Si la cambiás, el certificado actual deja de servir y tenés que pedir uno nuevo en ARCA.');
+    const k = await ARCA.crearClave(em.cuit, em.razon || 'YAPUR', 'yapur' + (c.amb === 'prod' ? 'prod' : 'homo'));
+    c.priv = k.priv; c.pub = k.pub; c.csr = k.csr; delete c.cert; delete c.certHasta;
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'arca_tk:%'");
+    this.arcaGuardar(c);
+    return this.arcaVer();
+  }
+  arcaCert(b) {
+    const c = this.arcaCfg();
+    if (!c.priv) throw httpErr(400, 'Primero tenés que generar el pedido de certificado.');
+    const pem = String(b.pem || '').trim();
+    if (pem.length > 20000) throw httpErr(400, 'El certificado es demasiado largo.');
+    let ci; try { ci = ARCA.leerCert(pem); } catch (e) { throw httpErr(400, e.message); }
+    if (btoa(String.fromCharCode(...ci.spki)) !== c.pub) throw httpErr(400, 'Este certificado no corresponde al pedido que generó esta aplicación. Usá el que ARCA te devolvió para ese pedido (o generá un pedido nuevo).');
+    c.cert = pem; c.certHasta = ci.hasta;
+    this.sql.exec("DELETE FROM meta WHERE k LIKE 'arca_tk:%'");
+    this.arcaGuardar(c);
+    return this.arcaVer();
+  }
+  arcaUrls(c) { return ARCA.urlsDe(c.amb, String(this.env.ARCA_MOCK || '').trim()); }
+  /* permiso de acceso de ARCA (vale 12 h): se guarda y se reutiliza; ARCA no deja pedir otro mientras éste sirva */
+  async arcaTicket(c) {
+    const k = 'arca_tk:' + (c.amb || 'homo'), r = this.q1('SELECT v FROM meta WHERE k=?', k);
+    if (r) { try { const t = JSON.parse(r.v); if (t.vence > Date.now() + 10 * 60e3) return t; } catch (e) { /* se pide de nuevo */ } }
+    if (!c.priv || !c.cert) throw httpErr(400, 'Falta cargar el certificado de ARCA en Ajustes.');
+    const t = await ARCA.loginWsaa(this.arcaUrls(c), c.priv, ARCA.leerCert(c.cert), 'wsfe');
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', k, JSON.stringify(t));
+    return t;
+  }
+  async arcaProbar() {
+    const c = this.arcaCfg(), em = this.arcaEmisor();
+    if (em.cuit.length !== 11) throw httpErr(400, 'Falta el CUIT en Ajustes → Recibo.');
+    const urls = this.arcaUrls(c), t = await this.arcaTicket(c), out = { ambiente: c.amb || 'homo' };
+    try { out.puntos = await ARCA.puntosVenta(urls, t, em.cuit); } catch (e) { out.puntosError = e.message; }
+    if (c.pv) { try { out.ultimaB = await ARCA.ultimoNro(urls, t, em.cuit, c.pv, 6); out.ultimaA = await ARCA.ultimoNro(urls, t, em.cuit, c.pv, 1); } catch (e) { out.pvError = e.message; } }
+    return out;
+  }
+  /* los cobros de un recibo (mismo recibo dentro de un documento de pagos) */
+  arcaRecibo(docId, recibo) {
+    const d = this.readDoc('pagos', docId);
+    if (!d || !isPlain(d.items)) throw httpErr(404, 'No encontré el recibo.');
+    const ks = Object.keys(d.items).filter(k => isPlain(d.items[k]) && (d.items[k].recibo || k) === recibo);
+    if (!ks.length) throw httpErr(404, 'No encontré el recibo.');
+    return { d, ks, its: ks.map(k => d.items[k]) };
+  }
+  arcaMarcar(docId, ks, fe) {
+    let seq = 0;
+    this.tx(() => {
+      const d = this.readDoc('pagos', docId);
+      if (!d || !isPlain(d.items)) return;
+      for (const k of ks) if (isPlain(d.items[k])) d.items[k].fe = fe;
+      this.putDoc('pagos', docId, JSON.stringify(d));
+      this.SEQ++; seq = this.SEQ;
+    });
+    if (!seq) return;
+    const patch = { items: {} };
+    for (const k of ks) patch.items[k] = { fe };
+    this.broadcastDoc('pagos', docId, 'merge', patch, seq);
+  }
+  async arcaEmitir(u, b) {
+    const p = effPerms(u);
+    if (u.role !== 'admin' && !p.cobrar && !p.caja) throw httpErr(403, 'Tu usuario no puede emitir facturas.', 'permission_denied');
+    const c = this.arcaCfg(), em = this.arcaEmisor();
+    if (!c.priv || !c.cert || !c.pv) throw httpErr(400, 'La factura electrónica todavía no está configurada (Ajustes → Factura ARCA).');
+    if (em.cuit.length !== 11) throw httpErr(400, 'Falta el CUIT en Ajustes → Recibo.');
+    const docId = String(b.doc || ''), recibo = String(b.recibo || '');
+    if (!ID_RE.test(docId) || !recibo || recibo.length > 60) throw httpErr(400, 'Datos inválidos.');
+    const nc = b.nc === true;
+    const { ks, its } = this.arcaRecibo(docId, recibo);
+    const vivos = its.filter(x => !x.anulado);
+    if (!nc) {
+      if (!vivos.length) throw httpErr(409, 'El recibo está anulado: no se puede facturar.');
+      if (its.some(x => isPlain(x.fe) && x.fe.cae)) throw httpErr(409, 'Este recibo ya tiene una factura emitida.');
+    } else if (!its.some(x => isPlain(x.fe) && x.fe.cae) || its.some(x => isPlain(x.fe) && x.fe.nc)) throw httpErr(409, 'Este recibo no tiene una factura para anular, o ya tiene su nota de crédito.');
+    const orig = nc ? its.find(x => isPlain(x.fe) && x.fe.cae).fe : null;
+    const base = nc ? its : vivos;
+    const total = Math.round(base.reduce((s, x) => s + (Number(x.monto) || 0), 0) * 100) / 100;
+    if (!(total > 0)) throw httpErr(400, 'El importe del recibo no es válido.');
+    if (this.arcaOcupado && Date.now() - this.arcaOcupado < 90e3) throw httpErr(409, 'Se está emitiendo otra factura. Esperá unos segundos y probá de nuevo.');
+    this.arcaOcupado = Date.now();
+    try {
+      let cli = {};
+      for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) { let d; try { d = JSON.parse(r.data); } catch (e) { continue; } if (d && isPlain(d.items) && isPlain(d.items[base[0].c])) { cli = d.items[base[0].c]; break; } }
+      /* una cuenta con varios servicios se factura a nombre de la cuenta principal */
+      if (cli.cuenta) for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) { let d; try { d = JSON.parse(r.data); } catch (e) { continue; } if (d && isPlain(d.items) && isPlain(d.items[cli.cuenta])) { cli = d.items[cli.cuenta]; break; } }
+      /* receptor: lo que se escribió, o el DNI / CUIT de la ficha, o consumidor final */
+      let docNro = String(b.docNro != null ? b.docNro : (cli.dni || '')).replace(/\D/g, ''), docTipo = 99, condIva = 5;
+      if (docNro.length === 11) docTipo = 80; else if (docNro.length >= 7 && docNro.length <= 8) docTipo = 96; else docNro = '0';
+      if (nc) { docTipo = orig.docTipo; docNro = String(orig.docNro); condIva = orig.condIva; }
+      else if (docTipo === 80) condIva = [1, 4, 6, 7].includes(Number(b.condIva)) ? Number(b.condIva) : 1;
+      const nombre = nc ? orig.nombre : String(b.nombre || cli.nombre || 'Consumidor final').trim().slice(0, 100);
+      const tipo = nc ? (orig.tipo === 1 ? 3 : 8) : (Number(b.tipo) === 1 && docTipo === 80 && [1, 6].includes(condIva) ? 1 : 6);
+      const hoy = arTime(Date.now()).fecha;
+      const mens = base.find(x => x.concepto === 'mensualidad' && /^\d{4}-\d{2}$/.test(x.per || ''));
+      const mes = mens ? mens.per : hoy.slice(0, 7);
+      const ult = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0)).getUTCDate();
+      const urls = this.arcaUrls(c), t = await this.arcaTicket(c);
+      const r = await ARCA.emitir(urls, t, em.cuit, { tipo, pv: c.pv, concepto: 2, docTipo, docNro, condIva, fecha: hoy, desde: mes + '-01', hasta: mes + '-' + String(ult).padStart(2, '0'), vto: hoy, total, asociado: nc ? { tipo: orig.tipo, pv: orig.pv, nro: orig.nro } : null });
+      const fe = { tipo, pv: c.pv, nro: r.nro, cae: r.cae, vto: r.vto, fecha: hoy, total: r.total, neto: r.neto, iva: r.iva, docTipo, docNro, condIva, nombre, cuit: em.cuit, amb: c.amb || 'homo', por: u.id, ts: Date.now() };
+      const out = nc ? Object.assign({}, orig, { nc: fe }) : fe;
+      this.arcaMarcar(docId, ks, out);
+      this.snapshotSoon();
+      return { ok: true, fe: out };
+    } catch (e) {
+      if (e && e.status) throw e;
+      throw httpErr(e && e.rechazo ? 422 : 502, (e && e.message) || 'No se pudo emitir la factura.');
+    } finally { this.arcaOcupado = 0; }
   }
   /* anota el estado del aviso en los cobros del recibo y se lo avisa a las pantallas abiertas */
   waMarcar(docId, ks, wa) {
@@ -3132,6 +3273,12 @@ export class YapurDB extends DurableObject {
     if (p === '/api/router/ping' && m === 'GET') return send(200, await this.routerPingPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
     if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
     if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
+    if (p === '/api/arca' && m === 'GET') { await this.needAdmin(request); return send(200, this.arcaVer()); }
+    if (p === '/api/arca' && m === 'PUT') { await this.needAdmin(request); return send(200, this.arcaConfig(readBody(raw, 2e3))); }
+    if (p === '/api/arca/clave' && m === 'POST') { await this.needAdmin(request); return send(200, await this.arcaClave(readBody(raw, 2e3))); }
+    if (p === '/api/arca/certificado' && m === 'POST') { await this.needAdmin(request); return send(200, this.arcaCert(readBody(raw, 3e4))); }
+    if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
+    if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
     if (p === '/api/uso' && m === 'GET') { await this.needAdmin(request); return send(200, this.usoVer()); }
     if (p === '/api/ping/armar' && m === 'POST') return send(200, this.pingArmar((await this.needAuth(request)).user));
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });

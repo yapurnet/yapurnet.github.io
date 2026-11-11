@@ -591,6 +591,13 @@ Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test
 - Los secretos de firma (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) son los mismos que ya usa FAVL; no hay que cargar nada nuevo.
 
 
+## Factura electrónica ARCA
+
+Opcional: los recibos siguen igual. Desde el recibo, «Emitir factura ARCA» (la oficina y el administrador) factura ese recibo completo: **Factura B** (consumidor final, con DNI o sin él) o **A** (a un CUIT, a elección), con el IVA del 21 % discriminado (el precio cobrado ya lo incluye). Sale con los datos de Ajustes → Recibo (razón social, CUIT, domicilio, Ingresos Brutos), con CAE y código QR, para imprimir/guardar como PDF o mandar por WhatsApp. Se anula con **nota de crédito** desde el mismo recibo. La factura queda guardada en cada pago del recibo (campo `fe`) y no se puede cargar ni cambiar a mano.
+Puesta en marcha (Ajustes → Factura electrónica ARCA, solo administrador): la app crea sola la clave privada y el pedido de certificado (CSR); se lo lleva a ARCA (Administración de Certificados Digitales), se autoriza el servicio `wsfe`, se crea un punto de venta «RECE para aplicativo y web services» y se pega acá el certificado. **No se usa ni se guarda la clave fiscal**: el certificado dura unos 2 años. Primero se prueba en el ambiente de **Pruebas** (facturas sin validez) y después se pasa a **Producción** (con su propio certificado y punto de venta).
+La clave y el certificado quedan solo en la base del servidor (no se replican al respaldo): si el respaldo toma el trabajo, ahí no se puede facturar hasta cargar el certificado.
+Probado con un ARCA simulado y OpenSSL (firma del pedido de acceso, CSR, QR con un lector real); **falta probarlo con el ambiente de pruebas real de ARCA**. Por seguridad, un pedido a ARCA no se repite solo: si no responde, se reintenta a mano.
+
 ## Historial del cliente
 
 En la ficha, «Historial del cliente» junta en una sola línea de tiempo (lo más nuevo arriba): alta, cortes, reconexiones, bajas, cambios de plan, pagos (los anulados se marcan), promesas de pago y órdenes (creadas y realizadas). Los pagos y promesas los ve quien ve cobranzas; el detalle del cambio de plan, quien ve planes.

@@ -1220,6 +1220,82 @@ const NET=(function(){
   };
 })();
 
+/* Código QR (modo bytes, corrección L o M, versiones 1 a 40). Lo usa la factura electrónica: ARCA exige el QR con los datos del comprobante.
+   Devuelve una matriz de módulos (true = negro). */
+const QR=(()=>{
+  const ECC={L:[1,[-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],[-1,1,1,1,1,1,2,2,2,2,4,4,4,4,4,6,6,6,6,7,8,8,9,9,10,12,12,12,13,14,15,16,17,18,19,19,20,21,22,24,25]],
+    M:[0,[-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],[-1,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49]]};
+  const bit=(x,i)=>((x>>>i)&1)!==0;
+  const rawModules=v=>{let r=(16*v+128)*v+64;if(v>=2){const n=Math.floor(v/7)+2;r-=(25*n-10)*n-55;if(v>=7)r-=36;}return r;};
+  const dataCw=(v,e)=>Math.floor(rawModules(v)/8)-ECC[e][1][v]*ECC[e][2][v];
+  function rsDiv(deg){const r=new Array(deg).fill(0);r[deg-1]=1;let root=1;for(let i=0;i<deg;i++){for(let j=0;j<r.length;j++){r[j]=mul(r[j],root);if(j+1<r.length)r[j]^=r[j+1];}root=mul(root,2);}return r;}
+  function mul(x,y){let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11D);z^=((y>>>i)&1)*x;}return z;}
+  function rsRem(data,div){const r=div.map(()=>0);for(const b of data){const f=b^r.shift();r.push(0);div.forEach((c,i)=>{r[i]^=mul(c,f);});}return r;}
+  function alignPos(v){if(v===1)return[];const n=Math.floor(v/7)+2,size=v*4+17,step=v===32?26:Math.ceil((v*4+4)/(n*2-2))*2,r=[6];for(let p=size-7;r.length<n;p-=step)r.splice(1,0,p);return r;}
+  function make(text,nivel){
+    const e=nivel==='L'?'L':'M',bytes=[...new TextEncoder().encode(text)];
+    let ver=1;
+    for(;;ver++){
+      if(ver>40)throw new Error('El texto es demasiado largo para un QR.');
+      const bits=4+(ver<10?8:16)+bytes.length*8;
+      if(bits<=dataCw(ver,e)*8)break;
+    }
+    const bb=[];const put=(v,n)=>{for(let i=n-1;i>=0;i--)bb.push((v>>>i)&1);};
+    put(4,4);put(bytes.length,ver<10?8:16);bytes.forEach(b=>put(b,8));
+    const cap=dataCw(ver,e)*8;
+    put(0,Math.min(4,cap-bb.length));put(0,(8-bb.length%8)%8);
+    for(let pad=0xEC;bb.length<cap;pad^=0xEC^0x11)put(pad,8);
+    const data=[];for(let i=0;i<bb.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|bb[i+j];data.push(b);}
+    /* corrección de errores e intercalado */
+    const nb=ECC[e][2][ver],el=ECC[e][1][ver],raw=Math.floor(rawModules(ver)/8),ns=nb-raw%nb,sl=Math.floor(raw/nb),div=rsDiv(el),blocks=[];
+    for(let i=0,k=0;i<nb;i++){const d=data.slice(k,k+sl-el+(i<ns?0:1));k+=d.length;const ec=rsRem(d,div);if(i<ns)d.push(0);blocks.push(d.concat(ec));}
+    const all=[];for(let i=0;i<blocks[0].length;i++)blocks.forEach((b,j)=>{if(i!==sl-el||j>=ns)all.push(b[i]);});
+    /* dibujo */
+    const size=ver*4+17,m=[],fn=[];for(let i=0;i<size;i++){m.push(new Array(size).fill(false));fn.push(new Array(size).fill(false));}
+    const set=(x,y,b)=>{m[y][x]=b;fn[y][x]=true;};
+    for(let i=0;i<size;i++){set(6,i,i%2===0);set(i,6,i%2===0);}
+    const finder=(x,y)=>{for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const d=Math.max(Math.abs(dx),Math.abs(dy)),xx=x+dx,yy=y+dy;if(xx>=0&&xx<size&&yy>=0&&yy<size)set(xx,yy,d!==2&&d!==4);}};
+    finder(3,3);finder(size-4,3);finder(3,size-4);
+    const ap=alignPos(ver);
+    ap.forEach((cx,i)=>ap.forEach((cy,j)=>{if(!((i===0&&j===0)||(i===0&&j===ap.length-1)||(i===ap.length-1&&j===0)))for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(cx+dx,cy+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);}));
+    const formato=mask=>{
+      const d=(ECC[e][0]<<3)|mask;let r=d;for(let i=0;i<10;i++)r=(r<<1)^((r>>>9)*0x537);
+      const bits=((d<<10)|r)^0x5412;
+      for(let i=0;i<=5;i++)set(8,i,bit(bits,i));set(8,7,bit(bits,6));set(8,8,bit(bits,7));set(7,8,bit(bits,8));
+      for(let i=9;i<15;i++)set(14-i,8,bit(bits,i));
+      for(let i=0;i<8;i++)set(size-1-i,8,bit(bits,i));
+      for(let i=8;i<15;i++)set(8,size-15+i,bit(bits,i));
+      set(8,size-8,true);
+    };
+    formato(0);
+    if(ver>=7){let r=ver;for(let i=0;i<12;i++)r=(r<<1)^((r>>>11)*0x1F25);const bits=(ver<<12)|r;for(let i=0;i<18;i++){const b=bit(bits,i),a=size-11+i%3,c=Math.floor(i/3);set(a,c,b);set(c,a,b);}}
+    let i=0;
+    for(let right=size-1;right>=1;right-=2){if(right===6)right=5;for(let vert=0;vert<size;vert++)for(let j=0;j<2;j++){const x=right-j,up=((right+1)&2)===0,y=up?size-1-vert:vert;if(!fn[y][x]&&i<all.length*8){m[y][x]=bit(all[i>>>3],7-(i&7));i++;}}}
+    const masks=[(x,y)=>(x+y)%2===0,(x,y)=>y%2===0,(x,y)=>x%3===0,(x,y)=>(x+y)%3===0,(x,y)=>(Math.floor(x/3)+Math.floor(y/2))%2===0,(x,y)=>x*y%2+x*y%3===0,(x,y)=>(x*y%2+x*y%3)%2===0,(x,y)=>((x+y)%2+x*y%3)%2===0];
+    const aplicar=k=>{for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!fn[y][x]&&masks[k](x,y))m[y][x]=!m[y][x];};
+    const castigo=()=>{
+      let p=0;
+      for(let y=0;y<size;y++){let run=1;for(let x=1;x<=size;x++){if(x<size&&m[y][x]===m[y][x-1])run++;else{if(run>=5)p+=run-2;run=1;}}}
+      for(let x=0;x<size;x++){let run=1;for(let y=1;y<=size;y++){if(y<size&&m[y][x]===m[y-1][x])run++;else{if(run>=5)p+=run-2;run=1;}}}
+      for(let y=0;y<size-1;y++)for(let x=0;x<size-1;x++)if(m[y][x]===m[y][x+1]&&m[y][x]===m[y+1][x]&&m[y][x]===m[y+1][x+1])p+=3;
+      let neg=0;for(const f of m)for(const c of f)if(c)neg++;
+      p+=Math.floor(Math.abs(neg*20-size*size*10)/(size*size))*10;
+      return p;
+    };
+    let mejor=0,mp=Infinity;
+    for(let k=0;k<8;k++){aplicar(k);formato(k);const p=castigo();if(p<mp){mp=p;mejor=k;}aplicar(k);}
+    aplicar(mejor);formato(mejor);
+    return m;
+  }
+  /* imagen SVG lista para pegar en la factura (con la zona blanca de 4 módulos que pide el QR) */
+  function svg(text,px){
+    const m=make(text,'M'),n=m.length,q=4;let d='';
+    m.forEach((f,y)=>{let x=0;while(x<n){if(f[x]){let k=x;while(k<n&&f[k])k++;d+='M'+(x+q)+' '+(y+q)+'h'+(k-x)+'v1h-'+(k-x)+'z';x=k;}else x++;}});
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n+2*q} ${n+2*q}" width="${px||160}" height="${px||160}" shape-rendering="crispEdges" role="img" aria-label="Código QR de la factura"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  }
+  return {make,svg};
+})();
+
 /* ===== clientes ===== */
 const VIEWS={};
 const CL={q:'',estado:'todos',plan:'',tec:'',limit:50};
@@ -4081,6 +4157,7 @@ VIEWS.ajustes={
     ${isAdmin()?`<div class="card"><h2>Consumo del servidor</h2><p class="muted small">El plan gratis de Cloudflare limita por día los pedidos y el tiempo que el servidor está encendido. Si algún día aparece «Sin conexión con el servidor» sin que nadie haya hecho nada, acá ves qué lo gastó.</p>
       <div class="actions start"><button class="btn" type="button" id="aj-uso">Ver el consumo de hoy</button></div></div>`:''}
     ${isAdmin()?ctAjustesCard():''}
+    ${isAdmin()?arcaAjustesCard():''}
     ${isAdmin()?respAjustesCard():''}
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
@@ -4098,6 +4175,7 @@ VIEWS.ajustes={
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
     ajWhatsApp($('#aj-wa-body',el));
     if(isAdmin())ctAjustesMount(el);
+    if(isAdmin())arcaAjustesMount(el);
     if(isAdmin())respAjustesMount(el);
     $('#aj-pre',el).addEventListener('submit',async e=>{e.preventDefault();
       const pi=Math.round(num($('#aj-pi',el).value)||0),pr=Math.round(num($('#aj-pr',el).value)||0);
@@ -6722,6 +6800,7 @@ function openReceipt(recibo){
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
+    ${arcaReciboHTML(ps)}
     ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${reciboVia()==='portapapeles'?'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo.':'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.'}</div>`:''}
     <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
@@ -6732,6 +6811,7 @@ function openReceipt(recibo){
       ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
       <div class="actions"><a class="btn primary" id="rc-wa-go" data-wa-img target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
     onMount(el){
+      arcaReciboMount(el,recibo);
       const bc=$('#rc-comp',el);if(bc)bc.addEventListener('click',()=>{bc.disabled=true;verComprobante(pc.comp,$('#rc-comp-img',el),$('#rc-comp-st',el)).finally(()=>{bc.disabled=false;});});
       const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
       if(sale&&!d.anulado&&!w)setTimeout(async()=>{
@@ -7454,6 +7534,190 @@ VIEWS.cobranzas={
   }
 };
 
+/* Factura electrónica de ARCA. Los recibos siguen igual: la factura es un paso aparte que se pide desde el recibo, solo cuando hace falta.
+   Ajustes (administrador): pedido de certificado, punto de venta y prueba de conexión. Recibo: «Emitir factura ARCA», ver / imprimir / enviar y nota de crédito. */
+const FE_LETRA={1:'A',6:'B',3:'A',8:'B'},FE_COD={1:'001',6:'006',3:'003',8:'008'},FE_NOMBRE={1:'FACTURA',6:'FACTURA',3:'NOTA DE CRÉDITO',8:'NOTA DE CRÉDITO'};
+const FE_COND={1:'Responsable Inscripto',4:'IVA Sujeto Exento',5:'Consumidor Final',6:'Responsable Monotributo',7:'Sujeto No Categorizado'};
+const feNro=f=>String(f.pv).padStart(5,'0')+'-'+String(f.nro).padStart(8,'0');
+const feVto=v=>/^\d{8}$/.test(v||'')?v.slice(6)+'/'+v.slice(4,6)+'/'+v.slice(0,4):v||'';
+const feFecha=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')?dmy(v):v||'';
+const fePesos=n=>fmtMoney(Number(n)||0);
+
+/* ----- Ajustes ----- */
+function arcaAjustesCard(){
+  return `<div class="card" id="arca-card"><h2>Factura electrónica ARCA</h2>
+    <p class="muted small">Los recibos siguen como siempre. Si un cliente necesita factura, se pide desde su recibo con «Emitir factura ARCA». Sale a nombre de la razón social de Ajustes → Recibo, como Responsable Inscripto.</p>
+    <div id="arca-st" class="hint">Mirando el estado…</div></div>`;
+}
+async function arcaAjustesMount(el){
+  const root=$('#arca-st',el);if(!root)return;
+  let a;try{a=await NET.api('GET','/api/arca');}catch(err){root.textContent=err.network?'No se pudo conectar con el servidor.':err.message;return;}
+  const em=a.emisor||{};
+  const falta=!em.cuit||em.cuit.length!==11;
+  root.className='';
+  root.innerHTML=`
+    <div class="kv-lite"><div><b>Emisor:</b> ${esc(em.razon||'sin razón social')} · CUIT ${esc(em.cuit||'sin cargar')}</div>
+    ${falta?'<div class="notice warn" style="margin-top:8px">Falta el CUIT. Cargalo en Ajustes → Recibo (son 11 números) y volvé acá.</div>':''}
+    ${a.mock?'<div class="notice info" style="margin-top:8px">Este servidor está conectado a un ARCA de prueba simulado.</div>':''}</div>
+    <h3 style="margin-top:14px">1. Certificado</h3>
+    <div class="hint">${a.tieneCert?`Certificado cargado, vence el ${esc(dmy(a.certHasta||''))}. Faltando un mes conviene pedir otro.`:a.tieneClave?'Pedido de certificado listo: llevalo a ARCA (pasos abajo) y pegá acá el certificado que te devuelven.':'Todavía no hay certificado.'}</div>
+    <div class="actions start"><button class="btn${a.tieneClave?'':' primary'}" type="button" id="arca-gen" ${falta?'disabled':''}>${a.tieneClave?'Generar un pedido nuevo':'Generar el pedido de certificado'}</button></div>
+    <div id="arca-csr" ${a.tieneClave&&!a.tieneCert&&a.csr?'':'hidden'}>
+      <div class="field"><label for="arca-csr-t">Pedido de certificado (CSR)</label><textarea id="arca-csr-t" rows="5" readonly class="mono small">${esc(a.csr||'')}</textarea></div>
+      <div class="actions start"><button class="btn small" type="button" id="arca-csr-c">Copiar</button><button class="btn small" type="button" id="arca-csr-d">Descargar archivo .csr</button></div>
+      <ol class="small" style="margin:10px 0 0 18px;line-height:1.5">
+        <li>Entrá a ARCA con tu CUIT y tu clave fiscal, como siempre (esto lo hacés vos).</li>
+        <li>Abrí el servicio <b>«Administración de Certificados Digitales»</b> (en el ambiente de pruebas se llama «WSASS – Autoservicio de Acceso a WSHomologación»). Agregá un alias, pegá el pedido de arriba y descargá el certificado (.crt).</li>
+        <li>En <b>«Administrador de Relaciones de Clave Fiscal»</b> autorizá ese alias para el servicio <b>«Facturación Electrónica» (wsfe)</b>.</li>
+        <li>En <b>«Administración de puntos de venta y domicilios»</b> creá un punto de venta del tipo <b>«RECE para aplicativo y web services»</b> y anotá su número.</li>
+        <li>Abrí el certificado con el Bloc de notas, copiá todo el texto y pegalo acá abajo.</li></ol></div>
+    <div id="arca-cert-box" ${a.tieneClave?'':'hidden'}>
+      <div class="field"><label for="arca-cert">Certificado que devolvió ARCA</label><textarea id="arca-cert" rows="5" class="mono small" placeholder="-----BEGIN CERTIFICATE-----"></textarea></div>
+      <div class="actions start"><button class="btn primary" type="button" id="arca-cert-g">Guardar certificado</button></div></div>
+    <h3 style="margin-top:14px">2. Punto de venta y ambiente</h3>
+    <div class="grid2">${F('Punto de venta (número)','arca-pv',`<input id="arca-pv" type="number" inputmode="numeric" min="1" max="99999" value="${esc(a.pv||'')}">`)}
+      ${F('Ambiente','arca-amb',`<select id="arca-amb"><option value="homo"${a.amb!=='prod'?' selected':''}>Pruebas (facturas sin validez)</option><option value="prod"${a.amb==='prod'?' selected':''}>Producción (facturas reales)</option></select>`)}</div>
+    <div class="actions start"><button class="btn" type="button" id="arca-pv-g">Guardar</button><button class="btn" type="button" id="arca-probar" ${a.tieneCert?'':'disabled'}>Probar conexión con ARCA</button></div>
+    <div id="arca-res" class="hint" aria-live="polite"></div>
+    <div class="small muted" style="margin-top:10px">${a.listo?(a.amb==='prod'?'<b>Listo para facturar de verdad.</b>':'<b>Listo para probar.</b> Cuando todo salga bien, probá con el ambiente «Producción» (y su propio certificado y punto de venta, que se piden aparte en ARCA).'):'Todavía falta completar los pasos de arriba.'} El certificado y la clave quedan guardados solo en el servidor y no se copian al servidor de respaldo.</div>`;
+  const res=$('#arca-res',el),aviso=(t,mal)=>{res.className=mal?'notice bad':'notice ok';res.textContent=t;};
+  const rec=()=>arcaAjustesMount(el);
+  const gen=$('#arca-gen',el);
+  if(gen)gen.addEventListener('click',async()=>{
+    if(a.tieneClave&&!await askConfirm('Si generás un pedido nuevo, el certificado actual deja de servir y tenés que pedir otro en ARCA. ¿Seguimos?','Generar uno nuevo'))return;
+    gen.disabled=true;
+    try{await NET.api('POST','/api/arca/clave',{reemplazar:!!a.tieneClave});toast('Pedido de certificado creado');rec();}
+    catch(err){gen.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+  });
+  const cc=$('#arca-csr-c',el);if(cc)cc.addEventListener('click',()=>copyText(a.csr,'Pedido de certificado'));
+  const cd=$('#arca-csr-d',el);if(cd)cd.addEventListener('click',()=>{const u=URL.createObjectURL(new Blob([a.csr],{type:'application/x-pem-file'})),l=document.createElement('a');l.href=u;l.download='yapur-pedido.csr';document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(u),20000);});
+  const cg=$('#arca-cert-g',el);
+  if(cg)cg.addEventListener('click',async()=>{
+    cg.disabled=true;
+    try{await NET.api('POST','/api/arca/certificado',{pem:$('#arca-cert',el).value});toast('Certificado guardado');rec();}
+    catch(err){cg.disabled=false;aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
+  });
+  $('#arca-pv-g',el).addEventListener('click',async()=>{
+    try{await NET.api('PUT','/api/arca',{pv:Number($('#arca-pv',el).value),amb:$('#arca-amb',el).value});toast('Guardado');rec();}
+    catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
+  });
+  const pb=$('#arca-probar',el);
+  if(pb)pb.addEventListener('click',async()=>{
+    pb.disabled=true;res.className='hint';res.textContent='Conectando con ARCA…';
+    try{
+      const r=await NET.api('POST','/api/arca/probar',{});
+      const pts=(r.puntos||[]).map(p=>p.nro+(p.bloqueado?' (bloqueado)':'')).join(', ');
+      const ok=!r.pvError&&!r.puntosError;
+      aviso('Conexión con ARCA ('+(r.ambiente==='prod'?'producción':'pruebas')+') correcta. '+(pts?'Puntos de venta que ARCA ve: '+pts+'. ':(r.puntosError?'No pude leer los puntos de venta: '+r.puntosError+'. ':'ARCA no informó puntos de venta. '))+(r.pvError?'Problema con el punto de venta cargado: '+r.pvError:(r.ultimaB!=null?'Última factura B: '+r.ultimaB+' · última A: '+r.ultimaA+'.':'')),!ok);
+    }catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
+    pb.disabled=false;
+  });
+}
+
+/* ----- Factura para imprimir / PDF ----- */
+const FE_CSS='.fe{background:#fff;color:#111;border:1px solid #222;font:13px/1.45 system-ui,sans-serif;max-width:680px;margin:0 auto}.fe *{box-sizing:border-box}.fe .h{display:grid;grid-template-columns:1fr 64px 1fr;border-bottom:1px solid #222}.fe .h>div{padding:10px 12px}.fe .l{text-align:center;border-left:1px solid #222;border-right:1px solid #222;padding:6px 4px!important}.fe .l b{font-size:30px;line-height:1;display:block}.fe .l span{font-size:10px}.fe .b{padding:8px 12px;border-bottom:1px solid #222}.fe table{width:100%;border-collapse:collapse}.fe th,.fe td{padding:4px 8px;text-align:left;border-bottom:1px solid #ddd}.fe .r{text-align:right}.fe .tot{padding:8px 12px;text-align:right;border-bottom:1px solid #222}.fe .pie{display:flex;gap:12px;align-items:center;padding:10px 12px}.fe .pie svg{flex:none}.fe .t2{font-size:15px;font-weight:700}.fe .prueba{background:#fde8e8;color:#8a1111;text-align:center;font-weight:700;padding:6px}';
+function facturaHTML(fe,ps){
+  const R=S.ajustes.recibo||{},esNc=!!fe.esNc,A=FE_LETRA[fe.tipo]==='A';
+  const lineas=esNc?[`Anulación de la factura ${feNro(fe.orig)}`]:ps.filter(p=>!p.anulado).map(p=>(CONCEPTOS[p.concepto]||p.concepto||'Servicio')+(p.concepto==='mensualidad'&&p.per?' '+p.per:''));
+  const items=esNc?[[lineas[0],fe.total]]:ps.filter(p=>!p.anulado).map((p,i)=>[lineas[i],Number(p.monto)||0]);
+  const qr=QR.svg('https://www.arca.gob.ar/fe/qr/?p='+btoa(JSON.stringify({ver:1,fecha:fe.fecha,cuit:Number(fe.cuit),ptoVta:fe.pv,tipoCmp:fe.tipo,nroCmp:fe.nro,importe:fe.total,moneda:'PES',ctz:1,tipoDocRec:fe.docTipo,nroDocRec:Number(fe.docNro),tipoCodAut:'E',codAut:Number(fe.cae)})),120);
+  const doc=fe.docTipo===80?'CUIT':fe.docTipo===96?'DNI':'Doc.';
+  return `<style>${FE_CSS}</style><div class="fe">${fe.amb!=='prod'?'<div class="prueba">COMPROBANTE DE PRUEBA · SIN VALIDEZ FISCAL</div>':''}
+    <div class="h"><div><div class="t2">${esc(R.razon||'')}</div>${R.leyenda?`<div>${esc(R.leyenda)}</div>`:''}<div>${esc(R.dom||'')}</div><div><b>IVA Responsable Inscripto</b></div></div>
+      <div class="l"><b>${FE_LETRA[fe.tipo]}</b><span>COD. ${FE_COD[fe.tipo]}</span></div>
+      <div><div class="t2">${FE_NOMBRE[fe.tipo]}</div><div>N° <b>${esc(feNro(fe))}</b></div><div>Fecha: <b>${esc(feFecha(fe.fecha))}</b></div><div>CUIT: ${esc(fe.cuit)}</div>${R.iibb?`<div>Ing. Brutos: ${esc(R.iibb)}</div>`:''}${R.inicio?`<div>Inicio de actividades: ${esc(R.inicio)}</div>`:''}</div></div>
+    <div class="b"><div>Cliente: <b>${esc(fe.nombre)}</b></div><div>${doc}: ${fe.docTipo===99?'—':esc(fe.docNro)} · ${esc(FE_COND[fe.condIva]||'')}</div><div>Condición de venta: Contado</div></div>
+    <table><thead><tr><th>Descripción</th><th class="r">Importe</th></tr></thead><tbody>${items.map(([d,m])=>`<tr><td>${esc(d)}</td><td class="r">${esc(fePesos(A?m/1.21:m))}</td></tr>`).join('')}</tbody></table>
+    <div class="tot">${A?`<div>Importe neto gravado: ${esc(fePesos(fe.neto))}</div><div>IVA 21 %: ${esc(fePesos(fe.iva))}</div>`:''}<div class="t2">Total: ${esc(fePesos(fe.total))}</div>${A?'':`<div class="small">Régimen de Transparencia Fiscal (Ley 27.743) · IVA contenido: ${esc(fePesos(fe.iva))}</div>`}</div>
+    <div class="pie">${qr}<div><div>CAE N°: <b>${esc(fe.cae)}</b></div><div>Vencimiento del CAE: <b>${esc(feVto(fe.vto))}</b></div><div class="small">Comprobante autorizado por ARCA</div></div></div></div>`;
+}
+function imprimirHTML(html,titulo){
+  const b=window.YapurApp;
+  if(b){
+    if(typeof b.printHtml!=='function')return toast('Para imprimir desde el celular instalá la última versión de la app.','bad');
+    let r='';try{r=String(b.printHtml(html,titulo)||'');}catch(_){r='No se pudo abrir la impresión.';}
+    if(r!=='ok')toast(r||'No se pudo abrir la impresión.','bad');
+    return;
+  }
+  try{
+    const f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';document.body.appendChild(f);
+    const w=f.contentWindow,doc=w.document;doc.open();doc.write('<!doctype html><meta charset="utf-8"><title>'+esc(titulo)+'</title><style>@page{size:A4 portrait;margin:10mm}html,body{margin:0;background:#fff}</style>'+html);doc.close();
+    setTimeout(()=>{try{w.focus();w.print();}catch(_){toast('Este navegador no puede imprimir.','bad');}setTimeout(()=>f.remove(),2000);},150);
+  }catch(_){toast('Este navegador no puede imprimir.','bad');}
+}
+function openFactura(recibo,verNc){
+  const ps=paymentsOfReceipt(recibo),p0=ps.find(x=>x.fe&&x.fe.cae);if(!p0)return toast('Este recibo no tiene factura','bad');
+  const f0=p0.fe,fe=verNc&&f0.nc?Object.assign({},f0.nc,{esNc:true,orig:f0}):f0;
+  const R=S.ajustes.recibo||{},c=S.clientes.get(ps[0].c),tel=c&&c.tel;
+  const txt=`${R.leyenda||R.razon||'YAPUR'} · ${FE_NOMBRE[fe.tipo]} ${FE_LETRA[fe.tipo]} ${feNro(fe)} por ${fePesos(fe.total)}. CAE ${fe.cae}. Podés verificarla en https://www.arca.gob.ar/fe/qr/?p=${btoa(JSON.stringify({ver:1,fecha:fe.fecha,cuit:Number(fe.cuit),ptoVta:fe.pv,tipoCmp:fe.tipo,nroCmp:fe.nro,importe:fe.total,moneda:'PES',ctz:1,tipoDocRec:fe.docTipo,nroDocRec:Number(fe.docNro),tipoCodAut:'E',codAut:Number(fe.cae)}))}`;
+  openModal({title:(verNc?'Nota de crédito ':'Factura ')+feNro(fe),wide:true,html:`${facturaHTML(fe,ps)}
+    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" id="fe-print">Imprimir o guardar como PDF</button>${tel?`<a class="btn" target="_blank" rel="noopener" href="${waUrl(tel,txt)}">Mandar por WhatsApp</a>`:''}<button class="btn" type="button" id="fe-copy">Copiar datos</button><button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
+    onMount(el){
+      $('#fe-print',el).addEventListener('click',()=>imprimirHTML(facturaHTML(fe,ps),'Factura '+feNro(fe)));
+      $('#fe-copy',el).addEventListener('click',()=>copyText(txt,'Datos de la factura'));
+    }});
+}
+
+/* la factura llega a la pantalla con el aviso del servidor: se espera un instante a que figure en el pago antes de abrirla */
+function arcaEsperar(recibo,cond,fin){
+  let n=0;const t=setInterval(()=>{
+    const p=paymentsOfReceipt(recibo).find(x=>x.fe&&x.fe.cae);
+    if((p&&cond(p.fe))||++n>20){clearInterval(t);fin();}
+  },150);
+}
+/* ----- En el recibo ----- */
+function arcaReciboHTML(ps){
+  const p0=ps.find(x=>x.fe&&x.fe.cae),oficina=can('cobrar')||can('caja');
+  if(p0){
+    const f=p0.fe;
+    return `<div class="card flat" id="rc-fe" style="margin-top:12px"><div><b>${FE_NOMBRE[f.tipo]} ${FE_LETRA[f.tipo]} ${esc(feNro(f))}</b> · ${esc(fePesos(f.total))}${f.amb!=='prod'?' <span class="chip warn">prueba</span>':''}${f.nc?' <span class="chip">anulada con nota de crédito</span>':''}</div>
+      <div class="small muted">CAE ${esc(f.cae)} · vence ${esc(feVto(f.vto))}</div>
+      <div class="actions start" style="margin-top:8px"><button class="btn small" type="button" id="fe-ver">Ver factura</button>${f.nc?'<button class="btn small" type="button" id="fe-ver-nc">Ver nota de crédito</button>':(oficina&&can('anular')?'<button class="btn small danger" type="button" id="fe-nc">Anular con nota de crédito</button>':'')}</div></div>`;
+  }
+  if(!S.ajustes.arcaListo||!oficina||ps.every(x=>x.anulado))return '';
+  return `<div class="actions start" id="rc-fe" style="margin-top:8px"><button class="btn" type="button" id="fe-emitir">Emitir factura ARCA</button></div>`;
+}
+function arcaReciboMount(el,recibo){
+  const ps=paymentsOfReceipt(recibo),q=s=>$(s,el);
+  const ver=q('#fe-ver');if(ver)ver.addEventListener('click',()=>openFactura(recibo));
+  const vnc=q('#fe-ver-nc');if(vnc)vnc.addEventListener('click',()=>openFactura(recibo,true));
+  const nc=q('#fe-nc');
+  if(nc)nc.addEventListener('click',async()=>{
+    if(!await askConfirm('Se emite una nota de crédito en ARCA por el total de la factura, y la factura queda anulada. No se puede deshacer. ¿Seguimos?','Emitir nota de crédito'))return;
+    nc.disabled=true;
+    try{await NET.api('POST','/api/arca/emitir',{doc:ps[0]._doc,recibo,nc:true});toast('Nota de crédito emitida');closeModal();arcaEsperar(recibo,f=>f.nc,()=>openReceipt(recibo));}
+    catch(err){nc.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+  });
+  const em=q('#fe-emitir');
+  if(em)em.addEventListener('click',()=>arcaPedir(recibo,ps));
+}
+function arcaPedir(recibo,ps){
+  const c=S.clientes.get(ps[0].c),head=c&&cuentaHead?cuentaHead(c):c,cli=head||c||{},total=ps.filter(p=>!p.anulado).reduce((s,p)=>s+(Number(p.monto)||0),0);
+  const dni=String(cli.dni||'').replace(/\D/g,'');
+  openModal({title:'Emitir factura ARCA',html:`<p class="small muted">Se factura el recibo <b>${esc(recibo)}</b> por <b>${esc(fePesos(total))}</b> (el IVA ya está incluido en el precio). Una vez emitida no se modifica: si hay un error, se anula con una nota de crédito.</p>
+    ${F('Nombre o razón social','fe-nom','<input id="fe-nom" maxlength="100" value="'+esc(cli.nombre||'')+'">')}
+    ${F('DNI o CUIT del cliente','fe-doc','<input id="fe-doc" inputmode="numeric" maxlength="13" value="'+esc(dni)+'">','Si queda vacío sale a «Consumidor final». Con CUIT se puede hacer Factura A.')}
+    <div id="fe-cuit" hidden>${F('Condición del cliente frente al IVA','fe-iva','<select id="fe-iva"><option value="1">Responsable Inscripto</option><option value="6">Monotributista</option><option value="4">IVA Sujeto Exento</option><option value="7">No categorizado</option></select>')}
+      ${F('Tipo de factura','fe-tipo','<select id="fe-tipo"><option value="1">Factura A (IVA discriminado)</option><option value="6">Factura B</option></select>')}</div>
+    <div class="notice ${S.ajustes.arcaProd?'info':'warn'}" style="margin-top:8px">${S.ajustes.arcaProd?'Es una factura real: ARCA la registra.':'Ambiente de pruebas: la factura no tiene validez.'}</div>
+    <div class="actions"><button class="btn primary" type="button" id="fe-go">Emitir factura</button><button class="btn ghost" type="button" data-close>Cancelar</button></div>`,
+    onMount(el){
+      const doc=$('#fe-doc',el),box=$('#fe-cuit',el),sync=()=>{box.hidden=doc.value.replace(/\D/g,'').length!==11;};
+      doc.addEventListener('input',sync);sync();
+      $('#fe-go',el).addEventListener('click',async ev=>{
+        const b=ev.currentTarget,dn=doc.value.replace(/\D/g,'');
+        if(dn&&dn.length!==11&&(dn.length<7||dn.length>8))return toast('El DNI tiene 7 u 8 números y el CUIT 11.','bad');
+        b.disabled=true;
+        try{
+          const r=await NET.api('POST','/api/arca/emitir',{doc:ps[0]._doc,recibo,nombre:$('#fe-nom',el).value,docNro:dn,condIva:Number($('#fe-iva',el).value),tipo:Number($('#fe-tipo',el).value)});
+          toast('Factura emitida: '+FE_NOMBRE[r.fe.tipo]+' '+FE_LETRA[r.fe.tipo]+' '+feNro(r.fe));
+          closeModal();
+          arcaEsperar(recibo,()=>true,()=>openFactura(recibo));
+        }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+      });
+    }});
+}
+
 /* ===== resumen ===== */
 /* clientes: altas y bajas por mes (últimos 6), para ver si la empresa crece o se achica. «Alta» es c.alta (fecha de alta vigente,
    se actualiza en cada reactivación desde «pendiente»); «baja» es c.bajaFecha (fecha en que se dio de baja, quede o no reactivado
@@ -7563,7 +7827,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='a8f8f14602';
+const BUILD='c9cf432506';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

@@ -231,6 +231,7 @@ function openReceipt(recibo){
   openModal({title:'Recibo '+recibo,html:`${receiptHTML(d)}
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
+    ${arcaReciboHTML(ps)}
     ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${reciboVia()==='portapapeles'?'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo.':'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.'}</div>`:''}
     <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
@@ -241,6 +242,7 @@ function openReceipt(recibo){
       ${c&&(can('editarClientes')||can('cobrar'))?'<label class="per"><input type="checkbox" id="rc-save" checked><span class="grow">Guardar este número en la ficha del cliente</span></label>':''}
       <div class="actions"><a class="btn primary" id="rc-wa-go" data-wa-img target="_blank" rel="noopener" href="#">Abrir WhatsApp</a></div></div>`,
     onMount(el){
+      arcaReciboMount(el,recibo);
       const bc=$('#rc-comp',el);if(bc)bc.addEventListener('click',()=>{bc.disabled=true;verComprobante(pc.comp,$('#rc-comp-img',el),$('#rc-comp-st',el)).finally(()=>{bc.disabled=false;});});
       const b=$('#rc-anular',el);if(b)b.addEventListener('click',()=>openAnular(recibo));$('#rc-print',el).addEventListener('click',()=>printReceipt(d));
       if(sale&&!d.anulado&&!w)setTimeout(async()=>{
