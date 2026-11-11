@@ -516,6 +516,42 @@ Correrlo dos veces no mueve a nadie dos veces. Los clientes que ya empiezan ese 
 - **APK nuevo (solo cuando cambia la parte de Android, por ejemplo un permiso nuevo):** el celular ve **«Hay un APK nuevo (2.X) con mejoras»** con el botón **Descargar**, que abre la descarga en el navegador. Se instala encima, sin perder nada. Lo informa el archivo `yapur-version.json` que publica solo el flujo que compila el APK.
 - «Después» esconde el aviso hasta que se vuelva a abrir la app.
 
+## Servidor de respaldo (una segunda cuenta de Cloudflare)
+
+**Para qué:** el plan gratis de Cloudflare tiene un tope por día **y por cuenta**. Si el servidor llega al tope, el sistema se detiene hasta las 21:00 (hora de Argentina). Con un segundo servidor, en **otra cuenta**, que va copiando todo lo que se carga, ese día se sigue trabajando en el segundo y después se vuelve al primero.
+
+**Cómo funciona**
+- Los dos servidores tienen **el mismo código** (se arma igual que el primero). Se conocen entre sí por dos datos: `REPLICA_URL` (la dirección del otro) y `REPLICA_KEY` (una clave larga, la misma en los dos).
+- **Trabaja uno solo a la vez** (el *activo*). El otro queda **en espera**: se puede mirar todo, pero no se puede cambiar nada (así no se mezclan dos versiones de los datos). Cada cambio del activo se copia al que espera unos 20 segundos después.
+- Los usuarios y claves también se copian: en el respaldo cada uno entra con su usuario y clave de siempre (hay que volver a entrar porque es otra dirección).
+- **Se copian:** clientes, pagos, órdenes, planes, ajustes, red, usuarios (con sus permisos y claves), contratos firmados con su firma y registro, texto del contrato y modelos de equipos. **No se copian:** la ubicación de los técnicos, las sesiones abiertas, los equipos autorizados, los routers y las fotos de comprobantes.
+
+**Armarlo (una sola vez)**
+1. Crear otra cuenta de Cloudflare (con otro correo; es gratis) y repetir los pasos 2 y 3 de «Puesta en marcha»: importar este mismo repositorio, proyecto `yapur`, carpeta `/yapur-app/worker`. **No** entrar a esa dirección todavía. Anotar la dirección que queda (`https://yapur.<subdominio-nuevo>.workers.dev`).
+2. Inventar una **clave de respaldo larga** (40 letras y números mezclados, sin espacios). Es la misma en las dos cuentas.
+3. En **cada** cuenta: *Workers & Pages → yapur → Settings → Variables and Secrets → Add* y cargar estos dos, **con el tipo «Secret»** (así Cloudflare no los borra cuando vuelve a publicar):
+   - `REPLICA_KEY` = la clave de respaldo.
+   - `REPLICA_URL` = la dirección **del otro** servidor (en el principal, la del respaldo; en el respaldo, la del principal). Con `https://`, sin nada después de `.workers.dev`.
+   Después de guardar, *Deploy* (o «Retry build»).
+4. Esperar unos minutos y abrir **Ajustes → «Servidor de respaldo»** en el principal: tiene que decir *Activo*, el otro servidor *en espera* y «ninguno: el otro está al día». La dirección del respaldo muestra primero «todavía no recibió la copia» y después ya deja entrar.
+5. Si el principal es una instalación **nueva y vacía** (todavía sin administrador), además hay que cargar en el principal `REPLICA_ROL` = `activo` (si no, como está vacío, espera la copia del otro).
+
+**El día que el principal llega al tope**
+- La app muestra un cartel rojo **«El servidor llegó al límite de hoy»** con el botón **Abrir el respaldo**. Abrir esa dirección en el celular o la PC, entrar con el mismo usuario y clave.
+- El administrador toca **«Pasar a este servidor»** (en el cartel amarillo de arriba o en *Ajustes → Servidor de respaldo*). Como el principal no responde, la app avisa y pide confirmar **«Activar este igual»**: se pierde, como mucho, lo que se cargó en los últimos segundos antes de que el principal se cayera. Desde ese momento se trabaja normalmente en el respaldo.
+- Los técnicos entran desde el navegador del celular a la dirección del respaldo (el APK sigue apuntando al principal). Mientras tanto **no llega la ubicación de los técnicos** a la oficina.
+
+**Volver al principal (cuando ya se reinició el cupo, 21:00)**
+- Abrir la dirección del principal y entrar. Va a decir **«Servidor de respaldo en espera»**: el respaldo ya le mandó todo lo que se cargó mientras estuvo caído (antes de pisar, el principal guarda una copia de lo que tenía, en *Copias automáticas…*).
+- Tocar **«Pasar a este servidor»** en el principal. Esta vez el cambio es ordenado: el respaldo manda lo último que le falta y queda en espera.
+- Si no se quiere esperar al otro día, se puede pasar de uno a otro cuando se quiera con ese mismo botón; funciona en los dos sentidos.
+
+**Qué mirar y qué esperar**
+- **Ajustes → Servidor de respaldo** muestra cuál es el activo, si el otro responde, cuántos cambios faltan copiar y cuándo recibió la última copia. Si el otro no responde, el sistema reintenta solo (cada vez más despacio, hasta cada 30 minutos).
+- Si por algún motivo las cantidades de los dos servidores no coinciden, el activo manda la copia completa solo (lo controla cada 6 horas como mucho). También se puede pedir a mano con **«Mandar la copia completa ahora»**.
+- Cada copia al respaldo gasta un poco del cupo de las dos cuentas (unos pocos cientos de pedidos por día en uso normal); el respaldo en espera, sin trabajar, casi no consume.
+- Si el respaldo todavía no recibió su primera copia no se puede activar. Si se pasó a trabajar en el respaldo de emergencia y el principal vuelve, lo que se hubiera cargado en el principal sin alcanzar a copiarse **se descarta** (queda en la copia «antes de restaurar» del principal, por si hiciera falta recuperar algo).
+
 ## Copias de seguridad
 
 - El sistema guarda **solas 2 copias por día** (la primera escritura del día y otra 8 horas después) y conserva las últimas 28 (14 días). **Ajustes → «Copias automáticas…»** las lista y permite volver a una (antes de restaurar guarda una copia del estado actual, por si te arrepentís).
@@ -540,6 +576,8 @@ La misma app funciona como página: abrir la dirección en Chrome del celular �
 Se probaron de punta a punta, contra el servidor real de Cloudflare simulado en la computadora (`wrangler dev`, mismo motor `workerd`): permisos de cada perfil, que cada usuario vea solo lo suyo, cobranzas que no se pueden borrar ni editar, ciclos de facturación 1–10 y 13–20 con feriados, promesas de pago, servicios extra, tiempo real entre usuarios, bloqueo por intentos, copias de seguridad y restauración, reinicios del servidor, la app en modo celular con navegador Chromium (sin conexión incluida) y los avisos de actualización y el botón del GPS con ubicaciones simuladas (precisa, que afina sola, floja, sin permiso, y al cerrar una instalación) y la red (alta de cajas y empalmes con el GPS, orden por cercanía, conexión del cliente a su caja y puerto, permisos y borrados bloqueados).
 
 **No se pudo probar** en este entorno: el programa de Android en un celular real (incluido el permiso, la lectura real del GPS y el servicio de ubicación con la pantalla apagada, que depende de cada marca y versión de Android) (se verificó que el APK se arma, firma y alinea bien y que el manifiesto declara el servicio como corresponde, pero no hay emulador), la publicación real en Cloudflare ni la corrida real en GitHub Actions. Si algo falla en alguno de esos tres pasos, es lo primero que hay que mirar.
+
+Del servidor de respaldo hay una prueba con **dos servidores que se hablan** (`test_replica.js`: copia inicial, cambios al vuelo, bloqueo del que espera, traspaso ordenado, caída de emergencia y vuelta, clave) y una de pantalla (`e2e_respaldo.py`: tarjeta de Ajustes, carteles y botón de pasar de uno a otro).
 
 Para volver a correr las pruebas: `cd yapur-app/tests && npm install && npm test` (GitHub también las corre en cada pedido de cambios, con `probar-yapur.yml`).
 

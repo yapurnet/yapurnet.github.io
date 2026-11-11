@@ -171,7 +171,14 @@ function showAuth(state,info){
   $('#roleChip').hidden=true;$('#viewAsBtn').hidden=true;
   if(state==='noserver'||state==='offline')return showNoServer(state,info);
   if(state==='setup')return showSetup();
-  showLogin(takeFlash());
+  if(state==='respaldo-vacio')return showRespaldoVacio();
+  showLogin(takeFlash(),info&&info.respaldo);
+}
+/* el servidor de respaldo recién creado todavía no recibió la copia del principal */
+function showRespaldoVacio(){
+  const el=authCard(`<h2>Servidor de respaldo</h2><p class="muted">Este servidor todavía no recibió la copia del servidor principal. Apenas la reciba (unos minutos después de configurarlo), vas a poder entrar con tu mismo usuario y clave de siempre.</p>
+    <div class="actions"><button class="btn primary" type="button" id="rv-retry">Volver a mirar</button></div>`);
+  $('#rv-retry',el).addEventListener('click',()=>location.reload());
 }
 function showNoServer(state,info){
   const off=state==='offline';
@@ -179,8 +186,8 @@ function showNoServer(state,info){
     <div class="actions"><button class="btn primary" type="button" id="ns-retry">Reintentar</button></div>`);
   $('#ns-retry',el).addEventListener('click',()=>location.reload());
 }
-function showLogin(flash){
-  const el=authCard(`<h2>Entrar</h2>${flash?`<div class="notice bad">${esc(flash)}</div>`:''}
+function showLogin(flash,respaldo){
+  const el=authCard(`<h2>Entrar</h2>${flash?`<div class="notice bad">${esc(flash)}</div>`:''}${respaldo&&respaldo.rol==='espera'?'<div class="notice warn"><b>Servidor de respaldo en espera.</b> Entrás con tu mismo usuario y clave, pero solo vas a poder mirar. Si el servidor principal no funciona, el administrador puede activar este desde Ajustes.</div>':''}
     <form class="form" id="lg-form" novalidate>${F('Usuario','lg-user','<input id="lg-user" autocomplete="username" autocapitalize="none" spellcheck="false">')}
     ${F('Clave','lg-pass','<input id="lg-pass" type="password" autocomplete="current-password">')}
     <div class="actions"><button class="btn primary" type="submit">Entrar</button></div></form>`);
@@ -250,6 +257,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
   NET.on('me',onMeChanged);
   NET.on('status',updateNetBar);
   NET.on('disp',dispAviso);
+  NET.on('respaldo',respBar);
   const devBar=$('#devBar');if(devBar)devBar.addEventListener('click',dispAbrir);
   let st;
   try{st=await NET.init();}catch(e){console.error(e);st={state:'noserver',error:e};}
@@ -265,7 +273,7 @@ setInterval(()=>{const t=todayStr();if(t!==_dia){_dia=t;if(S.ready)dataChanged('
       if(first){first=false;res();}else{rebuildDerived();onAjustesChanged();}
     },err=>{S.errors.ajustes=err;S.loaded.ajustes=true;if(first){first=false;res();}});
   });
-  S.ready=true;refreshAll();updateNetBar();
+  S.ready=true;refreshAll();updateNetBar();respBar();
   dispRefresh();
   ubicInit().then(jornadaInit,jornadaInit);
   tecAlertaInit();

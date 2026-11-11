@@ -215,6 +215,7 @@ VIEWS.ajustes={
     ${isAdmin()?`<div class="card"><h2>Consumo del servidor</h2><p class="muted small">El plan gratis de Cloudflare limita por día los pedidos y el tiempo que el servidor está encendido. Si algún día aparece «Sin conexión con el servidor» sin que nadie haya hecho nada, acá ves qué lo gastó.</p>
       <div class="actions start"><button class="btn" type="button" id="aj-uso">Ver el consumo de hoy</button></div></div>`:''}
     ${isAdmin()?ctAjustesCard():''}
+    ${isAdmin()?respAjustesCard():''}
     <div class="card"><h2>Copias de seguridad</h2><p class="muted small">El servidor guarda dos copias automáticas por día (las de los últimos 14 días). Esas copias viven en el mismo lugar que los datos, así que de vez en cuando bajá una a tu equipo y guardala aparte.</p>
       <div class="actions start"><button class="btn primary" type="button" id="aj-bk">Descargar copia completa</button><button class="btn" type="button" id="aj-bks">Copias automáticas…</button><button class="btn" type="button" id="aj-rs">Restaurar desde un archivo…</button><input type="file" id="aj-rs-file" hidden></div></div>
     <div class="card"><h2>Cómo se protege</h2><dl class="kv"><dt>Entrada</dt><dd>Cada persona tiene su usuario y su clave. Si alguien deja la empresa, lo desactivás y se le cierra la sesión en el momento.</dd>
@@ -231,6 +232,7 @@ VIEWS.ajustes={
       try{await saveAjustes({empresa:nombre});toast('Ajustes guardados');}catch(err){dbError(err);}});
     ajWhatsApp($('#aj-wa-body',el));
     if(isAdmin())ctAjustesMount(el);
+    if(isAdmin())respAjustesMount(el);
     $('#aj-pre',el).addEventListener('submit',async e=>{e.preventDefault();
       const pi=Math.round(num($('#aj-pi',el).value)||0),pr=Math.round(num($('#aj-pr',el).value)||0);
       if(pi<=0||pr<=0||pi>1e7||pr>1e7)return toast('Cargá los dos precios (números mayores que cero)','bad');
