@@ -15,6 +15,9 @@ t('texto invalido',parseCoords('hola')===null);
 t('link corto no resuelve',parseCoords('https://maps.app.goo.gl/abc123')===null);
 g=parseCoords('-62.8300, -28.4600');t('long y lat al revés se acomodan solas',g&&g.lat===-28.46&&g.lng===-62.83&&g.swapped&&!g.outside,g);
 g=parseCoords('-27.7345, -62.4678');t('en el orden correcto no marca swapped',g&&!g.swapped,g);
+g=parseCoords('-28,4698100, -62,8369850');t('coma decimal como en el «Acerca de» de Maps',g&&Math.abs(g.lat+28.46981)<0.0001&&Math.abs(g.lng+62.836985)<0.0001,g);
+g=parseCoords('28°28′11.3″S 62°50′13.2″W');t('grados, minutos y segundos',g&&Math.abs(g.lat+28.4698)<0.001&&Math.abs(g.lng+62.837)<0.001,g);
+g=parseCoords('https://www.google.com/maps/place/Anatuya/@-28.4600,-62.8300,15z/data=x');t('el link @ sigue andando (no se confunde con coma decimal)',g&&g.lat===-28.46&&g.lng===-62.83,g);
 // whatsapp
 t('wa numero',waNumber('3844 56-2605')==='5493844562605',waNumber('3844 56-2605'));
 t('wa con +54 9',waNumber('+54 9 3844 58-9351')==='5493844589351',waNumber('+54 9 3844 58-9351'));
