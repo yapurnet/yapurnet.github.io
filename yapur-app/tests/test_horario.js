@@ -194,7 +194,9 @@ function puras() {
       /* la jornada en la siesta */
       await call('POST', '/api/jornada/base', { lat: -28.4601, lng: -62.8302, radio: 40, tol: 10, dias: [0, 1, 2, 3, 4, 5, 6] }, A);
       r = await call('POST', '/api/jornada/ingreso', {}, P1);
-      t('el técnico inicia su jornada a mano', r.s === 200 && r.j.fila && r.j.fila.origen === 'manual', r);
+      t('con base cargada, tocar «Iniciar» sin estar en la base se rechaza', r.s === 403, r);
+      r = await call('POST', '/api/jornada/ingreso', { lat: -28.4601, lng: -62.8302, acc: 10 }, P1);
+      t('estando en la base, el técnico inicia su jornada (origen «base»)', r.s === 200 && r.j.fila && r.j.fila.origen === 'base', r);
       r = await call('GET', '/api/jornada', undefined, P1);
       t('él ve los tramos de hoy en su estado', r.j.horario && r.j.horario.tramos.length === 2 && r.j.horario.desde === 0 && r.j.horario.hasta === 24, r.j.horario);
       r = await call('GET', '/api/ubicaciones', undefined, A);

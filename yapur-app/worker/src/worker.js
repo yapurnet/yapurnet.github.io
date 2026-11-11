@@ -2111,8 +2111,9 @@ export class YapurDB extends DurableObject {
          (los técnicos vuelven a la base a guardar los vehículos); si sale otra vez, ese regreso deja de ser el último.
      Para que una posición pegada al borde del radio no cuente como entrar y salir, se «sale» recién a 1,5 veces el radio. Una posición cuya precisión es peor que el radio (o que 50 m)
      no se usa para decidir nada.
-     La hora es la del servidor (o la de la posición, que el servidor limita a los últimos 15 minutos). Si el técnico nunca pasa por la base, puede
-     tocar «Iniciar jornada» (queda marcado como manual, con la distancia a la base). Solo se guardan horas y distancias, nunca coordenadas.
+     La hora es la del servidor (o la de la posición, que el servidor limita a los últimos 15 minutos). No hay inicio a mano: los técnicos no pueden trabajar sin pasar por la base
+     (ahí buscan materiales, herramientas y vehículo), así que la jornada empieza recién cuando el celular llega a la base. Si la detección falla, la oficina carga la hora
+     con el ajuste (origen «oficina»). Solo si la oficina no cargó ninguna base queda el inicio a mano. Solo se guardan horas y distancias, nunca coordenadas.
      El técnico ve un aviso en su pantalla hasta que toca «Entendido» (queda anotado), pero el registro no depende de eso. */
   jornadaBase() {
     const r = this.q1("SELECT v FROM meta WHERE k='jornada_base'");
@@ -2160,13 +2161,16 @@ export class YapurDB extends DurableObject {
     else if (d > c.radio * 1.5 && f.en_base) this.sql.exec('UPDATE jornada SET en_base=0, ult=?, ev=? WHERE uid=? AND dia=?', ts, anotar(0, ts), u.id, dia);
     else this.sql.exec('UPDATE jornada SET ult=? WHERE uid=? AND dia=?', ts, u.id, dia);
   }
-  /* «Iniciar jornada» a mano: para quien arranca sin pasar por la base */
+  /* «Iniciar jornada» a mano. Con una base cargada ya NO sirve para arrancar desde cualquier lado (los técnicos tocaban «Iniciar» desde su casa y las horas
+     se pagan por hora): el servidor solo la acepta si la posición que manda el celular está de verdad dentro de la base, con una precisión que sirva
+     (es decir, lo mismo que habría anotado solo). Sin base cargada no hay contra qué comparar, y queda como antes (origen «manual»). */
   jornadaIngreso(u, b) {
     this.jornadaSoloTecnico(u);
     const now = Date.now(), dia = arTime(now).fecha;
     if (this.jornadaFila(u.id, dia)) return this.jornadaEstado(u);   // ya empezó: la hora no se pisa
     const c = this.jornadaBase(), pos = this.jornadaPos(b), dist = pos && c.base ? distM(pos.lat, pos.lng, c.base.lat, c.base.lng) : null;
-    const enBase = dist !== null && dist <= c.radio;
+    const acc = Number(b && b.acc), enBase = dist !== null && dist <= c.radio && !(isFinite(acc) && acc > Math.max(c.radio, 50));
+    if (c.base && !enBase) throw httpErr(403, 'Tu jornada empieza sola cuando tu celular llega a la base. Si ya estuviste en la base y no se anotó, avisale a la oficina para que te cargue la hora.', 'fuera_de_base');
     this.sql.exec('INSERT INTO jornada(uid,dia,ingreso,origen,dist,en_base,ult,ev,tr) VALUES(?,?,?,?,?,?,?,?,?)', u.id, dia, now, enBase ? 'base' : 'manual', dist, enBase ? 1 : 0, now, '[]', trStr(this.ubicDia(dia).tramos));
     return this.jornadaEstado(u);
   }
