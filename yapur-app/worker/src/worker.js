@@ -189,6 +189,8 @@ function guard(u, p, coll, existing, patch, ctx) {
       if (!isPlain(nw)) return 'Formato inválido.';
       const malComodato = guardComodato(p, nw, prev);
       if (malComodato) return malComodato;
+      const malMig = guardMigraciones(u, nw, prev);
+      if (malMig) return malMig;
       /* «Sin cargo» (no genera deuda ni se corta) lo marca solo el administrador: ni la oficina ni los técnicos, ni al dar de alta un cliente */
       if (('sinCargo' in nw && !same(nw.sinCargo || null, prev && prev.sinCargo || null)) || ('sinCargoMotivo' in nw && !same(nw.sinCargoMotivo || null, prev && prev.sinCargoMotivo || null))) return 'Solo el administrador puede marcar un servicio sin cargo.';
       if (!prev) { if (!p.editarClientes) return 'Tu usuario no puede dar de alta clientes.'; continue; }
@@ -386,6 +388,29 @@ function comodatoLimpio(v) {
 }
 /* la «firma» de una lista de equipos: dos listas con los mismos equipos (en cualquier orden) dan el mismo texto */
 const eqSig = arr => comodatoLimpio(arr).map(e => [e.t, e.d, e.s, e.n, e.e, e.o].map(x => String(x).toLowerCase()).join('|')).sort().join(';');
+/* Historial de migraciones de tecnología (antena → fibra): solo se agregan renglones. Nadie puede cambiar ni borrar los que ya están,
+   y los nuevos llevan quién lo hizo y la hora del servidor (no la del celular). El administrador puede corregir todo, como en el resto de la ficha. */
+const MIG_KEYS = ['f', 'ts', 'de', 'a', 'ipAnt', 'ip', 'nodoAnt', 'eqAnt', 'ret', 'por', 'obs'];
+const MIG_TECS = ['fibra', 'wireless'];
+function guardMigraciones(u, nw, prev) {
+  if (!('migraciones' in nw)) return null;
+  const mal = 'El historial de migraciones no es válido.', antes = prev && Array.isArray(prev.migraciones) ? prev.migraciones : [];
+  const lista = nw.migraciones;
+  if (!Array.isArray(lista) || lista.length > 30 || lista.length < antes.length) return mal;
+  for (let i = 0; i < antes.length; i++) if (!same(lista[i], antes[i])) return 'El historial de migraciones no se puede modificar: solo se agregan renglones.';
+  for (let i = antes.length; i < lista.length; i++) {
+    const m = lista[i];
+    if (!isPlain(m) || Object.keys(m).some(k => !MIG_KEYS.includes(k))) return mal;
+    for (const [k, n] of [['f', 10], ['de', 10], ['a', 10], ['ipAnt', 80], ['ip', 80], ['nodoAnt', 80], ['eqAnt', 80], ['por', 60], ['obs', 200]]) if (k in m && (typeof m[k] !== 'string' || m[k].length > n)) return mal;
+    if (!/^\d{4}-\d\d-\d\d$/.test(m.f || '') || !MIG_TECS.includes(m.de) || !MIG_TECS.includes(m.a) || m.de === m.a) return mal;
+    if ('ret' in m) {
+      if (!Array.isArray(m.ret) || m.ret.length > 12) return mal;
+      for (const e of m.ret) if (!isPlain(e) || Object.keys(e).some(k => !['t', 'd', 's'].includes(k)) || ['t', 'd', 's'].some(k => k in e && (typeof e[k] !== 'string' || e[k].length > 80))) return mal;
+    }
+    m.ts = Date.now(); m.por = String(u.nombre || u.usuario || '').slice(0, 60);   // lo anota el servidor
+  }
+  return null;
+}
 function guardComodato(p, nw, prev) {
   if (!('comodato' in nw) || (prev && same(nw.comodato, prev.comodato))) return null;
   if (!p.comodato) return 'Tu usuario no puede cargar los equipos en comodato.';

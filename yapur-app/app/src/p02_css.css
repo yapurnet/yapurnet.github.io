@@ -305,6 +305,8 @@ button.pelo:hover{border-color:var(--accent-line)}
 /* comodato: equipos prestados, contrato y hoja de firma */
 .cm-block{display:flex;flex-direction:column;gap:10px}
 .cm-block h3{margin:0}
+.mg-block{display:flex;flex-direction:column;gap:10px}
+.mg-block h3{margin:0}
 .cm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .cm-list li{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);overflow-wrap:anywhere}
 .cm-row{display:flex;flex-direction:column;gap:10px}

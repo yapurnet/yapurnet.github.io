@@ -76,6 +76,32 @@ const DNI_TXT = '20.111.222';
     r = await call('GET', '/api/contratos', undefined, T2);
     t('ni ver contratos', r.s === 403, r);
 
+    /* ---- migrar un cliente de antena a fibra: el técnico cambia la tecnología y las IP, y queda un historial que no se puede tocar ---- */
+    const cl = async () => (await call('GET', '/api/doc/clientes/c01', undefined, O)).j.data.items.cB;
+    const M1 = { f: '2026-11-11', ts: 1, de: 'wireless', a: 'fibra', ipAnt: '10.20.43.9', ip: '192.168.100.4', nodoAnt: 'Torre Leo', eqAnt: 'AA:BB', ret: [{ t: 'Antena', d: 'CPE Ubiquiti LiteBeam Gen2', s: '24:A4:3C:01:02:AB' }], por: 'inventado', obs: 'se retiró la antena' };
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { tec: 'wireless', ip: '10.20.43.9', nodo: 'Torre Leo', equipo: 'AA:BB' } } } }, O);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { tec: 'fibra', ip: '192.168.100.4', nodo: '', equipo: '2C:3A:E8:11:AA:BB', migraciones: [M1] } } } }, T1);
+    t('el técnico migra al cliente: cambia la tecnología y la IP y anota el historial', r.s === 200 && r.j.data.items.cB.tec === 'fibra' && r.j.data.items.cB.ip === '192.168.100.4' && r.j.data.items.cB.migraciones.length === 1, r);
+    let cb = await cl();
+    t('el servidor anota quién lo hizo y la hora (no lo que mande el celular)', cb.migraciones[0].por === 'tec1' && Math.abs(cb.migraciones[0].ts - Date.now()) < 60e3 && cb.migraciones[0].ipAnt === '10.20.43.9' && cb.migraciones[0].ip === '192.168.100.4' && cb.migraciones[0].ret[0].s === '24:A4:3C:01:02:AB', cb.migraciones);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [Object.assign({}, cb.migraciones[0], { ipAnt: '1.1.1.1' })] } } } }, T1);
+    t('un técnico no puede cambiar un renglón del historial', r.s === 403 && /no se puede modificar/.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [] } } } }, T1);
+    t('ni borrar el historial', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [cb.migraciones[0], Object.assign({}, M1, { inventado: 1 })] } } } }, T1);
+    t('ni agregar un renglón con campos de más', r.s === 403 && /historial/.test(r.j.error), r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [cb.migraciones[0], Object.assign({}, M1, { f: 'ayer' })] } } } }, T1);
+    t('ni con una fecha que no es fecha', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [cb.migraciones[0], Object.assign({}, M1, { a: 'fibra', de: 'fibra' })] } } } }, T1);
+    t('ni una migración de una tecnología a la misma', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [cb.migraciones[0], Object.assign({}, M1, { ip: 'x'.repeat(81) })] } } } }, T1);
+    t('ni con textos demasiado largos', r.s === 403, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { nombre: 'Otro Cliente', migraciones: cb.migraciones } } } }, O);
+    t('guardar de nuevo la ficha con el mismo historial no molesta', r.s === 200 && (await cl()).migraciones.length === 1, r);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cB: { migraciones: [cb.migraciones[0], Object.assign({}, M1, { de: 'fibra', a: 'wireless', ts: 5, por: 'otro' })] } } } }, O);
+    cb = await cl();
+    t('la oficina puede sumar otro renglón (vuelta a antena) y queda con su nombre y la hora del servidor', r.s === 200 && cb.migraciones.length === 2 && cb.migraciones[1].por === 'ofi' && cb.migraciones[1].ts > 1e12 && cb.migraciones[0].por === 'tec1', cb.migraciones);
+
     /* ---- modelos de equipos que el técnico elige de una lista (así solo escribe la MAC) ---- */
     r = await call('GET', '/api/comodato/modelos', undefined, T1);
     const modDef = (r.j.modelos || []).map(m => m.t + '|' + m.d);
