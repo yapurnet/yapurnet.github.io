@@ -70,7 +70,7 @@ async def main():
         pt = await login(ctx, 'tec', 'fernando1')
         await pt.wait_for_function('S.clientes.size === 3', timeout=10000)
 
-        # 1) la ficha de un cliente por antena ofrece migrar; la de uno que ya está en fibra o sin tecnología, no
+        # 1) la ficha de un cliente por antena o sin la tecnología cargada ofrece migrar; la de uno que ya figura en fibra, no
         await pt.evaluate("openClient('cUno')"); await pt.wait_for_selector('.cm-block')
         ft = await pt.inner_text('.sheet')
         check('la ficha del cliente por antena muestra su tecnología y su IP, y el botón «Migrar a fibra óptica»', 'Antena wireless' in ft and '10.20.43.9' in ft and await pt.query_selector('[data-act=migrar]') is not None, ft[:400])
@@ -79,7 +79,7 @@ async def main():
         check('uno que ya está en fibra no tiene el botón (ni el bloque, si no hay historial)', await pt.query_selector('[data-act=migrar]') is None)
         await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cTres')")
         await pt.wait_for_selector('.sheet')
-        check('uno sin tecnología definida tampoco', await pt.query_selector('[data-act=migrar]') is None)
+        check('uno que todavía no tiene la tecnología cargada sí lo ofrece (hoy es la mayoría de los clientes)', await pt.query_selector('[data-act=migrar]') is not None)
         await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cUno')"); await pt.wait_for_selector('[data-act=migrar]')
 
         # 2) el formulario trae lo que ya se sabe
@@ -121,15 +121,25 @@ async def main():
         check('la ficha lo muestra: «Pasó a fibra óptica», las dos IP y lo que se retiró; ya no ofrece migrar', 'Pasó a fibra óptica el' in ft and 'IP 10.20.43.9' in ft and 'IP 192.168.100.77' in ft and 'LiteBeam' in ft and 'Fernando Paz' in ft and await pt.query_selector('[data-act=migrar]') is None, ft[:700])
         check('la ficha muestra ahora la ONU y la fuente en comodato', 'Huawei HG8145V5' in ft and '2C:3A:E8:11:AA:BB' in ft)
         await shot(pt, 'migrar-ficha.png')
+
+        # 4b) un cliente sin la tecnología cargada también se puede migrar (queda anotado que venía de antena)
+        await pt.evaluate("closeModal()"); await pt.evaluate("openClient('cTres')"); await pt.wait_for_selector('[data-act=migrar]')
+        await pt.click('[data-act=migrar]'); await pt.wait_for_selector('#mgform')
+        check('sin IP ni equipos cargados, el formulario viene vacío y la ONU con su modelo', await pt.input_value('#mg-ipa') == '' and await pt.input_value('#mg-ip') == '' and await pt.input_value('#mg-m') == 'Huawei HG8145V5' and await pt.query_selector('[data-ret]') is None)
+        await pt.fill('#mg-ip', '192.168.100.90'); await pt.fill('#mg-s', 'hwtc1a2b3c4d')
+        await pt.click('#mgform button[type=submit]'); await pt.wait_for_selector('#mgform', state='detached', timeout=8000)
+        await pt.wait_for_function("document.querySelector('.sheet').innerText.includes('Pasó a fibra')", timeout=8000)
+        c3 = cliente_srv(TA, 'cTres')
+        check('pasa a fibra; el historial dice que venía de antena y la MAC/serie queda como se escribió (en mayúsculas)', c3['tec'] == 'fibra' and c3['ip'] == '192.168.100.90' and c3['migraciones'][0]['de'] == 'wireless' and 'ipAnt' not in c3['migraciones'][0] and c3['equipo'] == 'HWTC1A2B3C4D' and [e['t'] for e in c3['comodato']] == ['ONU', 'Fuente o adaptador'], c3)
         await ctx.close()
 
         # 5) un técnico sin permiso de datos técnicos no ve el botón
         api('POST', '/api/users', {'usuario': 'tec2', 'nombre': 'Marcos', 'role': 'tecnico', 'clave': 'marcos123', 'permisos': {'clientesTodos': True, 'ubicacion': False}}, TA)
-        api('PATCH', '/api/doc/clientes/' + shard('cTres'), {'data': {'items': {'cTres': dict(base, nombre='Sin Tecnología', codigo='79', tec='wireless', ip='10.20.43.50')}}}, TA)
+        api('PATCH', '/api/doc/clientes/' + shard('cDos'), {'data': {'items': {'cDos': dict(base, nombre='Ya Tiene Fibra', codigo='78', tec='wireless', ip='10.20.43.50')}}}, TA)
         ctx2 = await nuevo(br, 390, 844)
         p2 = await login(ctx2, 'tec2', 'marcos123')
         await p2.wait_for_function('S.clientes.size === 3', timeout=10000)
-        await p2.evaluate("openClient('cTres')"); await p2.wait_for_selector('.sheet')
+        await p2.evaluate("openClient('cDos')"); await p2.wait_for_selector('.sheet')
         check('sin el permiso de ubicación y datos técnicos no se ofrece migrar', await p2.query_selector('[data-act=migrar]') is None)
         await ctx2.close()
         await br.close()
