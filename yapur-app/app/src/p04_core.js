@@ -67,6 +67,7 @@ const PERMS=[
   ['telefono','Ver teléfonos','','Clientes'],
   ['dni','Ver DNI / CUIT / CUIL','','Clientes'],
   ['editarClientes','Dar de alta y editar clientes','Ficha completa, plan, estado y facturación.','Clientes'],
+  ['altaCampo','Dar de alta clientes de instalaciones ocasionales','El cliente queda «por instalar» con una orden a su nombre; la oficina lo confirma.','Clientes'],
   ['ubicacion','Cargar ubicaciones y datos técnicos','Coordenadas, usuario, nodo y equipo.','Clientes'],
   ['ordenesTodas','Ver y asignar las órdenes de todos','Apagado: solo ve las suyas y las que nadie tomó.','Órdenes'],
   ['crearOrdenes','Crear y editar órdenes','','Órdenes'],
@@ -90,8 +91,8 @@ const PERMS=[
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,redPlano:false,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,elegirPlan:true,comodato:true,contratosGestion:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,redPlano:true,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,elegirPlan:true,comodato:true,contratosGestion:true}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,altaCampo:true,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,redPlano:false,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,elegirPlan:true,comodato:true,contratosGestion:false},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,altaCampo:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,redPlano:true,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,elegirPlan:true,comodato:true,contratosGestion:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */

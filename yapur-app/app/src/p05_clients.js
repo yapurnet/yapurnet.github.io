@@ -507,12 +507,14 @@ function openClientForm(id){
   const old=id?S.clientes.get(id):null;
   const full=can('editarClientes');
   if(!full&&!can('ubicacion'))return toast('Tu perfil no puede editar clientes','bad');
-  const comp=!full&&puedeCompletar(old);   /* técnico completando a un abonado nuevo */
-  if(!old&&!full)return toast('Tu perfil no puede dar de alta clientes','bad');
-  const c=old||{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()};
+  const alta=!old&&!full&&can('altaCampo');   /* técnico dando de alta una instalación ocasional en la calle */
+  const comp=!full&&(alta||puedeCompletar(old));   /* técnico completando a un abonado nuevo */
+  if(!old&&!full&&!alta)return toast('Tu perfil no puede dar de alta clientes','bad');
+  const c=old||(alta?{estado:'pendiente'}:{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()});
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
   const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
+    ${alta?'<div class="hint">Queda como «por instalar» y se crea una orden de instalación a tu nombre. La oficina completa el plan y la facturación.</div>':''}
     ${!old&&full?`<details class="qsec" id="cf-rep"><summary>Completar con el reporte del técnico</summary><div class="form" style="margin-top:10px">
       ${F('Pegá el texto que mandó el técnico','cf-rep-txt','<textarea id="cf-rep-txt" rows="5" autocomplete="off" placeholder="NOMBRE: Ana Ester Paz&#10;DNI: 28354900&#10;IP: 10.20.43.9&#10;PAGO: (Efectivo) 65mil pesos"></textarea>')}
       <div class="actions start"><button class="btn small" type="button" id="cf-rep-go">Completar los datos</button></div><div class="hint" id="cf-rep-out"></div></div></details>`:''}
@@ -595,6 +597,7 @@ function openClientForm(id){
       const nf=readNap();if(nf){if(nf.bad)return toast(nf.bad,'bad');patch.nap=nf.nap;patch.napPuerto=nf.puerto;}
       if(comp){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
+        if(alta&&!v('cf-dir'))return toast('Falta el domicilio','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),dir:v('cf-dir'),loc:v('cf-loc')});
         if($('#cf-tel',el))Object.assign(patch,{tel:v('cf-tel'),tel2:v('cf-tel2')});   /* sin el permiso de teléfono el campo no está: guardar no puede borrarlo */
         if(v('cf-dni'))patch.dni=fmtDoc(v('cf-dni'));
@@ -643,7 +646,8 @@ function openClientForm(id){
       try{
         let nuevo=null;
         if(old)await saveClient(old,patch);
-        else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},patch));nuevo=nid;}
+        else{const nid=newId();await putItem('clientes',clientShard(nid),nid,Object.assign({creado:Date.now(),mod:Date.now()},alta?{estado:'pendiente'}:{},patch));nuevo=nid;
+          if(alta){const cre=todayStr(),t=tecById(S.tecId);await putItem('ordenes',orderShard(cre.slice(0,7)),newId(),{estado:'pendiente',creado:cre,mod:Date.now(),clientId:nid,tipo:'instalacion',tecnico:S.tecId||null,tecNombre:t?t.nombre:null,fecha:cre,prioridad:'normal',notas:'Instalación ocasional dada de alta en la calle.'});}}
         toast('Cliente guardado');closeModal();
         if(nuevo&&repPago)cobrarTrasAlta(nuevo,repPago);
       }catch(err){dbError(err);}
@@ -655,7 +659,7 @@ function openClientForm(id){
 VIEWS.clientes={
   mount(el){
     el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="cl-q" type="search" placeholder="Buscar por nombre, N° de cliente, DNI o CUIT, teléfono, calle o usuario" autocomplete="off" aria-label="Buscar clientes" value="${esc(CL.q)}">
-      ${can('editarClientes')?'<button class="btn primary" type="button" id="cl-new">Nuevo cliente</button>':''}</div>
+      ${can('editarClientes')||can('altaCampo')&&can('ubicacion')?'<button class="btn primary" type="button" id="cl-new">Nuevo cliente</button>':''}</div>
       <div class="seg" id="cl-seg"></div></div><div id="cl-ct"></div><div id="cl-count" class="hint"></div><div class="list" id="cl-list"></div>`;
     $('#cl-q',el).addEventListener('input',e=>{CL.q=e.target.value;CL.limit=50;this.update();});
     const nb=$('#cl-new',el);if(nb)nb.addEventListener('click',()=>openClientForm(null));

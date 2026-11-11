@@ -38,11 +38,11 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, redPlano: false, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, redPlano: true, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, elegirPlan: true, comodato: true, contratosGestion: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, altaCampo: true, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, redPlano: false, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, altaCampo: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, redPlano: true, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, elegirPlan: true, comodato: true, contratosGestion: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -172,6 +172,7 @@ const COMP_METODOS = ['transferencia'];
 const COMP_ID_RE = /^[a-f0-9]{20}$/;
 const COMP_MAX = 450e3;   // bytes de la foto ya comprimida (la app la reduce antes de subirla)
 const CLIENT_LOCKED = ['precio', 'planId', 'extras', 'hp', 'ciclo', 'desde', 'dia', 'deudaAnt', 'cuenta'];
+const CLIENT_ALTA_CAMPO = new Set(['nombre', 'dir', 'loc', 'tel', 'tel2', 'dni', 'ref', 'lat', 'lng', 'tec', 'usuario', 'ip', 'nodo', 'equipo', 'nap', 'napPuerto', 'estado', 'creado', 'mod', 'notas', 'altaCampo']);
 const ANUL_KEYS = ['anulado', 'anuladoMotivo', 'anuladoFecha', 'anuladoPor'];
 /* controles de integridad; devuelven un texto si hay que rechazar. Pueden completar datos (quién lo hizo). */
 function guard(u, p, coll, existing, patch, ctx) {
@@ -193,7 +194,14 @@ function guard(u, p, coll, existing, patch, ctx) {
       if (malMig) return malMig;
       /* «Sin cargo» (no genera deuda ni se corta) lo marca solo el administrador: ni la oficina ni los técnicos, ni al dar de alta un cliente */
       if (('sinCargo' in nw && !same(nw.sinCargo || null, prev && prev.sinCargo || null)) || ('sinCargoMotivo' in nw && !same(nw.sinCargoMotivo || null, prev && prev.sinCargoMotivo || null))) return 'Solo el administrador puede marcar un servicio sin cargo.';
-      if (!prev) { if (!p.editarClientes) return 'Tu usuario no puede dar de alta clientes.'; continue; }
+      if (!prev) {
+        if (p.editarClientes) continue;
+        /* instalaciones ocasionales en la calle: el técnico da de alta a un abonado «por instalar» con sus datos y los técnicos; nada de facturación */
+        if (!p.altaCampo || !p.ubicacion) return 'Tu usuario no puede dar de alta clientes.';
+        if (nw.estado !== 'pendiente') return 'Un cliente dado de alta desde la calle queda «por instalar»; la oficina lo activa.';
+        for (const k of Object.keys(nw)) if (!CLIENT_ALTA_CAMPO.has(k) && !(k === 'planId' && p.elegirPlan)) return 'Tu usuario no puede cargar ese dato al dar de alta un cliente.';
+        continue;
+      }
       if (p.editarClientes) continue;
       for (const k of CLIENT_LOCKED) if (k in nw && !same(nw[k], prev[k])) {
         /* con el permiso «Elegir el plan de un abonado por instalar» el técnico indica qué plan quiere el cliente nuevo: solo el plan, y solo mientras el cliente está por instalar */
