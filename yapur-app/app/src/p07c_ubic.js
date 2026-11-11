@@ -309,7 +309,7 @@ function jornadaBarra(){
   }else if(!f){
     const tr=stTramos(st.horario);
     if(h<tr[0][0]-1||h>=tr[tr.length-1][1]){bar.hidden=true;return;}
-    cls='warn';html=`<span>Todavía no empezó tu jornada.${st.hayBase?' Se anota sola cuando tu celular llega a la base.':''}</span><button class="btn small" type="button" id="jr-ini">Iniciar jornada</button>`;
+    cls='warn';html=`<span>Todavía no empezó tu jornada. Empieza sola cuando tu celular llega a la base. Si ya estuviste en la base y no figura, avisale a la oficina.</span>`;
   }else if(tr2.length>1&&h>=tr2[0][1]&&h<tr2[1][0]){
     cls='quiet';html=`<span>Tu mañana${f.regreso&&f.enBase?' terminó a las <b>'+hhmm(f.regreso)+'</b> al volver a la base':' terminó'}. Retomás a las <b>${tr2[1][0]}</b> h.</span>`;
   }else if(f.regreso&&f.enBase&&!(f.ingreso2&&f.regreso<f.ingreso2)){
@@ -320,7 +320,6 @@ function jornadaBarra(){
   if(st.enterado&&st.horas)html+=jrHorasTxt(st);
   bar.className='jrbar'+(cls?' '+cls:'');bar.innerHTML=html;bar.hidden=false;
   const hs=$('#jr-hs',bar);if(hs)hs.addEventListener('click',jornadaMisHoras);
-  const b=$('#jr-ini',bar);if(b)b.addEventListener('click',jornadaIniciar);
   const ok=$('#jr-ok',bar),inf=$('#jr-info',bar);
   if(ok)ok.addEventListener('click',jornadaEntendido);
   if(inf)inf.addEventListener('click',jornadaAviso);
@@ -345,23 +344,9 @@ async function jornadaEntendido(){
   try{JR.st=await NET.api('POST','/api/jornada/acepto',{});}catch(err){toast(err&&err.message||'No se pudo guardar. Probá de nuevo.','bad');return;}
   closeModal();jornadaBarra();
 }
-/* mejor posición de los próximos 8 segundos, o nada si el celular no la da: iniciar la jornada no debe trabarse por el GPS */
-async function jornadaPos(){
-  try{
-    const run=gpsStart(()=>{}),tm=setTimeout(()=>run.stop(),8000);
-    try{const r=await run.promise;return {lat:r.lat,lng:r.lng,acc:Math.round(r.acc)};}finally{clearTimeout(tm);}
-  }catch(e){return null;}
-}
-async function jornadaIniciar(){
-  const b=$('#jr-ini');if(b){b.disabled=true;b.textContent='Buscando señal…';}
-  const pos=await jornadaPos();
-  try{JR.st=await NET.api('POST','/api/jornada/ingreso',pos||{},{timeout:20000});if(JR.st.fila)jrMarcar(JR.st.dia);toast('Jornada iniciada a las '+(JR.st.fila?hhmm(JR.st.fila.ingreso):''));}
-  catch(e){toast(e&&e.message||'No se pudo iniciar la jornada','bad');}
-  jornadaBarra();
-}
 function jornadaAviso(){
   openModal({title:'Control de jornada',html:`<p>La oficina registra a qué hora empezás y a qué hora terminás el día, con la ubicación del celular:</p>
-    <ul class="plain"><li><b>Ingreso:</b> la primera vez que tu celular${ubNativo()&&ubSiempreOk()?'':', con la app abierta,'} aparece en la base.</li><li><b>Fin:</b> la última vez que volvés a la base a guardar el vehículo.</li><li>Si empezás sin pasar por la base, tocá «Iniciar jornada» en la barra de arriba.</li><li>Ves tus horas en esa misma barra.</li><li>Este registro guarda solo las horas y la distancia a la base, durante 90 días.</li></ul>
+    <ul class="plain"><li><b>Ingreso:</b> la primera vez que tu celular${ubNativo()&&ubSiempreOk()?'':', con la app abierta,'} aparece en la base.</li><li><b>Fin:</b> la última vez que volvés a la base a guardar el vehículo.</li><li>Las horas se cuentan desde que llegás a la base (ahí buscás materiales, herramientas y vehículo). Si ya estuviste y no se anotó, avisale a la oficina para que te cargue la hora.</li><li>Ves tus horas en esa misma barra.</li><li>Este registro guarda solo las horas y la distancia a la base, durante 90 días.</li></ul>
     <div class="actions"><button class="btn primary" type="button" id="jr-ok2">Entendido</button></div>`,
     onMount(el){$('#jr-ok2',el).addEventListener('click',jornadaEntendido);}});
 }

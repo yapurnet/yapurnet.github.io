@@ -33,6 +33,10 @@ async def main():
         api('POST', '/api/users', {'usuario': u, 'nombre': n, 'role': 'tecnico', 'clave': u + '11', 'tel': tel}, TA)
     now_ms = int(time.time() * 1000); desde = max(0, ar_hora(now_ms) - 2)
     api('POST', '/api/ubicacion/horario', {'desde': desde, 'hasta': 24}, TA)
+    # Juan arrancó a mano ANTES de que se cargara la base (sin base no hay con qué compararlo): esa fila sigue viéndose como «a mano»
+    TJ0 = api('POST', '/api/login', {'usuario': 'juan', 'clave': 'juan11'})[1]['token']
+    st, j = api('POST', '/api/jornada/ingreso', {}, TJ0)
+    check('sin base cargada, el inicio a mano todavía se acepta (origen «manual»)', st == 200 and j['fila']['origen'] == 'manual', (st, j))
     st, j = api('POST', '/api/jornada/base', {'lat': BASEPOS[0], 'lng': BASEPOS[1], 'radio': 40, 'tol': 10, 'dias': [0, 1, 2, 3, 4, 5, 6]}, TA)
     check('el administrador carga la base', st == 200 and j['base']['lat'] == BASEPOS[0], (st, j))
     async with async_playwright() as p:
@@ -65,23 +69,24 @@ async def main():
         fin = await pp.evaluate("""(()=>{const f=JR.st.fila;JR.st=Object.assign({},JR.st,{fila:Object.assign({},f,{regreso:f.ingreso+9*3600e3+18*60e3,enBase:true})});jornadaBarra();return document.querySelector('#jrBar').innerText;})()""")
         check('al volver a la base la barra dice cuándo terminó y cuánto duró', 'terminó a las' in fin and '9 h 18 min' in fin, fin)
         await pctx.close()   # que la página no mande más posiciones: lo que sigue se simula con el servidor
-        # --- Juan empieza lejos de la base: la jornada la inicia a mano
-        jctx = await ctx_con(*LEJOS); await jctx.route('**/fonts.g*/**', lambda r: r.abort())
-        jp = await login(jctx, 'juan', 'juan11')
-        await jp.wait_for_selector('[role=dialog] [data-act=si]', timeout=8000)
-        await jp.click('[role=dialog] [data-act=si]')
-        await jp.wait_for_selector('#jr-ok', timeout=8000)
-        await jp.click('#jr-ok')
-        await jp.wait_for_selector('#jr-ini', timeout=8000)
-        barra = await jp.inner_text('#jrBar')
-        check('lejos de la base: «Todavía no empezó tu jornada» con el botón para iniciarla', 'Todavía no empezó tu jornada' in barra and 'Iniciar jornada' in barra, barra)
-        await jp.click('#jr-ini')
-        await jp.wait_for_timeout(400); await jctx.set_geolocation({'latitude': LEJOS[0], 'longitude': LEJOS[1], 'accuracy': 8})   # el GPS simulado entrega la posición a quien la pide
-        await jp.wait_for_function("document.querySelector('#jrBar').innerText.includes('Tu jornada laboral comenzó a las')", timeout=15000)
-        barra = await jp.inner_text('#jrBar')
-        st, jf = api('GET', '/api/jornada', None, api('POST', '/api/login', {'usuario': 'juan', 'clave': 'juan11'})[1]['token'])
-        check('iniciada a mano: figura «manual», con la distancia a la base, y la barra no dice «en la base»', jf['fila']['origen'] == 'manual' and (jf['fila']['dist'] or 0) > 1000 and 'en la base' not in barra, (jf, barra))
-        await jctx.close()
+        # --- Luis está lejos de la base: no puede iniciar la jornada desde ahí
+        lctx = await ctx_con(*LEJOS); await lctx.route('**/fonts.g*/**', lambda r: r.abort())
+        lp = await login(lctx, 'luis', 'luis11')
+        await lp.wait_for_selector('[role=dialog] [data-act=si]', timeout=8000)
+        await lp.click('[role=dialog] [data-act=si]')
+        await lp.wait_for_selector('#jr-ok', timeout=8000)
+        await lp.click('#jr-ok')
+        await lp.wait_for_function("document.querySelector('#jrBar').innerText.includes('Todavía no empezó tu jornada')", timeout=8000)
+        barra = await lp.inner_text('#jrBar')
+        check('lejos de la base: «Todavía no empezó tu jornada» y se explica que empieza sola al llegar a la base', 'Empieza sola cuando tu celular llega a la base' in barra and 'avisale a la oficina' in barra, barra)
+        check('y no hay botón «Iniciar jornada» (nadie arranca las horas desde su casa)', await lp.evaluate("!document.querySelector('#jr-ini')") and 'Iniciar jornada' not in barra, barra)
+        await lp.wait_for_timeout(600)   # le da tiempo a mandar una posición lejana
+        TL = api('POST', '/api/login', {'usuario': 'luis', 'clave': 'luis11'})[1]['token']
+        st, jl = api('GET', '/api/jornada', None, TL)
+        check('mandando posiciones lejos de la base el servidor no anota ningún ingreso', st == 200 and jl['fila'] is None, jl)
+        st, jl = api('POST', '/api/jornada/ingreso', {'lat': LEJOS[0], 'lng': LEJOS[1], 'acc': 8}, TL)
+        check('y si llegara a pedirlo por la API desde lejos, el servidor lo rechaza con un mensaje claro', st == 403 and 'base' in (jl.get('error') or ''), (st, jl))
+        await lctx.close()
         # --- Pedro termina el día: sale y vuelve a la base (lo simula el servidor, con puntos en orden)
         TP = api('POST', '/api/login', {'usuario': 'pedro', 'clave': 'pedro11'})[1]['token']
         t0 = int(time.time() * 1000)
@@ -99,7 +104,7 @@ async def main():
         cards = await ap.evaluate("[...document.querySelectorAll('.tcard')].map(c=>c.innerText)")
         pe = next(c for c in cards if 'Pedro' in c); ju = next(c for c in cards if 'Juan' in c); lu = next(c for c in cards if 'Luis' in c)
         check('Pedro: ingresó, terminó y cuánto duró; ingresó en la base', 'Ingresó ' in pe and 'Terminó ' in pe and 'jornada de' in pe and 'Ingresó en la base' in pe, pe)
-        check('Juan: ingresó a mano y a cuántos metros de la base', 'Ingresó ' in ju and 'Inició a mano' in ju and 'de la base' in ju and 'Terminó' not in ju, ju)
+        check('Juan (que había iniciado a mano antes de cargar la base): se sigue viendo como «Inició a mano»', 'Ingresó ' in ju and 'Inició a mano' in ju and 'Terminó' not in ju, ju)
         check('Luis, que no apareció: «Sin ingreso»', 'Sin ingreso' in lu, lu)
         check('el técnico sin ingreso sube al principio de la lista', cards[0].startswith('Luis'), cards[0][:40])
         cartel = await ap.inner_text('#tu-ingreso')

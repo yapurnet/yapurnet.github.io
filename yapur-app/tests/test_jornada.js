@@ -112,11 +112,21 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     r = await call('GET', '/api/ubicaciones', undefined, O);
     t('la oficina sin permiso no ve nada de esto', r.s === 403, r);
 
-    /* ingreso manual */
+    /* ingreso a mano: con base cargada solo vale estando de verdad en la base (nadie arranca la jornada desde su casa) */
     r = await call('POST', '/api/jornada/ingreso', { lat: LEJOS.lat, lng: LEJOS.lng, acc: 20 }, J);
-    t('Juan inicia a mano desde lejos: origen «manual» y la distancia a la base', r.s === 200 && r.j.fila.origen === 'manual' && r.j.fila.dist > 1000 && r.j.fila.enBase === false && Math.abs(r.j.fila.ingreso - Date.now()) < 5000, r.j);
+    t('Juan toca «Iniciar» desde lejos de la base: se rechaza con un mensaje claro', r.s === 403 && r.j.code === 'fuera_de_base' && /base/.test(r.j.error || r.j.message || ''), r);
+    r = await call('GET', '/api/jornada', undefined, J);
+    t('y no queda ninguna hora anotada', r.j.fila === null, r.j);
     r = await call('POST', '/api/jornada/ingreso', { lat: 'x', lng: 'y' }, L);
-    t('sin posición válida igual se anota la hora (origen «manual», sin distancia)', r.s === 200 && r.j.fila.origen === 'manual' && r.j.fila.dist === null, r.j);
+    t('sin posición válida tampoco se anota la hora', r.s === 403 && r.j.code === 'fuera_de_base', r);
+    r = await call('POST', '/api/jornada/ingreso', {}, L);
+    t('ni mandando nada', r.s === 403, r);
+    r = await call('POST', '/api/jornada/ingreso', { lat: BASEPOS.lat, lng: BASEPOS.lng, acc: 900 }, L);
+    t('ni con una posición en la base pero con precisión mala (±900 m)', r.s === 403, r);
+    r = await call('GET', '/api/jornada', undefined, L);
+    t('Luis sigue sin ingreso', r.j.fila === null, r.j);
+    r = await call('POST', '/api/jornada/ingreso', { lat: BASEPOS.lat + 0.0002, lng: BASEPOS.lng, acc: 15 }, L);
+    t('en cambio, estando en la base (si el celular no mandó la posición a tiempo) se anota con origen «base» y la distancia', r.s === 200 && r.j.fila.origen === 'base' && r.j.fila.enBase === true && r.j.fila.dist > 10 && r.j.fila.dist <= 40 && Math.abs(r.j.fila.ingreso - Date.now()) < 5000, r.j);
     r = await call('POST', '/api/jornada/fin', {}, P);
     t('ya no hay «terminar jornada» a mano: el fin sale solo', r.s === 404, r);
 
@@ -201,11 +211,13 @@ const LEJOS = { lat: -28.6, lng: -62.9 };
     r = await call('GET', '/api/ubicaciones?dia=2999-01-04', undefined, A);
     t('un día futuro no es falta: «esperando»', r.j.tecnicos.every(x => x.jornada.estado === 'esperando'), r.j.tecnicos.map(x => x.jornada.estado));
 
-    /* sacar la base: ya no hay ingreso automático, pero sí manual */
+    /* sacar la base: ya no hay ingreso automático, y el manual vuelve a valer (no hay base con qué compararlo) */
     r = await call('POST', '/api/jornada/base', { radio: 40, tol: 10, dias: [1, 2, 3, 4, 5, 6] }, A);
     t('se puede quitar la base (queda sin ubicación)', r.s === 200 && r.j.base === null, r);
     r = await call('GET', '/api/jornada', undefined, J);
     t('sin base, el técnico lo sabe (hayBase = false)', r.j.hayBase === false, r.j);
+    r = await call('POST', '/api/jornada/ingreso', { lat: LEJOS.lat, lng: LEJOS.lng, acc: 20 }, J);
+    t('sin base cargada no hay contra qué comparar: el inicio a mano queda como «manual», sin distancia', r.s === 200 && r.j.fila.origen === 'manual' && r.j.fila.dist === null && r.j.fila.enBase === false, r);
     r = await call('GET', '/api/ubicaciones', undefined, A);
     t('sin base, lo ya anotado se conserva', r.j.tecnicos.find(x => x.nombre === 'Pedro').jornada.ingreso === tsBase && r.j.tecnicos.find(x => x.nombre === 'Pedro').jornada.estado !== 'sin_base', r.j.tecnicos.map(x => [x.nombre, x.jornada.estado]));
 
