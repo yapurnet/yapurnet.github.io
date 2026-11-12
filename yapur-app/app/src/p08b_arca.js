@@ -215,19 +215,32 @@ function ventaVer(v,nc,onAnular){
       });
     }});
 }
+function ventasCuerpo(d,recargar){
+  const lista=d.ventas||[];
+  return {html:`<p class="small muted">Punto de venta ${esc(String(d.pv2||'—'))}. Mismo CUIT y razón social. Estas ventas no suman a la caja, los cobros ni los informes de internet.</p>
+    <div class="actions start"><button class="btn primary" type="button" id="vt-nueva">Nueva venta</button></div>
+    <div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="r">Importe</th><th></th></tr></thead><tbody>${lista.length?lista.map((v,i)=>`<tr><td>${esc(dmy(v.fe.fecha))}</td><td>${FE_LETRA[v.fe.tipo]} ${esc(feNro(v.fe))}${v.nc?' <span class="chip warn">Anulada</span>':''}</td><td>${esc(v.fe.nombre)}</td><td>${esc(VENTA_PAGO[v.fe.pago&&v.fe.pago.m]||'')}</td><td class="r">${esc(fePesos(v.fe.total))}</td><td><button class="btn small" type="button" data-v="${i}">Ver</button></td></tr>`).join(''):'<tr><td colspan="6" class="muted">Todavía no hay ventas.</td></tr>'}</tbody></table></div>`,
+    mount(el){
+      $('#vt-nueva',el).addEventListener('click',()=>ventaNueva(recargar));
+      el.querySelectorAll('[data-v]').forEach(b=>b.addEventListener('click',()=>ventaVer(lista[Number(b.dataset.v)],false,recargar)));
+    }};
+}
 async function ventasAbrir(){
   let d;try{d=await NET.api('GET','/api/ventas');}catch(err){return toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
-  const lista=d.ventas||[];
-  openModal({title:'Ventas de otra actividad',wide:true,html:`<p class="small muted">Punto de venta ${esc(String(d.pv2||'—'))}. Mismo CUIT y razón social. Estas ventas no suman a la caja, los cobros ni los informes de internet.</p>
-    <div class="actions start"><button class="btn primary" type="button" id="vt-nueva">Nueva venta</button></div>
-    <div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="r">Importe</th><th></th></tr></thead><tbody>${lista.length?lista.map((v,i)=>`<tr><td>${esc(dmy(v.fe.fecha))}</td><td>${FE_LETRA[v.fe.tipo]} ${esc(feNro(v.fe))}${v.nc?' <span class="chip warn">Anulada</span>':''}</td><td>${esc(v.fe.nombre)}</td><td>${esc(VENTA_PAGO[v.fe.pago&&v.fe.pago.m]||'')}</td><td class="r">${esc(fePesos(v.fe.total))}</td><td><button class="btn small" type="button" data-v="${i}">Ver</button></td></tr>`).join(''):'<tr><td colspan="6" class="muted">Todavía no hay ventas.</td></tr>'}</tbody></table></div>
-    <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
-    onMount(el){
-      $('#vt-nueva',el).addEventListener('click',()=>ventaNueva());
-      el.querySelectorAll('[data-v]').forEach(b=>b.addEventListener('click',()=>{const v=lista[Number(b.dataset.v)];ventaVer(v,false,ventasAbrir);}));
-    }});
+  const c=ventasCuerpo(d,ventasAbrir);
+  openModal({title:'Ventas de otra actividad',wide:true,html:c.html+'<div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button></div>',onMount:c.mount});
 }
-function ventaNueva(){
+/* pestaña «Ventas» (usuarios con permiso, y el administrador) */
+VIEWS.ventas={
+  mount(el){this.el=el;el.innerHTML='<div class="head-row"><h2>Ventas</h2></div><div id="vt-cuerpo" class="muted">Cargando…</div>';this.recargar();},
+  update(){},
+  async recargar(){
+    const el=this.el,box=el&&$('#vt-cuerpo',el);if(!box)return;
+    try{const d=await NET.api('GET','/api/ventas');const c=ventasCuerpo(d,()=>VIEWS.ventas.recargar());box.className='';box.innerHTML=c.html;c.mount(box);}
+    catch(err){box.textContent=err.network?'No se pudo conectar con el servidor.':err.message;}
+  }
+};
+function ventaNueva(recargar){
   openModal({title:'Nueva venta',html:`<p class="small muted">Se emite una factura real por el punto de venta de la otra actividad. Una vez emitida no se modifica: si hay un error se anula con una nota de crédito.</p>
     ${F('Descripción','vt-det','<input id="vt-det" maxlength="100" value="VENTA">')}
     ${F('DNI o CUIT del cliente','vt-doc','<input id="vt-doc" inputmode="numeric" maxlength="13">','Si queda vacío sale a «Consumidor final». Con CUIT se puede hacer Factura A.')}
@@ -250,7 +263,7 @@ function ventaNueva(){
         try{
           const r=await NET.api('POST','/api/ventas/emitir',{det:$('#vt-det',el).value,docNro:dn,nombre:$('#vt-nom',el).value,condIva:Number(iva.value),tipo:Number($('#vt-tipo',el).value),monto,pago:pago.value,tarj:$('#vt-tarj',el).value,u4:$('#vt-u4',el).value});
           toast('Factura emitida: '+FE_LETRA[r.venta.fe.tipo]+' '+feNro(r.venta.fe));
-          closeModal();ventaVer(r.venta,false,ventasAbrir);
+          closeModal();ventaVer(r.venta,false,recargar||ventasAbrir);
         }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
       });
     }});

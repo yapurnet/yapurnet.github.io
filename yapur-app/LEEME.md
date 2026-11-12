@@ -614,3 +614,5 @@ Cuando el día va camino a gastar el cupo del plan gratis de Cloudflare (el mayo
 
 ## Ventas de otra actividad (ARCA)
 Mismo CUIT y razón social, otro punto de venta de ARCA (tipo «RECE para aplicativo y web services»). En Ajustes → Factura electrónica ARCA se carga el «Punto de venta de la otra actividad» y aparece el botón «Ventas de otra actividad» (solo administrador): descripción (VENTA), DNI o CUIT, importe y forma de pago (contado, transferencia, tarjeta con su tipo y últimos 4 números). Se factura como productos, se guarda en un listado propio (tabla meta, clave `ventas`) y **no** entra en cobros, caja, «Hoy» ni informes de internet. Se anula con nota de crédito desde la misma pantalla.
+
+Acceso a las ventas de otra actividad: permiso «Facturar la otra actividad» (pestaña Ventas) y, para alguien que solo factura eso, «Que solo vea esa pestaña de ventas» (apaga todo lo demás). No hace falta que esa persona tenga acceso a ARCA: factura el servidor con el certificado del administrador.

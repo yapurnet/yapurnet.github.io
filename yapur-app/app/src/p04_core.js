@@ -87,6 +87,8 @@ const PERMS=[
   ['verPlan','Ver el plan contratado de cada cliente','Apagado: el servidor no le manda el plan de los clientes ni la lista de planes, y no puede copiar la cola de MikroTik.','Clientes'],
   ['elegirPlan','Elegir el plan de un abonado por instalar','Al instalar, indica qué plan quiere el cliente nuevo. Recibe la lista de planes (sin precios) y el plan solo de los abonados «por instalar»: el de los clientes ya instalados sigue oculto. La oficina lo revisa antes de activar el servicio.','Clientes'],
   ['comodato','Cargar los equipos en comodato y hacer firmar el contrato','Lista de equipos prestados a cada cliente y contrato firmado con el dedo en el celular. Ve el estado de los contratos de sus clientes, pero no el DNI del titular.','Clientes'],
+  ['ventasOtra','Facturar la otra actividad (punto de venta aparte)','Pestaña «Ventas»: emite facturas por el segundo punto de venta de ARCA. No mezcla nada con el sistema de internet.','Otra actividad'],
+  ['soloVentas','Que solo vea esa pestaña de ventas','Apaga todo lo demás: este usuario no ve clientes, cobros, órdenes ni nada de internet. Ideal para quien solo factura la otra actividad.','Otra actividad'],
   ['contratosGestion','Revisar, aprobar y borrar contratos de comodato','Aprobar un cambio de titularidad (y archivar el contrato anterior), rechazar, mandar a la papelera y restaurar, y ver el registro de cada contrato con el DNI.','Clientes']
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];

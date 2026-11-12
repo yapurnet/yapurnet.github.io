@@ -39,7 +39,7 @@ const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 
 const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion', 'ventasOtra', 'soloVentas'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
   tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, altaCampo: true, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, redPlano: false, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
@@ -59,7 +59,9 @@ function cleanPerms(o) { const c = {}; PERM_KEYS.forEach(k => { if (k in o) c[k]
 
 function effPerms(u) {
   const o = {};
-  if (u.role === 'admin') { PERM_KEYS.forEach(k => { o[k] = true; }); return o; }
+  if (u.role === 'admin') { PERM_KEYS.forEach(k => { o[k] = k !== 'soloVentas'; }); return o; }
+  /* «solo ventas de otra actividad»: un usuario que factura por el otro punto de venta y no ve nada del sistema de internet */
+  if (u.permisos && typeof u.permisos === 'object' && u.permisos.soloVentas === true) { PERM_KEYS.forEach(k => { o[k] = k === 'ventasOtra' || k === 'soloVentas'; }); return o; }
   const base = PERM_DEF[u.role] || PERM_DEF.tecnico;
   const set = u.permisos && typeof u.permisos === 'object' ? u.permisos : {};
   PERM_KEYS.forEach(k => { o[k] = k in set ? !!set[k] : !!base[k]; });
@@ -962,6 +964,7 @@ export class YapurDB extends DurableObject {
     return { user: u, th, dev: dev ? dev.id : null };
   }
   async needAuth(request) { const a = await this.authOf(request); if (!a) throw httpErr(401, 'Tu sesión terminó. Entrá de nuevo.', 'unauthenticated'); return a; }
+  async needVentas(request) { const a = await this.needAuth(request); if (a.user.role !== 'admin' && !effPerms(a.user).ventasOtra) throw httpErr(403, 'Tu usuario no puede facturar la otra actividad.', 'permission_denied'); return a; }
   async needAdmin(request) { const a = await this.needAuth(request); if (a.user.role !== 'admin') throw httpErr(403, 'Solo el administrador puede hacer esto.', 'permission_denied'); return a; }
   /* lista de equipos para el administrador: primero los que esperan aprobación, después los autorizados (el último uso arriba) y al final los bloqueados */
   dispView(a) {
@@ -3323,8 +3326,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/certificado' && m === 'POST') { await this.needAdmin(request); return send(200, this.arcaCert(readBody(raw, 3e4))); }
     if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
-    if (p === '/api/ventas' && m === 'GET') { await this.needAdmin(request); return send(200, { ventas: this.ventasLista(), pv2: this.arcaCfg().pv2 || null }); }
-    if (p === '/api/ventas/emitir' && m === 'POST') { await this.needAdmin(request); return send(200, await this.ventaEmitir(readBody(raw, 3e3))); }
+    if (p === '/api/ventas' && m === 'GET') { await this.needVentas(request); return send(200, { ventas: this.ventasLista(), pv2: this.arcaCfg().pv2 || null }); }
+    if (p === '/api/ventas/emitir' && m === 'POST') { await this.needVentas(request); return send(200, await this.ventaEmitir(readBody(raw, 3e3))); }
     if (p === '/api/uso' && m === 'GET') { await this.needAdmin(request); return send(200, this.usoVer()); }
     if (p === '/api/ping/armar' && m === 'POST') return send(200, this.pingArmar((await this.needAuth(request)).user));
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
