@@ -539,7 +539,7 @@ function openClientForm(id){
   const alta=!old&&!full&&can('altaCampo');   /* técnico dando de alta una instalación ocasional en la calle */
   const comp=!full&&(alta||puedeCompletar(old));   /* técnico completando a un abonado nuevo */
   if(!old&&!full&&!alta)return toast('Tu perfil no puede dar de alta clientes','bad');
-  const c=old||(alta?{estado:'pendiente'}:{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()});
+  const c=old||(alta?{estado:'pendiente'}:{estado:'activo',alta:todayStr(),desde:addMonths(curMonth(),1),ciclo:1,codigo:nextCodigo()});
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
   const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
@@ -664,7 +664,7 @@ function openClientForm(id){
         const precio=v('cf-precio');
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
-          alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+          alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||addMonths(curMonth(),1),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
         if(!can('verPlan'))delete patch.planId;   /* sin el permiso no ve el plan: guardar la ficha no puede borrarlo */
       }
       if(full&&$('#cf-da',el)){

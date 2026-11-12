@@ -180,7 +180,7 @@ function openFinishOrder(o){
         if(c&&plIn&&puedePlan(c)&&(plIn.value||null)!==(c.planId||null))cp.planId=plIn.value||null;   /* el plan que eligió el cliente */
         if(c&&ndIn&&ndIn.value.trim()!==String(c.nodo||'').trim())cp.nodo=ndIn.value.trim();
         const ck=$('#ff-est',el);
-        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
+        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=addMonths(curMonth(),1);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
         let rec=null;
         if(cobra){
