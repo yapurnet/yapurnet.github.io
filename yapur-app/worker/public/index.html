@@ -7621,7 +7621,7 @@ const FE_CSS='.fe{background:#fff;color:#111;border:1.5px solid #222;font:12.5px
 function facturaCopia(fe,ps,copia){
   const R=S.ajustes.recibo||{},esNc=!!fe.esNc,A=FE_LETRA[fe.tipo]==='A';
   const act=ps.filter(p=>!p.anulado);
-  const items=esNc?[[`Anulación de la factura ${feNro(fe.orig)}`,fe.total]]:act.map(p=>[(CONCEPTOS[p.concepto]||p.concepto||'Servicio')+(p.concepto==='mensualidad'&&p.per?' '+p.per:''),Number(p.monto)||0]);
+  const items=esNc?[[`Anulación de la factura ${feNro(fe.orig)}`,fe.total]]:act.map(p=>[p.concepto==='mensualidad'?'ABONO MENSUAL DE INTERNET':(CONCEPTOS[p.concepto]||p.concepto||'Servicio').toUpperCase()+(p.nota?': '+p.nota:''),Number(p.monto)||0]);
   const qr=QR.svg('https://www.arca.gob.ar/fe/qr/?p='+btoa(JSON.stringify({ver:1,fecha:fe.fecha,cuit:Number(fe.cuit),ptoVta:fe.pv,tipoCmp:fe.tipo,nroCmp:fe.nro,importe:fe.total,moneda:'PES',ctz:1,tipoDocRec:fe.docTipo,nroDocRec:Number(fe.docNro),tipoCodAut:'E',codAut:Number(fe.cae)})),110);
   const doc=fe.docTipo===80?'CUIT':fe.docTipo===96?'DNI':'Doc.';
   const f=feFecha(fe.fecha),desde=feFecha(fe.desde||fe.fecha),hasta=feFecha(fe.hasta||fe.fecha),vp=feFecha(fe.vp||fe.fecha);
@@ -7633,7 +7633,7 @@ function facturaCopia(fe,ps,copia){
       <div class="l"><div class="bx"><b>${FE_LETRA[fe.tipo]}</b><span>COD. ${FE_COD[fe.tipo]}</span></div><div class="vl"></div></div>
       <div class="dr"><div class="t3">${FE_NOMBRE[fe.tipo]}</div><div><b>Punto de Venta: ${String(fe.pv).padStart(5,'0')} &nbsp; Comp. Nro: ${String(fe.nro).padStart(8,'0')}</b></div><div><b>Fecha de Emisión: ${esc(f)}</b></div><div style="margin-top:8px"><b>CUIT:</b> ${esc(fe.cuit)}</div>${R.iibb?`<div><b>Ingresos Brutos:</b> ${esc(R.iibb)}</div>`:''}${R.inicio?`<div><b>Fecha de Inicio de Actividades:</b> ${esc(R.inicio)}</div>`:''}</div></div>
     <div class="per"><span><b>Período Facturado Desde:</b> ${esc(desde)} &nbsp; <b>Hasta:</b> ${esc(hasta)}</span><span><b>Fecha de Vto. para el pago:</b> ${esc(vp)}</span></div>
-    <div class="b"><div><b>${doc}:</b> ${fe.docTipo===99?'—':esc(fe.docNro)} &nbsp;&nbsp; <b>Apellido y Nombre / Razón Social:</b> ${esc(fe.nombre)}</div><div><b>Condición frente al IVA:</b> ${esc(FE_COND[fe.condIva]||'')}</div><div><b>Condición de venta:</b> Contado</div></div>
+    <div class="b"><div><b>${doc}:</b> ${fe.docTipo===99?'—':esc(fe.docNro)} &nbsp;&nbsp; <b>Apellido y Nombre / Razón Social:</b> ${esc(fe.nombre)}</div><div><b>Condición frente al IVA:</b> ${esc(FE_COND[fe.condIva]||'')}${fe.dom?` &nbsp;&nbsp; <b>Domicilio:</b> ${esc(fe.dom)}`:''}</div><div><b>Condición de venta:</b> ${act.length&&act.every(p=>p.metodo==='efectivo')?'Contado':'Otros medios de pago electrónico'}</div></div>
     <div class="det"><table><thead><tr><th>Código</th><th style="text-align:left">Producto / Servicio</th><th>Cantidad</th><th>U. Medida</th><th>Precio Unit.</th><th>% Bonif</th><th>Imp. Bonif.</th>${A?'<th>% IVA</th>':''}<th>Subtotal</th></tr></thead><tbody>${items.map(fila).join('')}</tbody></table></div>
     <div class="tot">${A?`<span></span><span class="lb">Importe Neto Gravado: $</span><span class="vl">${m2(fe.neto)}</span><span></span><span class="lb">IVA 21%: $</span><span class="vl">${m2(fe.iva)}</span>`:`<span></span><span class="lb">Subtotal: $</span><span class="vl">${m2(fe.total)}</span>`}<span></span><span class="lb">Importe Otros Tributos: $</span><span class="vl">0,00</span><span></span><span class="lb">Importe Total: $</span><span class="vl">${m2(fe.total)}</span></div>
     ${A?'':`<div class="tf"><b><i>Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)</i></b><div style="margin-top:3px"><b>IVA Contenido: $ ${m2(fe.iva)}</b></div></div>`}
@@ -7709,18 +7709,20 @@ function arcaPedir(recibo,ps){
     ${F('Nombre o razón social','fe-nom','<input id="fe-nom" maxlength="100" value="'+esc(cli.nombre||'')+'">')}
     ${F('DNI o CUIT del cliente','fe-doc','<input id="fe-doc" inputmode="numeric" maxlength="13" value="'+esc(dni)+'">','Si queda vacío sale a «Consumidor final». Con CUIT se puede hacer Factura A.')}
     <div id="fe-cuit" hidden>${F('Condición del cliente frente al IVA','fe-iva','<select id="fe-iva"><option value="1">Responsable Inscripto</option><option value="6">Monotributista</option><option value="4">IVA Sujeto Exento</option><option value="7">No categorizado</option></select>')}
-      ${F('Tipo de factura','fe-tipo','<select id="fe-tipo"><option value="1">Factura A (IVA discriminado)</option><option value="6">Factura B</option></select>')}</div>
+      <div id="fe-tipo-box">${F('Tipo de factura','fe-tipo','<select id="fe-tipo"><option value="1">Factura A (IVA discriminado)</option><option value="6">Factura B</option></select>')}</div></div>
+    ${F('Domicilio del cliente (opcional)','fe-dom','<input id="fe-dom" maxlength="120" value="'+esc(cli.dir||'')+'">')}
     <div class="notice ${S.ajustes.arcaProd?'info':'warn'}" style="margin-top:8px">${S.ajustes.arcaProd?'Es una factura real: ARCA la registra.':'Ambiente de pruebas: la factura no tiene validez.'}</div>
     <div class="actions"><button class="btn primary" type="button" id="fe-go">Emitir factura</button><button class="btn ghost" type="button" data-close>Cancelar</button></div>`,
     onMount(el){
       const doc=$('#fe-doc',el),box=$('#fe-cuit',el),sync=()=>{box.hidden=doc.value.replace(/\D/g,'').length!==11;};
-      doc.addEventListener('input',sync);sync();
+      const iva=$('#fe-iva',el),tb=$('#fe-tipo-box',el),tipoSel=()=>{const ab=['1','6'].includes(iva.value);tb.hidden=!ab;if(!ab)$('#fe-tipo',el).value='6';};
+      doc.addEventListener('input',sync);iva.addEventListener('change',tipoSel);sync();tipoSel();
       $('#fe-go',el).addEventListener('click',async ev=>{
         const b=ev.currentTarget,dn=doc.value.replace(/\D/g,'');
         if(dn&&dn.length!==11&&(dn.length<7||dn.length>8))return toast('El DNI tiene 7 u 8 números y el CUIT 11.','bad');
         b.disabled=true;
         try{
-          const r=await NET.api('POST','/api/arca/emitir',{doc:ps[0]._doc,recibo,nombre:$('#fe-nom',el).value,docNro:dn,condIva:Number($('#fe-iva',el).value),tipo:Number($('#fe-tipo',el).value)});
+          const r=await NET.api('POST','/api/arca/emitir',{doc:ps[0]._doc,recibo,nombre:$('#fe-nom',el).value,docNro:dn,condIva:Number($('#fe-iva',el).value),tipo:Number($('#fe-tipo',el).value),dom:$('#fe-dom',el).value});
           toast('Factura emitida: '+FE_NOMBRE[r.fe.tipo]+' '+FE_LETRA[r.fe.tipo]+' '+feNro(r.fe));
           closeModal();
           arcaEsperar(recibo,()=>true,()=>openFactura(recibo));
@@ -7838,7 +7840,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='2e93b6f4d2';
+const BUILD='538cecde46';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
