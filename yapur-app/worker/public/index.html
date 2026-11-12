@@ -713,6 +713,8 @@ function billing(c,withNext){
   const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:vivo&&!c.sinCargo,sinCargo:vivo&&!!c.sinCargo};
   if(out.aplica){
     let from=c.desde||(c.alta?c.alta.slice(0,7):cur);
+    /* los instalados el 11/11/2026 (antes de este criterio) tenían «Cobrar desde» = mes de la alta: el mes de la instalación no se cobra, empiezan al mes siguiente */
+    if(c.alta==='2026-11-11'&&from===c.alta.slice(0,7))from='2026-12';
     const floor=addMonths(cur,-35);if(from<floor)from=floor;
     const paidMap=S.paidIdx.get(c.id)||new Map();
     const last=withNext?addMonths(cur,1):cur;
@@ -1837,7 +1839,7 @@ function openClientForm(id){
   const alta=!old&&!full&&can('altaCampo');   /* técnico dando de alta una instalación ocasional en la calle */
   const comp=!full&&(alta||puedeCompletar(old));   /* técnico completando a un abonado nuevo */
   if(!old&&!full&&!alta)return toast('Tu perfil no puede dar de alta clientes','bad');
-  const c=old||(alta?{estado:'pendiente'}:{estado:'activo',alta:todayStr(),desde:todayStr().slice(0,7),ciclo:1,codigo:nextCodigo()});
+  const c=old||(alta?{estado:'pendiente'}:{estado:'activo',alta:todayStr(),desde:addMonths(curMonth(),1),ciclo:1,codigo:nextCodigo()});
   const svcs=serviciosList().filter(s=>s.activo!==false||(c.extras||[]).includes(s.id));
   const plans=[...S.planes.values()].filter(p=>p.activo!==false||p.id===c.planId).sort((a,b)=>(a.bajada-b.bajada)||(planNow(a)-planNow(b)));
   const html=`<form class="form" id="cform" novalidate>
@@ -1962,7 +1964,7 @@ function openClientForm(id){
         const precio=v('cf-precio');
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
-          alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||todayStr().slice(0,7),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+          alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||addMonths(curMonth(),1),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
         if(!can('verPlan'))delete patch.planId;   /* sin el permiso no ve el plan: guardar la ficha no puede borrarlo */
       }
       if(full&&$('#cf-da',el)){
@@ -5531,7 +5533,7 @@ function openFinishOrder(o){
         if(c&&plIn&&puedePlan(c)&&(plIn.value||null)!==(c.planId||null))cp.planId=plIn.value||null;   /* el plan que eligió el cliente */
         if(c&&ndIn&&ndIn.value.trim()!==String(c.nodo||'').trim())cp.nodo=ndIn.value.trim();
         const ck=$('#ff-est',el);
-        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=todayStr().slice(0,7);}}}
+        if(ck&&ck.checked&&sug){cp.estado=sug[0];if(sug[0]==='baja'){cp.retiro='ok';cp.retiroFecha=todayStr();if(!c.bajaFecha)cp.bajaFecha=todayStr();}if(sug[0]==='activo'){cp.corteMora=null;if(c.estado==='pendiente'){cp.alta=todayStr();cp.desde=addMonths(curMonth(),1);}}}
         if(c&&Object.keys(cp).length)await saveClient(c,cp);
         let rec=null;
         if(cobra){
@@ -7836,7 +7838,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='1e5b9cc430';
+const BUILD='0ff8def33c';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

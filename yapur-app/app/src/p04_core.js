@@ -306,6 +306,8 @@ function billing(c,withNext){
   const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:vivo&&!c.sinCargo,sinCargo:vivo&&!!c.sinCargo};
   if(out.aplica){
     let from=c.desde||(c.alta?c.alta.slice(0,7):cur);
+    /* los instalados el 11/11/2026 (antes de este criterio) tenían «Cobrar desde» = mes de la alta: el mes de la instalación no se cobra, empiezan al mes siguiente */
+    if(c.alta==='2026-11-11'&&from===c.alta.slice(0,7))from='2026-12';
     const floor=addMonths(cur,-35);if(from<floor)from=floor;
     const paidMap=S.paidIdx.get(c.id)||new Map();
     const last=withNext?addMonths(cur,1):cur;
