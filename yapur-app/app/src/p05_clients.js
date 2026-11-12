@@ -573,7 +573,7 @@ function openClientForm(id){
       ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
-      <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Antes de este mes no se genera deuda.')}</div>
+      <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Nuevo instalado: dejá el mes siguiente. Cliente que ya existía y falta cargar: poné este mes para cobrarle desde ahora.')}</div>
       <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${isAdmin()?`<label class="per"><input id="cf-sc" type="checkbox"${c.sinCargo?' checked':''}><span class="grow"><b>Servicio sin cargo</b><br><span class="small muted">No paga ni genera deuda, figura «Al día» y nunca aparece para cortar. Para la casa del dueño, de la familia, etc.</span></span></label>
@@ -665,6 +665,7 @@ function openClientForm(id){
         if(precio!==''&&num(precio)===null)return toast('El precio especial no se entiende','bad');
         Object.assign(patch,{nombre:v('cf-nombre'),codigo:cod,dni:fmtDoc(v('cf-dni')),tel:v('cf-tel'),tel2:v('cf-tel2'),dir:v('cf-dir'),loc:v('cf-loc'),planId:v('cf-plan')||null,estado:v('cf-estado'),
           alta:v('cf-alta')||todayStr(),desde:v('cf-desde')||addMonths(curMonth(),1),ciclo:Number(v('cf-ciclo'))===2?2:1,precio:precio===''?null:num(precio),notas:v('cf-notas')});
+        if(!old||(old.desde||'')!==patch.desde)patch.desdeOk=true;   /* eligió el mes a mano: no se le aplica el ajuste de los instalados de noviembre */
         if(!can('verPlan'))delete patch.planId;   /* sin el permiso no ve el plan: guardar la ficha no puede borrarlo */
       }
       if(full&&$('#cf-da',el)){
