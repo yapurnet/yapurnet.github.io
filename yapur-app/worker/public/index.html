@@ -713,8 +713,8 @@ function billing(c,withNext){
   const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:vivo&&!c.sinCargo,sinCargo:vivo&&!!c.sinCargo};
   if(out.aplica){
     let from=c.desde||(c.alta?c.alta.slice(0,7):cur);
-    /* los instalados el 11/11/2026 (antes de este criterio) tenían «Cobrar desde» = mes de la alta: el mes de la instalación no se cobra, empiezan al mes siguiente */
-    if(c.alta==='2026-11-11'&&from===c.alta.slice(0,7))from='2026-12';
+    /* los instalados en noviembre de 2026 (antes de este criterio) tenían «Cobrar desde» = mes de la alta: el mes de la instalación no se cobra, empiezan al mes siguiente */
+    if(c.alta&&c.alta.slice(0,7)==='2026-11'&&from==='2026-11')from='2026-12';
     const floor=addMonths(cur,-35);if(from<floor)from=floor;
     const paidMap=S.paidIdx.get(c.id)||new Map();
     const last=withNext?addMonths(cur,1):cur;
@@ -7838,7 +7838,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='0ff8def33c';
+const BUILD='2e93b6f4d2';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
