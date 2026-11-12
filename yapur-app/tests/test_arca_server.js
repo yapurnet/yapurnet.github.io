@@ -102,6 +102,33 @@ const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&
     t('ni cambiarla en un pago existente', r.s === 403, r.s);
     r = await call('GET', '/api/doc/pagos/' + mes + '-s01', undefined, O);
     t('la factura viaja con el pago para que la vean las pantallas', JSON.stringify(r.j).includes('"cae"'), r.s);
+    /* ventas de otra actividad */
+    r = await call('POST', '/api/ventas/emitir', { monto: 5000 }, A);
+    t('sin punto de venta de la otra actividad no se factura', r.s === 400 && /punto de venta/i.test(JSON.stringify(r.j)), r);
+    r = await call('PUT', '/api/arca', { pv: 3, amb: 'homo', pv2: 9 }, A);
+    t('el administrador carga el punto de venta de la otra actividad', r.s === 200 && r.j.pv2 === 9, r);
+    r = await call('GET', '/api/ventas', undefined, O);
+    t('la oficina no ve las ventas de la otra actividad', r.s === 403, r.s);
+    r = await call('POST', '/api/ventas/emitir', { monto: 5000 }, T);
+    t('el técnico tampoco las emite', r.s === 403, r.s);
+    r = await call('POST', '/api/ventas/emitir', { monto: 0 }, A);
+    t('el importe tiene que ser mayor a cero', r.s === 400, r);
+    r = await call('POST', '/api/ventas/emitir', { monto: 5000, docNro: '30111222', nombre: 'Juan Perez', pago: 'credito', tarj: 'Visa', u4: '1234567812345678' }, A);
+    const v1 = r.j && r.j.venta;
+    t('venta a consumidor final con DNI: Factura B por el punto 9, descripción VENTA', r.s === 200 && v1.fe.tipo === 6 && v1.fe.pv === 9 && v1.fe.det === 'VENTA' && v1.fe.docTipo === 96 && v1.fe.total === 5000, r);
+    t('la tarjeta guarda solo los últimos 4 números', v1.fe.pago.u4 === '5678' && v1.fe.cv === 'Tarjeta de Crédito' && !JSON.stringify(v1).includes('12345678'), v1.fe.pago);
+    const rq = log.fe.filter(x => x.name === 'FECAESolicitar').pop().b;
+    t('se pide a ARCA como productos, con el punto 9', rq.includes('<ar:PtoVta>9</ar:PtoVta>') && rq.includes('<ar:Concepto>1</ar:Concepto>') && !rq.includes('FchServDesde'), rq);
+    r = await call('POST', '/api/ventas/emitir', { monto: 12100, docNro: '30676296448', condIva: 4, tipo: 1, pago: 'transferencia', det: 'VENTA' }, A);
+    t('cliente exento con CUIT: sale Factura B aunque se pida A', r.s === 200 && r.j.venta.fe.tipo === 6 && r.j.venta.fe.condIva === 4, r);
+    r = await call('GET', '/api/ventas', undefined, A);
+    t('el listado trae las dos ventas, la última primero', r.s === 200 && r.j.ventas.length === 2 && r.j.ventas[0].fe.pago.m === 'transferencia', r);
+    r = await call('POST', '/api/ventas/emitir', { nc: v1.id }, A);
+    t('la nota de crédito anula la venta con el mismo importe', r.s === 200 && r.j.venta.nc.tipo === 8 && r.j.venta.nc.total === 5000, r);
+    r = await call('POST', '/api/ventas/emitir', { nc: v1.id }, A);
+    t('no se anula dos veces', r.s === 409, r.s);
+    const dd = await call('GET', '/api/doc/pagos/' + mes + '-s01', undefined, O);
+    t('las ventas no aparecen en los cobros de internet', !JSON.stringify(dd.j).includes('"det":"VENTA"'), dd.s);
     t('el permiso de acceso se pidió una sola vez (se reutiliza 12 horas)', log.wsaa === 1, log.wsaa);
   } finally { if (failN && process.env.VERLOG) console.log(srv.log().split('\n').filter(l => /rror|arca/i.test(l)).slice(-12).join('\n')); await srv.stop(); await M.stop(); }
   console.log('\n' + okN + ' ok, ' + failN + ' con fallas');

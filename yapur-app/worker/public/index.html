@@ -7580,8 +7580,10 @@ async function arcaAjustesMount(el){
     <h3 style="margin-top:14px">2. Punto de venta y ambiente</h3>
     <div class="grid2">${F('Punto de venta (número)','arca-pv',`<input id="arca-pv" type="number" inputmode="numeric" min="1" max="99999" value="${esc(a.pv||'')}">`)}
       ${F('Ambiente','arca-amb',`<select id="arca-amb"><option value="homo"${a.amb!=='prod'?' selected':''}>Pruebas (facturas sin validez)</option><option value="prod"${a.amb==='prod'?' selected':''}>Producción (facturas reales)</option></select>`)}</div>
+    ${F('Punto de venta de la otra actividad (opcional)','arca-pv2',`<input id="arca-pv2" type="number" inputmode="numeric" min="1" max="99999" value="${esc(a.pv2||'')}">`,'Mismo CUIT y razón social, otro punto de venta de ARCA. Esas ventas no aparecen en ningún informe de internet.')}
     <div class="actions start"><button class="btn" type="button" id="arca-pv-g">Guardar</button><button class="btn" type="button" id="arca-probar" ${a.tieneCert?'':'disabled'}>Probar conexión con ARCA</button></div>
     <div id="arca-res" class="hint" aria-live="polite"></div>
+    ${a.pv2?'<div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" id="ventas-abrir">Ventas de otra actividad</button></div>':''}
     <div class="small muted" style="margin-top:10px">${a.listo?(a.amb==='prod'?'<b>Listo para facturar de verdad.</b>':'<b>Listo para probar.</b> Cuando todo salga bien, probá con el ambiente «Producción» (y su propio certificado y punto de venta, que se piden aparte en ARCA).'):'Todavía falta completar los pasos de arriba.'} El certificado y la clave quedan guardados solo en el servidor y no se copian al servidor de respaldo.</div>`;
   const res=$('#arca-res',el),aviso=(t,mal)=>{res.className=mal?'notice bad':'notice ok';res.textContent=t;};
   const rec=()=>arcaAjustesMount(el);
@@ -7601,9 +7603,10 @@ async function arcaAjustesMount(el){
     catch(err){cg.disabled=false;aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
   $('#arca-pv-g',el).addEventListener('click',async()=>{
-    try{await NET.api('PUT','/api/arca',{pv:$('#arca-pv',el).value?Number($('#arca-pv',el).value):null,amb:$('#arca-amb',el).value});toast('Guardado');rec();}
+    try{await NET.api('PUT','/api/arca',{pv:$('#arca-pv',el).value?Number($('#arca-pv',el).value):null,amb:$('#arca-amb',el).value,pv2:$('#arca-pv2',el).value?Number($('#arca-pv2',el).value):null});toast('Guardado');rec();}
     catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
   });
+  const vb=$('#ventas-abrir',el);if(vb)vb.addEventListener('click',ventasAbrir);
   const pb=$('#arca-probar',el);
   if(pb)pb.addEventListener('click',async()=>{
     pb.disabled=true;res.className='hint';res.textContent='Conectando con ARCA…';
@@ -7611,7 +7614,7 @@ async function arcaAjustesMount(el){
       const r=await NET.api('POST','/api/arca/probar',{});
       const pts=(r.puntos||[]).map(p=>p.nro+(p.bloqueado?' (bloqueado)':'')).join(', ');
       const ok=!r.pvError&&!r.puntosError;
-      aviso('Conexión con ARCA ('+(r.ambiente==='prod'?'producción':'pruebas')+') correcta. '+(pts?'Puntos de venta que ARCA ve: '+pts+'. ':(r.puntosError?'No pude leer los puntos de venta: '+r.puntosError+'. ':'ARCA no informó puntos de venta. '))+(r.pvError?'Problema con el punto de venta cargado: '+r.pvError:(r.ultimaB!=null?'Última factura B: '+r.ultimaB+' · última A: '+r.ultimaA+'.':'')),!ok);
+      aviso('Conexión con ARCA ('+(r.ambiente==='prod'?'producción':'pruebas')+') correcta. '+(pts?'Puntos de venta que ARCA ve: '+pts+'. ':(r.puntosError?'No pude leer los puntos de venta: '+r.puntosError+'. ':'ARCA no informó puntos de venta. '))+(r.pvError?'Problema con el punto de venta cargado: '+r.pvError:(r.ultimaB!=null?'Última factura B: '+r.ultimaB+' · última A: '+r.ultimaA+'.':''))+(r.pv2Error?' Problema con el punto de venta de la otra actividad: '+r.pv2Error:(r.pv2Ultima!=null?' Otra actividad: última factura B '+r.pv2Ultima+'.':'')),!ok);
     }catch(err){aviso(err.network?'No se pudo conectar con el servidor.':err.message,true);}
     pb.disabled=false;
   });
@@ -7622,7 +7625,7 @@ const FE_CSS='.fe{background:#fff;color:#111;border:1.5px solid #222;font:12.5px
 function facturaCopia(fe,ps,copia){
   const R=S.ajustes.recibo||{},esNc=!!fe.esNc,A=FE_LETRA[fe.tipo]==='A';
   const act=ps.filter(p=>!p.anulado);
-  const items=esNc?[[`Anulación de la factura ${feNro(fe.orig)}`,fe.total]]:act.map(p=>[p.concepto==='mensualidad'?'ABONO MENSUAL DE INTERNET':(CONCEPTOS[p.concepto]||p.concepto||'Servicio').toUpperCase()+(p.nota?': '+p.nota:''),Number(p.monto)||0]);
+  const items=esNc?[[`Anulación de la factura ${feNro(fe.orig)}`,fe.total]]:fe.det?[[fe.det,fe.total]]:act.map(p=>[p.concepto==='mensualidad'?'ABONO MENSUAL DE INTERNET':(CONCEPTOS[p.concepto]||p.concepto||'Servicio').toUpperCase()+(p.nota?': '+p.nota:''),Number(p.monto)||0]);
   const qr=QR.svg('https://www.arca.gob.ar/fe/qr/?p='+btoa(JSON.stringify({ver:1,fecha:fe.fecha,cuit:Number(fe.cuit),ptoVta:fe.pv,tipoCmp:fe.tipo,nroCmp:fe.nro,importe:fe.total,moneda:'PES',ctz:1,tipoDocRec:fe.docTipo,nroDocRec:Number(fe.docNro),tipoCodAut:'E',codAut:Number(fe.cae)})),110);
   const doc=fe.docTipo===80?'CUIT':fe.docTipo===96?'DNI':'Doc.';
   const f=feFecha(fe.fecha),desde=feFecha(fe.desde||fe.fecha),hasta=feFecha(fe.hasta||fe.fecha),vp=feFecha(fe.vp||fe.fecha);
@@ -7633,8 +7636,8 @@ function facturaCopia(fe,ps,copia){
     <div class="h"><div class="iz"><div class="t2">${esc(R.razon||'')}</div><div><b>Razón Social:</b> ${esc(R.razon||'')}</div><div style="margin-top:8px"><b>Domicilio Comercial:</b> ${esc(R.dom||'')}</div><div style="margin-top:6px"><b>Condición frente al IVA: IVA Responsable Inscripto</b></div></div>
       <div class="l"><div class="bx"><b>${FE_LETRA[fe.tipo]}</b><span>COD. ${FE_COD[fe.tipo]}</span></div><div class="vl"></div></div>
       <div class="dr"><div class="t3">${FE_NOMBRE[fe.tipo]}</div><div><b>Punto de Venta: ${String(fe.pv).padStart(5,'0')} &nbsp; Comp. Nro: ${String(fe.nro).padStart(8,'0')}</b></div><div><b>Fecha de Emisión: ${esc(f)}</b></div><div style="margin-top:8px"><b>CUIT:</b> ${esc(fe.cuit)}</div>${R.iibb?`<div><b>Ingresos Brutos:</b> ${esc(R.iibb)}</div>`:''}${R.inicio?`<div><b>Fecha de Inicio de Actividades:</b> ${esc(R.inicio)}</div>`:''}</div></div>
-    <div class="per"><span><b>Período Facturado Desde:</b> ${esc(desde)} &nbsp; <b>Hasta:</b> ${esc(hasta)}</span><span><b>Fecha de Vto. para el pago:</b> ${esc(vp)}</span></div>
-    <div class="b"><div><b>${doc}:</b> ${fe.docTipo===99?'—':esc(fe.docNro)} &nbsp;&nbsp; <b>Apellido y Nombre / Razón Social:</b> ${esc(fe.nombre)}</div><div><b>Condición frente al IVA:</b> ${esc(FE_COND[fe.condIva]||'')}${fe.dom?` &nbsp;&nbsp; <b>Domicilio:</b> ${esc(fe.dom)}`:''}</div><div><b>Condición de venta:</b> ${act.length&&act.every(p=>p.metodo==='efectivo')?'Contado':'Otros medios de pago electrónico'}</div></div>
+    ${fe.conc===1?'':`<div class="per"><span><b>Período Facturado Desde:</b> ${esc(desde)} &nbsp; <b>Hasta:</b> ${esc(hasta)}</span><span><b>Fecha de Vto. para el pago:</b> ${esc(vp)}</span></div>`}
+    <div class="b"><div><b>${doc}:</b> ${fe.docTipo===99?'—':esc(fe.docNro)} &nbsp;&nbsp; <b>Apellido y Nombre / Razón Social:</b> ${esc(fe.nombre)}</div><div><b>Condición frente al IVA:</b> ${esc(FE_COND[fe.condIva]||'')}${fe.dom?` &nbsp;&nbsp; <b>Domicilio:</b> ${esc(fe.dom)}`:''}</div><div><b>Condición de venta:</b> ${fe.cv?esc(fe.cv)+(fe.pago&&fe.pago.tarj?' · '+esc(fe.pago.tarj)+(fe.pago.u4?' ****'+esc(fe.pago.u4):''):''):act.length&&act.every(p=>p.metodo==='efectivo')?'Contado':'Otros medios de pago electrónico'}</div></div>
     <div class="det"><table><thead><tr><th>Código</th><th style="text-align:left">Producto / Servicio</th><th>Cantidad</th><th>U. Medida</th><th>Precio Unit.</th><th>% Bonif</th><th>Imp. Bonif.</th>${A?'<th>% IVA</th>':''}<th>Subtotal</th></tr></thead><tbody>${items.map(fila).join('')}</tbody></table></div>
     <div class="tot">${A?`<span></span><span class="lb">Importe Neto Gravado: $</span><span class="vl">${m2(fe.neto)}</span><span></span><span class="lb">IVA 21%: $</span><span class="vl">${m2(fe.iva)}</span>`:`<span></span><span class="lb">Subtotal: $</span><span class="vl">${m2(fe.total)}</span>`}<span></span><span class="lb">Importe Otros Tributos: $</span><span class="vl">0,00</span><span></span><span class="lb">Importe Total: $</span><span class="vl">${m2(fe.total)}</span></div>
     ${A?'':`<div class="tf"><b><i>Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)</i></b><div style="margin-top:3px"><b>IVA Contenido: $ ${m2(fe.iva)}</b></div></div>`}
@@ -7727,6 +7730,66 @@ function arcaPedir(recibo,ps){
           toast('Factura emitida: '+FE_NOMBRE[r.fe.tipo]+' '+FE_LETRA[r.fe.tipo]+' '+feNro(r.fe));
           closeModal();
           arcaEsperar(recibo,()=>true,()=>openFactura(recibo));
+        }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+      });
+    }});
+}
+
+/* ----- Ventas de otra actividad (factura suelta con otro punto de venta; nada de esto entra en el sistema de internet) ----- */
+const VENTA_PAGO={contado:'Contado',transferencia:'Transferencia',debito:'Tarjeta de débito',credito:'Tarjeta de crédito'};
+function ventaFE(v,nc){return nc?Object.assign({},v.nc,{esNc:true,orig:v.fe}):v.fe;}
+function ventaVer(v,nc,onAnular){
+  const fe=ventaFE(v,nc),R=S.ajustes.recibo||{};
+  const txt=`${R.leyenda||R.razon||'YAPUR'} · ${FE_NOMBRE[fe.tipo]} ${FE_LETRA[fe.tipo]} ${feNro(fe)} por ${fePesos(fe.total)}. CAE ${fe.cae}.`;
+  openModal({title:(nc?'Nota de crédito ':'Factura ')+feNro(fe),wide:true,html:`${facturaHTML(fe,[])}
+    <div class="actions start" style="margin-top:12px"><button class="btn primary" type="button" id="fe-print">Imprimir o guardar como PDF</button><button class="btn" type="button" id="fe-copy">Copiar datos</button>${!nc&&!v.nc?'<button class="btn danger" type="button" id="fe-nc">Anular con nota de crédito</button>':''}<button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
+    onMount(el){
+      $('#fe-print',el).addEventListener('click',()=>imprimirHTML(facturaHTML(fe,[],true),'Factura '+feNro(fe)));
+      $('#fe-copy',el).addEventListener('click',()=>copyText(txt,'Datos de la factura'));
+      const b=$('#fe-nc',el);if(b)b.addEventListener('click',async()=>{
+        if(!await askConfirm('Se emite una nota de crédito contra ARCA por '+fePesos(fe.total)+' y la venta queda anulada. No se puede deshacer.','Anular venta'))return;
+        b.disabled=true;
+        try{await NET.api('POST','/api/ventas/emitir',{nc:v.id});toast('Nota de crédito emitida');closeModal();onAnular();}
+        catch(err){b.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+      });
+    }});
+}
+async function ventasAbrir(){
+  let d;try{d=await NET.api('GET','/api/ventas');}catch(err){return toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
+  const lista=d.ventas||[];
+  openModal({title:'Ventas de otra actividad',wide:true,html:`<p class="small muted">Punto de venta ${esc(String(d.pv2||'—'))}. Mismo CUIT y razón social. Estas ventas no suman a la caja, los cobros ni los informes de internet.</p>
+    <div class="actions start"><button class="btn primary" type="button" id="vt-nueva">Nueva venta</button></div>
+    <div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="r">Importe</th><th></th></tr></thead><tbody>${lista.length?lista.map((v,i)=>`<tr><td>${esc(dmy(v.fe.fecha))}</td><td>${FE_LETRA[v.fe.tipo]} ${esc(feNro(v.fe))}${v.nc?' <span class="chip warn">Anulada</span>':''}</td><td>${esc(v.fe.nombre)}</td><td>${esc(VENTA_PAGO[v.fe.pago&&v.fe.pago.m]||'')}</td><td class="r">${esc(fePesos(v.fe.total))}</td><td><button class="btn small" type="button" data-v="${i}">Ver</button></td></tr>`).join(''):'<tr><td colspan="6" class="muted">Todavía no hay ventas.</td></tr>'}</tbody></table></div>
+    <div class="actions"><button class="btn ghost" type="button" data-close>Cerrar</button></div>`,
+    onMount(el){
+      $('#vt-nueva',el).addEventListener('click',()=>ventaNueva());
+      el.querySelectorAll('[data-v]').forEach(b=>b.addEventListener('click',()=>{const v=lista[Number(b.dataset.v)];ventaVer(v,false,ventasAbrir);}));
+    }});
+}
+function ventaNueva(){
+  openModal({title:'Nueva venta',html:`<p class="small muted">Se emite una factura real por el punto de venta de la otra actividad. Una vez emitida no se modifica: si hay un error se anula con una nota de crédito.</p>
+    ${F('Descripción','vt-det','<input id="vt-det" maxlength="100" value="VENTA">')}
+    ${F('DNI o CUIT del cliente','vt-doc','<input id="vt-doc" inputmode="numeric" maxlength="13">','Si queda vacío sale a «Consumidor final». Con CUIT se puede hacer Factura A.')}
+    ${F('Nombre o razón social','vt-nom','<input id="vt-nom" maxlength="100" placeholder="Consumidor final">','ARCA no completa el nombre desde acá: escribilo si querés que figure.')}
+    <div id="vt-cuit" hidden>${F('Condición del cliente frente al IVA','vt-iva','<select id="vt-iva"><option value="1">Responsable Inscripto</option><option value="6">Monotributista</option><option value="4">IVA Sujeto Exento</option><option value="7">No categorizado</option></select>')}
+      <div id="vt-tipo-box">${F('Tipo de factura','vt-tipo','<select id="vt-tipo"><option value="1">Factura A (IVA discriminado)</option><option value="6">Factura B</option></select>')}</div></div>
+    ${F('Importe (con IVA incluido)','vt-monto','<input id="vt-monto" inputmode="decimal" placeholder="0,00">')}
+    ${F('Forma de pago','vt-pago',`<select id="vt-pago">${Object.keys(VENTA_PAGO).map(k=>`<option value="${k}">${VENTA_PAGO[k]}</option>`).join('')}</select>`)}
+    <div id="vt-tj" hidden><div class="grid2">${F('Qué tarjeta es','vt-tarj','<input id="vt-tarj" maxlength="30" placeholder="Visa, Mastercard…">')}${F('Últimos 4 números','vt-u4','<input id="vt-u4" inputmode="numeric" maxlength="4">','Solo los últimos 4: no se guarda el número completo.')}</div></div>
+    <div class="actions"><button class="btn primary" type="button" id="vt-go">Emitir factura</button><button class="btn ghost" type="button" data-close>Cancelar</button></div>`,
+    onMount(el){
+      const doc=$('#vt-doc',el),iva=$('#vt-iva',el),pago=$('#vt-pago',el);
+      const sync=()=>{$('#vt-cuit',el).hidden=doc.value.replace(/\D/g,'').length!==11;const ab=['1','6'].includes(iva.value);$('#vt-tipo-box',el).hidden=!ab;if(!ab)$('#vt-tipo',el).value='6';$('#vt-tj',el).hidden=!['debito','credito'].includes(pago.value);};
+      [doc,iva,pago].forEach(x=>x.addEventListener('input',sync));sync();
+      $('#vt-go',el).addEventListener('click',async ev=>{
+        const b=ev.currentTarget,dn=doc.value.replace(/\D/g,''),monto=num($('#vt-monto',el).value);
+        if(dn&&dn.length!==11&&(dn.length<7||dn.length>8))return toast('El DNI tiene 7 u 8 números y el CUIT 11.','bad');
+        if(!(monto>0))return toast('Escribí el importe.','bad');
+        b.disabled=true;
+        try{
+          const r=await NET.api('POST','/api/ventas/emitir',{det:$('#vt-det',el).value,docNro:dn,nombre:$('#vt-nom',el).value,condIva:Number(iva.value),tipo:Number($('#vt-tipo',el).value),monto,pago:pago.value,tarj:$('#vt-tarj',el).value,u4:$('#vt-u4',el).value});
+          toast('Factura emitida: '+FE_LETRA[r.venta.fe.tipo]+' '+feNro(r.venta.fe));
+          closeModal();ventaVer(r.venta,false,ventasAbrir);
         }catch(err){b.disabled=false;toast(err.network?'No se pudo conectar con el servidor':err.message,'bad');}
       });
     }});
@@ -7841,7 +7904,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='a2736d0e6f';
+const BUILD='99512272c1';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
