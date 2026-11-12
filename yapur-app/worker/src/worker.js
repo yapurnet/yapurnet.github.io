@@ -1316,7 +1316,7 @@ export class YapurDB extends DurableObject {
   }
   arcaVer() {
     const c = this.arcaCfg(), em = this.arcaEmisor();
-    return { emisor: em, pv: c.pv || null, amb: c.amb || 'homo', tieneClave: !!c.priv, tieneCert: !!c.cert, certHasta: c.certHasta || null, csr: c.csr || null, listo: !!(c.priv && c.cert && c.pv && em.cuit.length === 11), mock: !!this.env.ARCA_MOCK };
+    return { emisor: em, pv: c.pv || null, pv2: c.pv2 || null, amb: c.amb || 'homo', tieneClave: !!c.priv, tieneCert: !!c.cert, certHasta: c.certHasta || null, csr: c.csr || null, listo: !!(c.priv && c.cert && c.pv && em.cuit.length === 11), mock: !!this.env.ARCA_MOCK };
   }
   arcaConfig(b) {
     const c = this.arcaCfg();
@@ -1324,6 +1324,10 @@ export class YapurDB extends DurableObject {
     if (!sinPv && (!Number.isInteger(pv) || pv < 1 || pv > 99999)) throw httpErr(400, 'El punto de venta tiene que ser un número (el que creaste en ARCA para web services).');
     if (amb !== (c.amb || 'homo')) this.sql.exec("DELETE FROM meta WHERE k LIKE 'arca_tk:%'");
     c.pv = pv; c.amb = amb;
+    if (b.pv2 !== undefined) {
+      if (b.pv2 === null || b.pv2 === '' || b.pv2 === 0) delete c.pv2;
+      else { const v2 = Number(b.pv2); if (!Number.isInteger(v2) || v2 < 1 || v2 > 99999) throw httpErr(400, 'El punto de venta de la otra actividad tiene que ser un número.'); c.pv2 = v2; }
+    }
     this.arcaGuardar(c);
     return this.arcaVer();
   }
@@ -1365,6 +1369,7 @@ export class YapurDB extends DurableObject {
     const urls = this.arcaUrls(c), t = await this.arcaTicket(c), out = { ambiente: c.amb || 'homo' };
     try { out.puntos = await ARCA.puntosVenta(urls, t, em.cuit); } catch (e) { out.puntosError = e.message; }
     if (c.pv) { try { out.ultimaB = await ARCA.ultimoNro(urls, t, em.cuit, c.pv, 6); out.ultimaA = await ARCA.ultimoNro(urls, t, em.cuit, c.pv, 1); } catch (e) { out.pvError = e.message; } }
+    if (c.pv2) { try { out.pv2Ultima = await ARCA.ultimoNro(urls, t, em.cuit, c.pv2, 6); } catch (e) { out.pv2Error = e.message; } }
     return out;
   }
   /* los cobros de un recibo (mismo recibo dentro de un documento de pagos) */
@@ -1433,6 +1438,45 @@ export class YapurDB extends DurableObject {
       this.arcaMarcar(docId, ks, out);
       this.snapshotSoon();
       return { ok: true, fe: out };
+    } catch (e) {
+      if (e && e.status) throw e;
+      throw httpErr(e && e.rechazo ? 422 : 502, (e && e.message) || 'No se pudo emitir la factura.');
+    } finally { this.arcaOcupado = 0; }
+  }
+  /* ===== Ventas de otra actividad (mismo CUIT, otro punto de venta): factura suelta, sin clientes, caja ni cobranzas de internet.
+     Se guardan aparte (tabla meta, clave 'ventas'): no se mezclan con ningún informe del sistema de internet. */
+  ventasLista() { const r = this.q1("SELECT v FROM meta WHERE k='ventas'"); try { const a = r ? JSON.parse(r.v) : []; return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  async ventaEmitir(b) {
+    const c = this.arcaCfg(), em = this.arcaEmisor();
+    if (!c.priv || !c.cert) throw httpErr(400, 'La factura electrónica todavía no está configurada (Ajustes → Factura ARCA).');
+    if (!c.pv2) throw httpErr(400, 'Falta el punto de venta de la otra actividad (Ajustes → Factura ARCA).');
+    if (em.cuit.length !== 11) throw httpErr(400, 'Falta el CUIT en Ajustes → Recibo.');
+    const lista = this.ventasLista(), nc = typeof b.nc === 'string' && b.nc ? b.nc : null;
+    let orig = null;
+    if (nc) { orig = lista.find(x => x.id === nc); if (!orig || orig.nc) throw httpErr(409, 'Esa venta no existe o ya tiene su nota de crédito.'); }
+    const total = nc ? orig.fe.total : Math.round((Number(b.monto) || 0) * 100) / 100;
+    if (!(total > 0) || total > 1e9) throw httpErr(400, 'El importe no es válido.');
+    if (this.arcaOcupado && Date.now() - this.arcaOcupado < 90e3) throw httpErr(409, 'Se está emitiendo otra factura. Esperá unos segundos y probá de nuevo.');
+    this.arcaOcupado = Date.now();
+    try {
+      let docNro = String(b.docNro || '').replace(/\D/g, ''), docTipo = 99, condIva = 5;
+      if (docNro.length === 11) docTipo = 80; else if (docNro.length >= 7 && docNro.length <= 8) docTipo = 96; else docNro = '0';
+      if (nc) { docTipo = orig.fe.docTipo; docNro = String(orig.fe.docNro); condIva = orig.fe.condIva; }
+      else if (docTipo === 80) condIva = [1, 4, 6, 7].includes(Number(b.condIva)) ? Number(b.condIva) : 1;
+      const nombre = nc ? orig.fe.nombre : String(b.nombre || 'Consumidor final').replace(/[<>]/g, '').trim().slice(0, 100) || 'Consumidor final';
+      const tipo = nc ? (orig.fe.tipo === 1 ? 3 : 8) : (Number(b.tipo) === 1 && docTipo === 80 && [1, 6].includes(condIva) ? 1 : 6);
+      const CV = { contado: 'Contado', transferencia: 'Transferencia Bancaria', debito: 'Tarjeta de Débito', credito: 'Tarjeta de Crédito' };
+      const m = nc ? orig.fe.pago.m : (CV[b.pago] ? b.pago : 'contado');
+      const pago = nc ? orig.fe.pago : { m, tarj: m === 'debito' || m === 'credito' ? String(b.tarj || '').replace(/[<>]/g, '').trim().slice(0, 30) : '', u4: m === 'debito' || m === 'credito' ? String(b.u4 || '').replace(/\D/g, '').slice(-4) : '' };
+      const det = nc ? orig.fe.det : (String(b.det || '').replace(/[<>]/g, '').trim().slice(0, 100) || 'VENTA');
+      const hoy = arTime(Date.now()).fecha, urls = this.arcaUrls(c), t = await this.arcaTicket(c);
+      const r = await ARCA.emitir(urls, t, em.cuit, { tipo, pv: c.pv2, concepto: 1, docTipo, docNro, condIva, fecha: hoy, total, asociado: nc ? { tipo: orig.fe.tipo, pv: orig.fe.pv, nro: orig.fe.nro } : null });
+      const fe = { tipo, pv: c.pv2, nro: r.nro, cae: r.cae, vto: r.vto, fecha: hoy, total: r.total, neto: r.neto, iva: r.iva, docTipo, docNro, condIva, nombre, cuit: em.cuit, conc: 1, det, pago, cv: CV[m], amb: c.amb || 'homo' };
+      const fila = nc ? Object.assign(orig, { nc: fe }) : { id: 'v' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36), fe, por: '' };
+      const nueva = nc ? lista : [fila].concat(lista).slice(0, 2000);
+      this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('ventas',?)", JSON.stringify(nueva));
+      this.snapshotSoon();
+      return { ok: true, venta: fila };
     } catch (e) {
       if (e && e.status) throw e;
       throw httpErr(e && e.rechazo ? 422 : 502, (e && e.message) || 'No se pudo emitir la factura.');
@@ -3279,6 +3323,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/certificado' && m === 'POST') { await this.needAdmin(request); return send(200, this.arcaCert(readBody(raw, 3e4))); }
     if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
+    if (p === '/api/ventas' && m === 'GET') { await this.needAdmin(request); return send(200, { ventas: this.ventasLista(), pv2: this.arcaCfg().pv2 || null }); }
+    if (p === '/api/ventas/emitir' && m === 'POST') { await this.needAdmin(request); return send(200, await this.ventaEmitir(readBody(raw, 3e3))); }
     if (p === '/api/uso' && m === 'GET') { await this.needAdmin(request); return send(200, this.usoVer()); }
     if (p === '/api/ping/armar' && m === 'POST') return send(200, this.pingArmar((await this.needAuth(request)).user));
     if ((mm = /^\/api\/ping\/(g[0-9a-f]{14})$/.exec(p)) && m === 'GET') return send(200, { ping: this.pingVer((await this.needAuth(request)).user, mm[1]) });
