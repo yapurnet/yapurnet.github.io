@@ -889,7 +889,7 @@ VIEWS.miscobros={
 VIEWS.cobranzas={
   mount(el){
     if(!CB.fecha)CB.fecha=todayStr();
-    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['dant','Deuda anterior'],['cortes','A cortar']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
+    const subs=[['cobrar','Cobrar'],['caja','Caja del día'],['morosos','Morosos'],['dant','Deuda anterior'],['cortes','A cortar'],['egresos','Egresos']].filter(([k])=>k==='cobrar'?can('cobrar'):can('caja'));
     if(!subs.some(s=>s[0]===CB.sub))CB.sub=subs.length?subs[0][0]:'cobrar';
     el.innerHTML=`<div class="seg" id="cb-sub">${subs.map(([k,l])=>`<button type="button" data-s="${k}" aria-pressed="${CB.sub===k}">${l}</button>`).join('')}</div><div id="cb-body" class="wrap" style="padding:0"></div>`;
     $('#cb-sub',el).addEventListener('click',e=>{const b=e.target.closest('[data-s]');if(!b)return;CB.sub=b.dataset.s;$$('#cb-sub button',el).forEach(x=>x.setAttribute('aria-pressed',String(x===b)));this.draw(true);});
@@ -929,10 +929,12 @@ VIEWS.cobranzas={
       const byM={};ok.forEach(p=>{byM[p.metodo]=(byM[p.metodo]||0)+(Number(p.monto)||0);});
       const recs=new Set(ok.map(p=>p.recibo)).size;
       $('#cb-caja',body).innerHTML=`<div class="kpis"><div class="kpi"><span class="n">${fmtMoney(tot)}</span><span class="l">Total cobrado · ${recs} ${recs===1?'recibo':'recibos'}</span></div>
-        ${Object.entries(METODOS).filter(([k])=>byM[k]).map(([k,v])=>`<div class="kpi"><span class="n">${fmtMoney(byM[k])}</span><span class="l">${v}</span></div>`).join('')}</div>
+        ${Object.entries(METODOS).filter(([k])=>byM[k]).map(([k,v])=>`<div class="kpi"><span class="n">${fmtMoney(byM[k])}</span><span class="l">${v}</span></div>`).join('')}${(()=>{const eh=egresosHoy(CB.fecha).filter(e=>!e.anulado),te=eh.reduce((x,e)=>x+Number(e.m),0);return te?`<div class="kpi"><span class="n">${fmtMoney(te)}</span><span class="l">Egresos de efectivo del día</span></div><div class="kpi"><span class="n">${fmtMoney((byM.efectivo||0)-te)}</span><span class="l">Efectivo que debería quedar</span></div>`:'';})()}</div>
         ${cajaWaAviso(ok)}
         ${cajaPorCobrador(ok)}
         <div class="list" style="margin-top:12px">${ps.length?ps.map(paymentRow).join(''):'<div class="empty"><b>Sin movimientos</b><span>No hay cobros registrados en esta fecha.</span></div>'}</div>`;
+    }else if(CB.sub==='egresos'){
+      egresosDraw(body,full);
     }else if(CB.sub==='cortes'){
       drawCortes(body);
     }else if(CB.sub==='dant'){
