@@ -90,6 +90,7 @@ function startData(){
   if(!started.red){started.red=1;watchSharded('red',S.red,'red');}
   if(!started.ct&&can('comodato')){started.ct=1;ctStart();}
   if(!started.ordenes){started.ordenes=1;watchSharded('ordenes',S.ordenes,'ordenes');}
+  if(!started.egresos&&(S.realRole==='admin'||can('caja')||can('resumen'))){started.egresos=1;watchSharded('egresos',S.egresos,'egresos');}
   if(!started.pagos){
     if(S.realRole==='admin'||can('cobrar')||can('caja')||can('promesas')||can('resumen')){started.pagos=1;watchSharded('pagos',S.pagos,'pagos');}
     else S.loaded.pagos=true;

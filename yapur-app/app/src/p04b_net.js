@@ -117,7 +117,7 @@ const NET=(function(){
   }
 
   /* ----- sincronización ----- */
-  function markAll(){['clientes','pagos','ordenes','planes','ajustes','red'].forEach(c=>dirty.add(c));kick();}
+  function markAll(){['clientes','pagos','ordenes','planes','ajustes','red','egresos'].forEach(c=>dirty.add(c));kick();}
   function kick(){if(flushT)return;flushT=setTimeout(()=>{flushT=null;flush();},20);}
   function flush(){
     const d=dirty;dirty=new Set();
@@ -130,7 +130,7 @@ const NET=(function(){
       buffer=[];
       const j=await api('GET','/api/sync',undefined,{timeout:90000});
       for(const k of Object.keys(data))delete data[k];
-      for(const c of ['clientes','pagos','ordenes','planes','ajustes','red'])data[c]=null;
+      for(const c of ['clientes','pagos','ordenes','planes','ajustes','red','egresos'])data[c]=null;
       for(const c of Object.keys(j.cols))data[c]=new Map(j.cols[c].map(d=>[d.id,d.data]));
       baseSeq=j.seq;docSeq.clear();synced=true;fresh=true;
       const pend=buffer;buffer=[];

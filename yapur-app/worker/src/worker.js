@@ -36,7 +36,9 @@ async function gunzip(u8) {
 /* día en Argentina (UTC-3, sin horario de verano) */
 const ymd = (t = Date.now()) => new Date(t - 3 * 3600e3).toISOString().slice(0, 10);
 
-const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red']);
+const COLS = new Set(['clientes', 'pagos', 'ordenes', 'planes', 'ajustes', 'red', 'egresos']);
+const EGRESO_CATS = ['retiro', 'proveedor', 'devolucion', 'saldo_favor', 'equipo', 'sueldo', 'otro'];
+const canSeeEgresos = (u, p) => u.role === 'admin' || p.caja || p.resumen;
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
 const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion', 'ventasOtra', 'soloVentas'];
@@ -146,6 +148,7 @@ function canWrite(u, p, coll, op) {
   if (coll === 'ordenes') return (p.crearOrdenes || p.operarOrdenes) ? null : 'Tu usuario no puede modificar órdenes.';
   if (coll === 'pagos') return (p.cobrar || p.anular || p.cobrarCampo) ? null : 'Tu usuario no puede registrar pagos.';
   if (coll === 'red') return p.red ? null : 'Tu usuario no puede modificar la red.';
+  if (coll === 'egresos') return (p.caja || p.anular) ? null : 'Tu usuario no puede registrar egresos de caja.';
   return 'No permitido.';
 }
 const RT_KINDS = ['q', 'p', 'd'];   // q: colas simples (IP fija) · p: secretos y perfiles PPPoE · d: leases DHCP estáticos
@@ -183,10 +186,38 @@ function guard(u, p, coll, existing, patch, ctx) {
     for (const k of Object.values(PRECIO_KEYS)) if (k in patch && (!isNum(patch[k]) || patch[k] <= 0 || patch[k] > 1e7 || Math.round(patch[k]) !== patch[k])) return 'El precio no es válido: tiene que ser un número entero mayor que cero.';
     return null;
   }
-  if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red') return null;
+  if (u.role === 'admin' && coll !== 'pagos' && coll !== 'red' && coll !== 'egresos') return null;
   const items = isPlain(patch.items) ? patch.items : null;
-  if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' ? 'Formato inválido.' : null;
+  if (!items) return coll === 'pagos' || coll === 'clientes' || coll === 'ordenes' || coll === 'red' || coll === 'egresos' ? 'Formato inválido.' : null;
   const old = existing && isPlain(existing.items) ? existing.items : {};
+  if (coll === 'egresos') {
+    /* los egresos de efectivo de la caja quedan registrados para siempre: se cargan nuevos y, si hubo un error, se anulan con motivo (no se editan ni se borran) */
+    for (const id of Object.keys(items)) {
+      const nw = items[id], prev = old[id];
+      if (!ID_RE.test(id) || !isPlain(nw)) return 'Formato inválido.';
+      if (prev) {
+        for (const k of new Set([...Object.keys(prev), ...Object.keys(nw)])) {
+          if (k === 'anulado' || k === 'anuladoMotivo' || k === 'anuladoPor' || k === 'anuladoTs') continue;
+          if (!same(nw[k], prev[k])) return 'Un egreso cargado no se puede modificar: anulalo y cargá uno nuevo.';
+        }
+        if (nw.anulado && !prev.anulado) {
+          if (u.role !== 'admin' && !p.anular) return 'Tu usuario no puede anular egresos.';
+          if (typeof nw.anuladoMotivo !== 'string' || nw.anuladoMotivo.trim().length < 3 || nw.anuladoMotivo.length > 160) return 'Escribí el motivo de la anulación.';
+          nw.anuladoPor = u.id; nw.anuladoTs = Date.now();
+        } else if (!!nw.anulado !== !!prev.anulado) return 'Un egreso anulado no se puede reactivar.';
+        continue;
+      }
+      if (u.role !== 'admin' && !p.caja) return 'Tu usuario no puede registrar egresos de caja.';
+      if (!isNum(nw.m) || nw.m <= 0 || nw.m > 1e8 || Math.round(nw.m * 100) !== nw.m * 100) return 'El monto del egreso no es válido.';
+      if (!EGRESO_CATS.includes(nw.cat)) return 'Elegí el motivo del egreso.';
+      if (typeof nw.det !== 'string' || nw.det.trim().length < 3 || nw.det.length > 200) return 'Escribí el detalle del egreso (para qué fue el dinero).';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(nw.f || '')) return 'La fecha del egreso no es válida.';
+      if (nw.c != null && (typeof nw.c !== 'string' || !ID_RE.test(nw.c))) return 'El cliente del egreso no es válido.';
+      for (const k of Object.keys(nw)) if (!['f', 'm', 'cat', 'det', 'c', 'cn', 'por', 'ts', 'hora'].includes(k)) return 'El egreso tiene datos que no corresponden.';
+      nw.por = u.id; nw.ts = Date.now();
+    }
+    return null;
+  }
   if (coll === 'clientes') {
     for (const id of Object.keys(items)) {
       const nw = items[id], prev = old[id];
@@ -1015,6 +1046,7 @@ export class YapurDB extends DurableObject {
   }
   viewData(u, p, coll, id, data) {
     if (coll === 'pagos') return canReadPagos(u, p) ? data : null;
+    if (coll === 'egresos') return canSeeEgresos(u, p) ? data : null;
     if (coll === 'ajustes') {
       if (id !== 'general') return u.role === 'admin' ? data : null;
       const d = Object.assign({}, data, { perfiles: this.perfilesView(), waActivo: this.waActivo(), arcaListo: this.arcaVer().listo, arcaProd: this.arcaCfg().amb === 'prod' });
@@ -1094,7 +1126,7 @@ export class YapurDB extends DurableObject {
     if (!COLS.has(coll) || !ID_RE.test(id)) throw httpErr(400, 'Ruta inválida.');
     if (!isPlain(data)) throw httpErr(400, 'Datos inválidos.');
     const p = effPerms(u);
-    if (op === 'set' && (coll === 'clientes' || coll === 'pagos' || coll === 'ordenes' || coll === 'red')) throw httpErr(400, 'Los lotes de clientes, pagos, órdenes y red solo se modifican de a un registro.', 'invalid_argument');
+    if (op === 'set' && (coll === 'clientes' || coll === 'pagos' || coll === 'ordenes' || coll === 'red' || coll === 'egresos')) throw httpErr(400, 'Los lotes de clientes, pagos, órdenes y red solo se modifican de a un registro.', 'invalid_argument');
     const bad = canWrite(u, p, coll, op);
     if (bad) throw httpErr(403, bad, 'permission_denied');
     if (coll === 'ajustes' && id !== 'general') throw httpErr(400, 'Ruta inválida.');
@@ -1178,12 +1210,13 @@ export class YapurDB extends DurableObject {
     const p = effPerms(u), cols = [];
     for (const coll of COLS) {
       if (coll === 'pagos' && !canReadPagos(u, p)) continue;
+      if (coll === 'egresos' && !canSeeEgresos(u, p)) continue;
       const arr = [];
       let hasGeneral = false;
       for (const r of this.q('SELECT id,data FROM docs WHERE coll=? ORDER BY id', coll)) {
         if (coll === 'ajustes' && r.id !== 'general' && u.role !== 'admin') continue;
         if (coll === 'ajustes' && r.id === 'general') hasGeneral = true;
-        if (coll === 'pagos' || (u.role === 'admin' && coll !== 'ajustes')) { arr.push('{"id":' + JSON.stringify(r.id) + ',"data":' + r.data + '}'); continue; }
+        if (coll === 'pagos' || (u.role === 'admin' && coll !== 'ajustes' && coll !== 'egresos')) { arr.push('{"id":' + JSON.stringify(r.id) + ',"data":' + r.data + '}'); continue; }
         const v = this.viewData(u, p, coll, r.id, JSON.parse(r.data));
         if (v != null) arr.push(JSON.stringify({ id: r.id, data: v }));
       }
