@@ -166,6 +166,8 @@ function watchSharded(coll,target,key){
 function rebuildDerived(){
   S.paidIdx=new Map();S.payByClient=new Map();S.billCache=new Map();S.cutCache=new Map();
   S.payDA=new Map();S.cuentaIdx=new Map();
+  S.instNov=new Set();   /* clientes cuya instalación se hizo en noviembre de 2026 (ver billing) */
+  for(const o of S.ordenes.values())if(o.tipo==='instalacion'&&o.estado==='hecha'&&String(o.cierre||o.creado||'').slice(0,7)==='2026-11')S.instNov.add(o.clientId);
   for(const c of S.clientes.values())if(c.cuenta&&c.cuenta!==c.id){let l=S.cuentaIdx.get(c.cuenta);if(!l){l=[];S.cuentaIdx.set(c.cuenta,l);}l.push(c);}
   for(const p of S.pagos.values()){
     let l=S.payByClient.get(p.c);if(!l){l=[];S.payByClient.set(p.c,l);}l.push(p);
@@ -308,8 +310,9 @@ function billing(c,withNext){
   const out={price:priceOf(c),periods:[],vencidos:0,deuda:0,aplica:vivo&&!c.sinCargo,sinCargo:vivo&&!!c.sinCargo};
   if(out.aplica){
     let from=c.desde||(c.alta?c.alta.slice(0,7):cur);
-    /* los instalados en noviembre de 2026 (antes de este criterio) tenían «Cobrar desde» = mes de la alta: el mes de la instalación no se cobra, empiezan al mes siguiente */
-    if(!c.desdeOk&&c.alta&&c.alta.slice(0,7)==='2026-11'&&from==='2026-11')from='2026-12';
+    /* los que se instalaron en noviembre de 2026 (antes de este criterio) tenían «Cobrar desde» = noviembre: el mes de la instalación no se cobra, empiezan en diciembre.
+       Solo vale para quien tiene una orden de instalación hecha este mes: los clientes que ya existían y se cargaron con alta de noviembre siguen debiendo noviembre */
+    if(!c.desdeOk&&from==='2026-11'&&S.instNov&&S.instNov.has(c.id))from='2026-12';
     const floor=addMonths(cur,-35);if(from<floor)from=floor;
     const paidMap=S.paidIdx.get(c.id)||new Map();
     const last=withNext?addMonths(cur,1):cur;
