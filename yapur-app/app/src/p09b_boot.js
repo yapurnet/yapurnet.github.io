@@ -64,7 +64,7 @@ function updateHeader(){
   else btn.hidden=true;
 }
 function dataChanged(key){
-  if(key==='pagos'||key==='clientes'||key==='planes'||key==='ajustes')rebuildDerived();
+  if(key==='pagos'||key==='clientes'||key==='planes'||key==='ajustes'||key==='ordenes')rebuildDerived();
   if(key==='red')S.rv++;
   if(renderTimer)return;
   renderTimer=setTimeout(()=>{renderTimer=null;if(!S.ready||S.gate||S.ubicGate)return;updateHeader();renderTabs();const v=VIEWS[S.tab];if(v&&v.update)v.update();},60);
