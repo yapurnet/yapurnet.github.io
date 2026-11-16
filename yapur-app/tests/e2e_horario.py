@@ -42,12 +42,12 @@ async def main():
         await ap.click('#tu-hz'); await ap.wait_for_selector('#hz-form')
         check('sin horario cortado cargado, el cuadro de la siesta está escondido', await ap.evaluate("document.querySelector('#hz-cbox').hidden") and not await ap.is_checked('#hz-c'))
         await ap.click('#hz-c')
-        check('al tildar «También hay días con horario cortado» aparecen mañana, tarde y los días', not await ap.evaluate("document.querySelector('#hz-cbox').hidden") and await ap.input_value('#hz-m0') == '8' and await ap.input_value('#hz-m1') == '13' and await ap.input_value('#hz-t0') == '17' and await ap.input_value('#hz-t1') == '22')
+        check('al tildar «También hay días con horario cortado» aparecen mañana, tarde y los días', not await ap.evaluate("document.querySelector('#hz-cbox').hidden") and await ap.input_value('#hz-m0') == '08:00' and await ap.input_value('#hz-m1') == '13:00' and await ap.input_value('#hz-t0') == '17:00' and await ap.input_value('#hz-t1') == '22:00')
         if os.environ.get('VIS_OUT'): await ap.screenshot(path=os.path.join(os.environ['VIS_OUT'], 'horario-cortado.png'), full_page=True)
         # validaciones
-        await ap.fill('#hz-m1', '18'); await ap.click('#hz-form button[type=submit]'); await ap.wait_for_timeout(500)
+        await ap.fill('#hz-m1', '18:00'); await ap.click('#hz-form button[type=submit]'); await ap.wait_for_timeout(500)
         check('una mañana que termina después de que empieza la tarde no se guarda y el cuadro sigue abierto', await ap.evaluate("!!document.querySelector('#hz-form')") and api('GET', '/api/ubicaciones', None, TA)[1]['plan']['cortado'] is None)
-        await ap.fill('#hz-m1', '13')
+        await ap.fill('#hz-m1', '13:00')
         for d in (1, 2, 3, 4, 5, 6): await ap.click(f'[data-dc="{d}"]')
         check('el domingo queda sin tildar', not await ap.is_checked('[data-dc="0"]'))
         # un día puntual

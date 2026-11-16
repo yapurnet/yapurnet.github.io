@@ -5792,6 +5792,9 @@ VIEWS.instalaciones={
 const UB={st:null,stTs:0,watch:null,queue:[],lastQ:0,sending:false,asked:false,denied:false,gpsOff:false,nat:false,started:false,refr:false,bg:'',bgPedido:false,sOk:false};
 const arNow=()=>{const d=new Date(Date.now()-3*3600e3);return {fecha:d.toISOString().slice(0,10),h:d.getUTCHours()+d.getUTCMinutes()/60};};
 /* tramos del día: [[8,20]] de corrido, o [[8,13],[17,22]] en un día cortado (con siesta). Los datos viejos traen solo desde/hasta. */
+/* horas con minutos: 8.5 <-> «8:30» */
+const hrTxt=x=>{const m=Math.round(x*60);return Math.floor(m/60)+':'+String(m%60).padStart(2,'0');};
+const hrNum=v=>{const m=/^(\d{1,2}):(\d{2})$/.exec(String(v||''));return m?Math.round((Number(m[1])+Number(m[2])/60)*1e4)/1e4:NaN;};
 const stTramos=s=>!s?[]:(s.tramos&&s.tramos.length?s.tramos:[[s.desde,s.hasta]]);
 const trTxt=tr=>tr.map(t=>t[0]+' a '+t[1]).join(' y de ');   /* «8 a 13 y de 17 a 22»: se usa como «de … h» */
 /* la oficina puede cortarle el GPS a un técnico a una hora de hoy: desde ahí no se comparte nada más (el servidor igual descarta lo que llegue) */
@@ -5978,8 +5981,8 @@ function ubicLoopCore(){
     if(b&&typeof b.startLocation==='function'){   /* en el APK, un servicio sigue enviando con la pantalla apagada */
       try{
         UB.nat=String((typeof b.startLocationTramos==='function'
-          ?b.startLocationTramos(NET.token,tr.map(t=>t[0]+'-'+t[1]).join(','))
-          :b.startLocation(NET.token,tr[0][0],tr[tr.length-1][1]))||'')==='ok';
+          ?b.startLocationTramos(NET.token,tr.map(t=>Math.floor(t[0]+1e-9)+'-'+Math.ceil(t[1]-1e-9)).join(','))
+          :b.startLocation(NET.token,Math.floor(tr[0][0]+1e-9),Math.ceil(tr[tr.length-1][1]-1e-9)))||'')==='ok';
       }catch(e){UB.nat=false;}
     }
     if(UB.nat){if(UB.watch!=null&&navigator.geolocation)navigator.geolocation.clearWatch(UB.watch);UB.watch=null;}   /* ya manda el servicio: que no mande también la página */
@@ -6254,7 +6257,7 @@ function tecRender(){
   const bannerRet=sinRet.length?`<div class="notice bad" role="status" id="tu-retoma" style="margin-bottom:12px"><b>Sin retomar a la tarde:</b> ${sinRet.map(t=>esc(t.nombre)).join(', ')}.</div>`:'';
   const jc=d.jornada||{tol:10,radio:40,base:null,dias:[1,2,3,4,5,6]},DN=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const jb=$('#tu-base');
-  if(jb)jb.textContent=`Jornada: se espera el ingreso a las ${tr[0][0]}:00${tr.length>1?' y la retoma a las '+tr[1][0]+':00':''}, con ${jc.tol} min de tolerancia, ${jc.dias.length?'de '+[1,2,3,4,5,6,0].filter(x=>jc.dias.includes(x)).map(x=>DN[x]).join(', '):'ningún día'}. ${jc.base?'Base cargada (radio '+jc.radio+' m): el ingreso y el fin salen solos.':'Todavía sin base: el control de jornada está apagado. Cargala con «Base y jornada».'}`;
+  if(jb)jb.textContent=`Jornada: se espera el ingreso a las ${hrTxt(tr[0][0])}${tr.length>1?' y la retoma a las '+hrTxt(tr[1][0]):''}, con ${jc.tol} min de tolerancia, ${jc.dias.length?'de '+[1,2,3,4,5,6,0].filter(x=>jc.dias.includes(x)).map(x=>DN[x]).join(', '):'ningún día'}. ${jc.base?'Base cargada (radio '+jc.radio+' m): el ingreso y el fin salen solos.':'Todavía sin base: el control de jornada está apagado. Cargala con «Base y jornada».'}`;
   out.innerHTML=list.length?`${bannerIng}${bannerRet}${banner}<div class="plans">${list.map(t=>tecCard(t,d)).join('')}</div>`:'<div class="empty"><b>No hay técnicos cargados</b><span>Los técnicos son los usuarios de tipo «Técnico»: se crean en Ajustes.</span></div>';
 }
 async function tecCargar(){
@@ -6311,13 +6314,13 @@ async function guardarPlan(pl){
 }
 function openHorarioUbic(){
   const pl=planDe(),cor=pl.cortado||{m:[8,13],t:[17,22]},fechas=Object.assign({},pl.fechas),hoy=(TU.data&&TU.data.hoy)||arNow().fecha;
-  const num=(id,v,mn,mx)=>`<input id="${id}" type="number" min="${mn}" max="${mx}" step="1" inputmode="numeric" value="${v}">`;
+  const num=(id,v)=>`<input id="${id}" type="time" step="300" value="${v>=24?'23:59':String(Math.floor(Math.round(v*60)/60)).padStart(2,'0')+':'+String(Math.round(v*60)%60).padStart(2,'0')}">`;
   openModal({title:'Horario de la ubicación',html:`<form class="form" id="hz-form" novalidate><div class="hint">Fuera de estos horarios el servidor no guarda nada, aunque el celular lo mande. El ingreso esperado es el «desde» del primer tramo del día.</div>
-    <div class="field"><label>De corrido (un solo tramo)</label><div class="grid2">${F('Desde (hora)','hz-d',num('hz-d',pl.corrido.desde,0,23))}${F('Hasta (hora)','hz-h',num('hz-h',pl.corrido.hasta,1,24))}</div></div>
+    <div class="field"><label>De corrido (un solo tramo)</label><div class="grid2">${F('Desde','hz-d',num('hz-d',pl.corrido.desde))}${F('Hasta','hz-h',num('hz-h',pl.corrido.hasta))}</div></div>
     <div class="field"><label><input type="checkbox" id="hz-c"${pl.cortado?' checked':''}> También hay días con horario cortado (siesta)</label></div>
     <div id="hz-cbox"${pl.cortado?'':' hidden'}>
-      <div class="grid2">${F('Mañana desde','hz-m0',num('hz-m0',cor.m[0],0,23))}${F('Mañana hasta','hz-m1',num('hz-m1',cor.m[1],1,24))}</div>
-      <div class="grid2">${F('Tarde desde','hz-t0',num('hz-t0',cor.t[0],0,23))}${F('Tarde hasta','hz-t1',num('hz-t1',cor.t[1],1,24))}</div>
+      <div class="grid2">${F('Mañana desde','hz-m0',num('hz-m0',cor.m[0]))}${F('Mañana hasta','hz-m1',num('hz-m1',cor.m[1]))}</div>
+      <div class="grid2">${F('Tarde desde','hz-t0',num('hz-t0',cor.t[0]))}${F('Tarde hasta','hz-t1',num('hz-t1',cor.t[1]))}</div>
       <div class="field"><label>Qué días se trabaja cortado</label><div class="dias">${HZ_DIAS.map(([n,l])=>`<label><input type="checkbox" data-dc="${n}"${pl.dias[n]==='cortado'?' checked':''}>${l}</label>`).join('')}</div></div>
       <div class="field"><label>Un día puntual (por ejemplo, un día de mucho calor)</label>
         <div class="grid2"><input id="hz-fd" type="date" aria-label="Día puntual" value="${hoy}"><select id="hz-fm" aria-label="Horario ese día"><option value="cortado">Cortado</option><option value="corrido">De corrido</option></select></div>
@@ -6337,14 +6340,14 @@ function openHorarioUbic(){
       lista.addEventListener('click',e=>{const b=e.target.closest('[data-qf]');if(!b)return;delete fechas[b.dataset.qf];pintar();});
       $('#hz-form',el).addEventListener('submit',async e=>{
         e.preventDefault();
-        const N=id=>Number($('#'+id,el).value),desde=N('hz-d'),hasta=N('hz-h'),usa=$('#hz-c',el).checked;
-        const ok=(a,b)=>Number.isInteger(a)&&Number.isInteger(b)&&a>=0&&b<=24&&a<b;
-        if(!ok(desde,hasta))return toast('De corrido: «desde» tiene que ser menor que «hasta» (de 0 a 24)','bad');
+        const N=id=>hrNum($('#'+id,el).value),desde=N('hz-d'),hasta=N('hz-h'),usa=$('#hz-c',el).checked;
+        const ok=(a,b)=>isFinite(a)&&isFinite(b)&&a>=0&&b<=24&&a<b;
+        if(!ok(desde,hasta))return toast('De corrido: «desde» tiene que ser menor que «hasta» (ej.: 8:30)','bad');
         const nuevo={corrido:{desde,hasta},cortado:null,dias:{},fechas:{}};
         for(const [n] of HZ_DIAS)nuevo.dias[n]='corrido';
         if(usa){
           const m=[N('hz-m0'),N('hz-m1')],t=[N('hz-t0'),N('hz-t1')];
-          if(!ok(m[0],m[1])||!ok(t[0],t[1]))return toast('Cortado: en la mañana y en la tarde «desde» tiene que ser menor que «hasta» (de 0 a 24)','bad');
+          if(!ok(m[0],m[1])||!ok(t[0],t[1]))return toast('Cortado: en la mañana y en la tarde «desde» tiene que ser menor que «hasta» (ej.: 8:30)','bad');
           if(m[1]>=t[0])return toast('La mañana tiene que terminar antes de que empiece la tarde','bad');
           nuevo.cortado={m,t};
           el.querySelectorAll('[data-dc]').forEach(c=>{nuevo.dias[Number(c.dataset.dc)]=c.checked?'cortado':'corrido';});
@@ -8005,7 +8008,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='5585a39b52';
+const BUILD='dd7c72c712';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

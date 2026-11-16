@@ -725,7 +725,13 @@ const prevMesKey = cur => { let [y, m] = cur.split('-').map(Number); m--; if (m 
 /* ----- horario por día: de corrido (un tramo) o cortado (mañana y tarde, con siesta en el medio) -----
    plan = { corrido:{desde,hasta}, cortado:{m:[d,h],t:[d,h]}|null, dias:{0..6:'corrido'|'cortado'}, fechas:{'AAAA-MM-DD':'corrido'|'cortado'} }.
    Un día puntual (fechas) gana sobre el día de la semana. Son funciones puras para poder probarlas con cualquier hora. */
-const horaOk = (d, h) => Number.isInteger(d) && Number.isInteger(h) && d >= 0 && h <= 24 && d < h;
+/* las horas pueden llevar minutos (8.5 = 8:30): se aceptan al minuto. */
+const horaVal = x => typeof x === 'number' && isFinite(x) && Math.abs(x * 60 - Math.round(x * 60)) < 0.05;
+const horaOk = (d, h) => horaVal(d) && horaVal(h) && d >= 0 && h <= 24 && d < h;
+/* «8.5» -> «8:30» */
+const horaTxt = x => { const m = Math.round(x * 60); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+/* el APK lee las horas con getInt: se le pasa el tramo ensanchado a horas enteras (el servidor igual descarta lo que llegue fuera del horario exacto) */
+const tramosApk = tr => tr.map(t => [Math.floor(t[0] + 1e-9), Math.ceil(t[1] - 1e-9)]);
 const trOk = t => Array.isArray(t) && t.length === 2 && horaOk(t[0], t[1]);
 function ubicTramosDe(plan, fecha) {
   const dow = new Date(arDayStart(fecha) + 12 * 3600e3).getUTCDay();
@@ -2273,7 +2279,7 @@ export class YapurDB extends DurableObject {
   ubicHorario() {
     const r = this.q1("SELECT v FROM meta WHERE k='ubic_horario'");
     const [d, h] = String(r && r.v || '8,20').split(',').map(Number);
-    return Number.isInteger(d) && Number.isInteger(h) && d >= 0 && h <= 24 && d < h ? { desde: d, hasta: h } : { desde: 8, hasta: 20 };
+    return horaOk(d, h) ? { desde: d, hasta: h } : { desde: 8, hasta: 20 };
   }
   ubicPlan() {
     const r = this.q1("SELECT v FROM meta WHERE k='ubic_plan'");
@@ -2302,7 +2308,7 @@ export class YapurDB extends DurableObject {
   ubicEstado(u) {
     const ahora = Date.now(), fecha = arTime(ahora).fecha, h = this.ubicDia(fecha), corte = u.role === 'tecnico' ? this.ubicCorteDe(u.id, fecha) : null;
     const tramos = ubicTramosCorte(h.tramos, arDayStart(fecha), corte);
-    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, modo: h.modo, dentro: !(corte && ahora >= corte) && this.ubicDentro(ahora, tramos), corte, dias: UBIC_DIAS, novedades: this.tecNovedades(u) };
+    return { aplica: u.role === 'tecnico', acepto: this.ubicAcepto(u.id), fecha, desde: tramosApk(tramos)[0][0], hasta: tramosApk(tramos).slice(-1)[0][1], tramos: tramosApk(tramos), modo: h.modo, dentro: !(corte && ahora >= corte) && this.ubicDentro(ahora, tramos), corte, dias: UBIC_DIAS, novedades: this.tecNovedades(u) };
   }
   /* cuántas de SUS órdenes (asignadas a él) cambiaron desde la última vez que las miró: una orden nueva, una que le volvieron a
      asignar, un comentario… con mirar el campo «mod» alcanza, sin tener que distinguir de qué se trata. Lo pide el APK junto con
@@ -2335,7 +2341,7 @@ export class YapurDB extends DurableObject {
     ts = Math.round(ts);
     if (ts > ahora + 60e3) throw httpErr(400, 'Esa hora todavía no llegó: elegí la hora a la que se fue, o una anterior.');
     ts = Math.min(ts, ahora);
-    if (ts <= t0 + tr[0][0] * 3600e3) throw httpErr(400, 'Esa hora es anterior al comienzo de su horario de hoy (' + tr[0][0] + ':00).');
+    if (ts <= t0 + tr[0][0] * 3600e3) throw httpErr(400, 'Esa hora es anterior al comienzo de su horario de hoy (' + horaTxt(tr[0][0]) + ').');
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubiccorte:' + t.id + ':' + dia, String(ts));
     const borrados = (this.q1('SELECT COUNT(*) n FROM ubic WHERE uid=? AND ts>=?', t.id, ts) || {}).n || 0;
     if (borrados) { this.sql.exec('DELETE FROM ubic WHERE uid=? AND ts>=?', t.id, ts); this.ubicMem.clear(); }
@@ -2389,7 +2395,7 @@ export class YapurDB extends DurableObject {
     }
     this.mantenimiento();   // borrar lo viejo recorre toda la tabla de posiciones: corre cada varias horas, no con cada posición
     const hoy = arTime(now).fecha, corteHoy = hoy in cortes ? cortes[hoy] : this.ubicCorteDe(u.id, hoy), tramos = ubicTramosCorte(h.tramos, arDayStart(hoy), corteHoy);
-    return { ok: true, guardados: n, freno: { nivel, seg: FRENO_SEG[nivel] }, frenados, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramos[0][0], hasta: tramos[tramos.length - 1][1], tramos, corte: corteHoy };
+    return { ok: true, guardados: n, freno: { nivel, seg: FRENO_SEG[nivel] }, frenados, fuera_horario: n === 0 && fuera > 0, cortado: n === 0 && cortados > 0, desde: tramosApk(tramos)[0][0], hasta: tramosApk(tramos).slice(-1)[0][1], tramos: tramosApk(tramos), corte: corteHoy };
   }
   /* ----- latido: lo que el celular dice de sí mismo, sin posición ni nada fuera de horario -----
      Cada minuto, dentro del horario, la app (o el servicio del APK) manda si la ubicación está prendida, si la app tiene permiso y cuánta batería queda.
@@ -3311,7 +3317,7 @@ export class YapurDB extends DurableObject {
     if (p === '/api/ubicacion/horario' && m === 'POST') {
       await this.needAdmin(request);
       const b = readBody(raw, 1e3), d = Number(b.desde), h = Number(b.hasta);
-      if (!Number.isInteger(d) || !Number.isInteger(h) || d < 0 || h > 24 || d >= h) throw httpErr(400, 'El horario no es válido: «desde» tiene que ser menor que «hasta» (de 0 a 24).');
+      if (!horaOk(d, h)) throw httpErr(400, 'El horario no es válido: «desde» tiene que ser menor que «hasta» (de 0 a 24).');
       this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'ubic_horario', d + ',' + h);
       return send(200, { horario: this.ubicHorario() });
     }
