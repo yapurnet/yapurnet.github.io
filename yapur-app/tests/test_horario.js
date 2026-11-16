@@ -128,6 +128,9 @@ function puras() {
     await malo('tampoco pegada a la tarde (13 y 13)', { cortado: { m: [8, 13], t: [13, 22] } }, 'antes de que empiece la tarde');
     await malo('un tramo con «desde» mayor que «hasta» no se acepta', { cortado: { m: [13, 8], t: [17, 22] } }, 'cortado no es válido');
     await malo('una hora de 25 no se acepta', { cortado: { m: [8, 13], t: [17, 25] } }, 'cortado no es válido');
+    { const x = await call('POST', '/api/ubicacion/plan', Object.assign({}, plan, { desde: 8.5, hasta: 18.25, cortado: { m: [8.5, 12.5], t: [17, 23] } }), A);
+      t('acepta horas con minutos (8:30, 18:15)', x.s === 200 && x.j.plan.corrido.desde === 8.5 && x.j.plan.corrido.hasta === 18.25 && x.j.plan.cortado.m[0] === 8.5, x); }
+    await malo('minutos raros (8.123 h) no se aceptan', { desde: 8.123, hasta: 18 }, 'de corrido no es válido');
     await malo('horas como texto no se aceptan', { cortado: { m: ['8', '13'], t: [17, 22] } });
     await malo('el horario de corrido inválido no se acepta', { desde: 20, hasta: 8 }, 'de corrido no es válido');
     await malo('un día con un modo desconocido no se acepta', { dias: Object.assign({}, plan.dias, { 2: 'medio' }) }, 'corrido» o «cortado');

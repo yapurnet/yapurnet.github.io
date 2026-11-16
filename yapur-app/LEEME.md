@@ -619,3 +619,6 @@ Acceso a las ventas de otra actividad: permiso «Facturar la otra actividad» (p
 
 ## Egresos de efectivo de la caja
 Cobranzas → **Egresos**: toda salida de plata en efectivo de la caja se carga con importe, motivo (retiro, proveedor, devolución, saldo a favor de un cliente usado, equipo, sueldo, otro), cliente cuando corresponde y un detalle obligatorio. Quedan guardados con quién los cargó y cuándo; **no se editan ni se borran**: si hay un error se anulan con un motivo (solo administrador o quien tenga «Anular recibos»). La Caja del día muestra los egresos y el «efectivo que debería quedar», y el informe del mes se imprime. Se guardan en la colección `egresos` (un documento por mes), que entra en las copias de seguridad y en el servidor de respaldo. La puede ver y cargar quien tenga el permiso «Ver la caja del día».
+
+## Horario de la ubicación con minutos (8:30)
+En «Horario de la ubicación» las horas se cargan ahora con selector de hora (de 5 en 5 minutos), así que se puede poner 8:30, 12:15, etc. El servidor guarda el horario exacto y descarta lo que llegue fuera de él. El APK (2.17) lee solo horas enteras, por eso a la app se le pasa el tramo ensanchado (8:30–18:15 → 8–19): el celular puede mandar un rato de más, pero el servidor lo filtra.
