@@ -327,8 +327,8 @@ function openCobro(clientId,con1,pre){
     let dv=null;   /* el reparto en 2 medios (se arma más abajo): si está activo, el medio que cuenta para el comprobante es el del reparto */
     const comp=campo?mountComp(el,'cb',()=>(dv&&dv.metodo())||$('#cb-met',el).value):null;
     if(comp){$('#cb-met',el).addEventListener('change',comp.sync);comp.sync();}
-    dv=mountDividir(el,'cb',{ocultar:()=>[$('#cb-met',el).closest('.field'),$('#cb-monto',el).closest('.field')],total:()=>campo?precioFijo(con):null,onChange:()=>{if(comp)comp.sync();}});
-    dv.habilitar(con!=='mensualidad'&&con!=='deuda_anterior');
+    dv=mountDividir(el,'cb',{ocultar:()=>[$('#cb-met',el).closest('.field'),$('#cb-monto',el).closest('.field')],total:()=>campo?precioFijo(con):null,onChange:()=>{if(comp)comp.sync();if(typeof sum==='function')sum();}});
+    dv.habilitar(true);
     const ord=new Map(grp.map((m,i)=>[m.id,i]));
     const sel=()=>$$('[data-per]',el).filter(i=>i.checked).map(i=>({cid:i.dataset.cid||c.id,per:i.dataset.per,rest:Number(i.dataset.rest)})).sort((a,b)=>a.per.localeCompare(b.per)||((ord.get(a.cid)||0)-(ord.get(b.cid)||0)));
     const total=()=>sel().reduce((s,p)=>s+p.rest,0);
@@ -336,11 +336,11 @@ function openCobro(clientId,con1,pre){
       const m=$('#cb-monto',el),h=$('#cb-sum',el);
       if(con==='mensualidad'){
         if(!manual)m.value=total()||'';
-        const r=num(m.value)||0,t=total();
+        const rd=dv&&dv.activo()?dv.leer():null,r=rd&&!rd.error?rd.total:num(m.value)||0,t=total();
         h.className='hint'+(r<t?' bad':'');
         h.textContent=!sel().length?(gm?'Marcá lo que paga.':'Marcá los meses que paga.'):r===t?(gm?`Cubre ${sel().length} ${sel().length===1?'mensualidad':'mensualidades'}.`:`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`):r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
       }else if(con==='deuda_anterior'){
-        const r=num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
+        const rd=dv&&dv.activo()?dv.leer():null,r=rd&&!rd.error?rd.total:num(m.value)||0;h.className='hint'+(r>daRest?' bad':'');
         h.textContent=r>daRest?`Es más que lo que debe: faltan ${fmtMoney(daRest)}.`:r===daRest?`Cancela la deuda anterior (${fmtMoney(daRest)}).`:`Debe ${fmtMoney(daRest)} de deuda anterior${r>0?`: quedan ${fmtMoney(daRest-r)} después de este cobro`:''}.`;
       }else{
         const pf=precioFijo(con);
@@ -355,7 +355,7 @@ function openCobro(clientId,con1,pre){
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
       $('#cb-monto',el).value=con==='deuda_anterior'?daRest:'';$('#cb-nota-o',el).value=con==='deuda_anterior'?da:'';precio();sum();
-      dv.habilitar(con!=='mensualidad'&&con!=='deuda_anterior');dv.reiniciar();});
+      dv.habilitar(true);dv.reiniciar();});
     $('#cb-mens',el).addEventListener('change',()=>{manual=false;sum();});
     $('#cb-monto',el).addEventListener('input',()=>{manual=true;sum();});
     if(con==='deuda_anterior'){$('#cb-monto',el).value=daRest;$('#cb-nota-o',el).value=da;}
@@ -377,7 +377,12 @@ function openCobro(clientId,con1,pre){
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
-        allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
+        if(rp){   /* 2 medios: lo que cubre cada mes se reparte entre los medios en orden; un renglón por mes y medio, mismo recibo */
+          const q=rp.medios.map(m=>({metodo:m.metodo,r:Math.round(m.monto*100)}));let k=0,n=0;
+          allocate(s,monto).forEach(a=>{let r=Math.round(a.monto*100);
+            while(r>0&&k<q.length){if(q[k].r<=0){k++;continue;}const t=Math.min(r,q[k].r),it=Object.assign({concepto:'mensualidad',per:a.per,monto:t/100},base,{metodo:q[k].metodo,c:a.cid||c.id});
+              if(!COMP_METODOS.includes(q[k].metodo))delete it.comp;items[newId()+a.per.slice(5)+(n++).toString(36)]=it;r-=t;q[k].r-=t;}});
+        }else allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
       }else if(rp){
         /* un registro por medio, mismo recibo; la foto del comprobante va solo en el de la transferencia */
         rp.medios.forEach((m,i)=>{const it=Object.assign({concepto:con,per:null,nota:$('#cb-nota-o',el).value.trim()},base,{metodo:m.metodo,monto:m.monto});if(!COMP_METODOS.includes(m.metodo))delete it.comp;items[newId()+i.toString(36)]=it;});
@@ -636,7 +641,7 @@ function mountDividir(el,px,{ocultar,total,onChange}){
     leer:()=>estado(),
     /* cambió el concepto o el precio: se vuelven a escribir los montos */
     reiniciar:()=>{a1.value='';a2.value='';if(on)pintar();},
-    /* mensualidad y deuda anterior no se reparten acá (para eso está «Pagar deuda») */
+    /* ahora también la mensualidad y la deuda anterior se pueden repartir en 2 medios (para más de 2 está «Pagar deuda») */
     habilitar:v=>{habilitado=!!v;if(!habilitado&&on)poner(false);box.hidden=on||!habilitado;},
     /* el medio que decide si hace falta la foto del comprobante: si alguno de los dos es transferencia, la pide */
     metodo:()=>on?(m1.value==='transferencia'||m2.value==='transferencia'?'transferencia':m1.value):null
