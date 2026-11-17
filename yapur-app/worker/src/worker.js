@@ -847,6 +847,7 @@ export class YapurDB extends DurableObject {
       CREATE TABLE IF NOT EXISTS sessions(th TEXT PRIMARY KEY, uid TEXT NOT NULL, created INTEGER, last INTEGER);
       CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, uid TEXT NOT NULL, did TEXT NOT NULL, label TEXT, ua TEXT, app TEXT, ip TEXT, geo TEXT, estado TEXT NOT NULL DEFAULT 'pend', creado INTEGER, visto INTEGER, UNIQUE(uid,did));
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+      CREATE TABLE IF NOT EXISTS onus(k TEXT PRIMARY KEY, rx REAL, tx REAL, est TEXT, port TEXT, name TEXT, ts INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS usodia(dia TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS fails(k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL, t INTEGER NOT NULL) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS routers(id TEXT PRIMARY KEY, nombre TEXT NOT NULL, th TEXT NOT NULL, kinds TEXT NOT NULL DEFAULT 'q', creado INTEGER, visto INTEGER, run TEXT, total INTEGER NOT NULL DEFAULT 0, ident TEXT, ros TEXT, ip TEXT);
@@ -1485,6 +1486,57 @@ export class YapurDB extends DurableObject {
       throw httpErr(e && e.rechazo ? 422 : 502, (e && e.message) || 'No se pudo emitir la factura.');
     } finally { this.arcaOcupado = 0; }
   }
+  /* ===== Señal de las ONU (potencia óptica recibida).
+     El servidor no entra a la OLT: un lector dentro de la red (una PC o un script) consulta la OLT por SNMP y manda la lista con un token propio de solo envío.
+     Acá solo se guarda la última lectura de cada ONU (tabla onus) y se cruza con los clientes por la serie o MAC de la ONU. «Mala señal» = peor (más negativa) que el umbral. */
+  oltCfg() { const r = this.q1("SELECT v FROM meta WHERE k='oltcfg'"); let c = {}; try { c = r ? JSON.parse(r.v) : {}; } catch (e) { /* queda por defecto */ } const u = Number(c.umbral); return { umbral: Number.isFinite(u) && u < 0 && u > -50 ? u : -27, visto: c.visto || null, tok: !!c.th }; }
+  oltSave(c) { this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltcfg', JSON.stringify(c)); }
+  oltRaw() { const r = this.q1("SELECT v FROM meta WHERE k='oltcfg'"); try { return r ? JSON.parse(r.v) : {}; } catch (e) { return {}; } }
+  async oltToken() { const t = 'olt.' + hex(rnd(24)), c = this.oltRaw(); c.th = await sha(t); this.oltSave(c); return { token: t }; }
+  oltConfig(b) { const u = Number(b.umbral); if (!Number.isFinite(u) || u >= 0 || u <= -50) throw httpErr(400, 'El umbral va en dBm, entre -50 y 0 (por ejemplo -27).'); const c = this.oltRaw(); c.umbral = Math.round(u * 10) / 10; this.oltSave(c); return this.oltCfg(); }
+  async oltIngest(request, raw) {
+    const ip = this.clientIp(request), key = 'olt|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
+    if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token de la OLT inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    const b = readBody(raw, 9e5), lect = Array.isArray(b.lect) ? b.lect : [];
+    if (lect.length > 8000) throw httpErr(413, 'Demasiadas ONU en una tanda.', 'quota_exceeded');
+    const ts = Date.now(), num = v => { const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v; return typeof n === 'number' && isFinite(n) && n > -60 && n < 30 ? Math.round(n * 100) / 100 : null; };
+    let n = 0;
+    this.tx(() => {
+      for (const x of lect) {
+        if (!isPlain(x)) continue;
+        const k = String(x.sn || x.mac || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+        if (k.length < 6) continue;
+        this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, num(x.rx), num(x.tx), String(x.est || '').toLowerCase().slice(0, 12), String(x.port || '').slice(0, 20), String(x.name || '').slice(0, 40), ts);
+        n++;
+      }
+      this.sql.exec('DELETE FROM onus WHERE ts<?', ts - 3 * 864e5);
+      c.visto = ts; this.oltSave(c);
+    });
+    return { ok: true, guardadas: n };
+  }
+  oltVer(u) {
+    if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver la señal de las ONU.', 'permission_denied');
+    const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = new Map();
+    const alta = (k, c) => { if (k.length >= 6 && !mapa.has(k)) mapa.set(k, c); };
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
+      for (const c of Object.values((d && d.items) || {})) {
+        if (!isPlain(c) || c.estado === 'baja') continue;
+        alta(norm(c.equipo), c);
+        for (const e of (Array.isArray(c.comodato) ? c.comodato : [])) if (isPlain(e) && /onu/i.test(String(e.t || ''))) alta(norm(e.s), c);
+      }
+    }
+    const lista = this.q('SELECT * FROM onus').map(o => {
+      const c = mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
+      return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
+    });
+    const mala = lista.filter(o => o.rx != null && o.rx < cfg.umbral).sort((a, b) => a.rx - b.rx);
+    return { umbral: cfg.umbral, visto: cfg.visto, tok: cfg.tok, total: lista.length, malas: mala.length, lista: mala, sinCliente: lista.filter(o => !o.cid).length };
+  }
+
   /* ===== Ventas de otra actividad (mismo CUIT, otro punto de venta): factura suelta, sin clientes, caja ni cobranzas de internet.
      Se guardan aparte (tabla meta, clave 'ventas'): no se mezclan con ningún informe del sistema de internet. */
   ventasLista() { const r = this.q1("SELECT v FROM meta WHERE k='ventas'"); try { const a = r ? JSON.parse(r.v) : []; return Array.isArray(a) ? a : []; } catch (e) { return []; } }
@@ -3365,6 +3417,10 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/certificado' && m === 'POST') { await this.needAdmin(request); return send(200, this.arcaCert(readBody(raw, 3e4))); }
     if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
+    if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
+    if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));
+    if (p === '/api/olt/config' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltConfig(readBody(raw, 500))); }
+    if (p === '/api/olt/token' && m === 'POST') { await this.needAdmin(request); return send(200, await this.oltToken()); }
     if (p === '/api/ventas' && m === 'GET') { await this.needVentas(request); return send(200, { ventas: this.ventasLista(), pv2: this.arcaCfg().pv2 || null }); }
     if (p === '/api/ventas/emitir' && m === 'POST') { await this.needVentas(request); return send(200, await this.ventaEmitir(readBody(raw, 3e3))); }
     if (p === '/api/uso' && m === 'GET') { await this.needAdmin(request); return send(200, this.usoVer()); }

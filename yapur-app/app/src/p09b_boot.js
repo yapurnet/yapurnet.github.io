@@ -35,7 +35,7 @@ function allowedTabs(){
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
   if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
-  if(can('red'))t.push(['red','Red']);
+  if(can('red')){t.push(['red','Red']);t.push(['senal','Señal']);}
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
   if(can('verTecnicos'))t.push(['tecnicos','Técnicos']);
@@ -43,8 +43,9 @@ function allowedTabs(){
   return t;
 }
 function renderTabs(){
+  if(typeof senalVigilar==='function')senalVigilar();
   const open=[...S.ordenes.values()].filter(ORD_OPEN).length;
-  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}${k==='tecnicos'&&TAL.sin.length?`<span class="count bad" title="Técnicos sin señal en horario">${TAL.sin.length}</span>`:''}</button>`).join('');
+  const html=allowedTabs().map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}${k==='ordenes'&&open?`<span class="count">${open}</span>`:''}${k==='senal'&&SENAL.d&&SENAL.d.malas?`<span class="count bad" title="ONU con mala señal">${SENAL.d.malas}</span>`:''}${k==='tecnicos'&&TAL.sin.length?`<span class="count bad" title="Técnicos sin señal en horario">${TAL.sin.length}</span>`:''}</button>`).join('');
   if(html!==tabsHtml){tabsHtml=html;$('#tabs').innerHTML=html;}
 }
 function showTab(t){

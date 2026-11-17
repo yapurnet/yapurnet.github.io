@@ -622,3 +622,10 @@ Cobranzas → **Egresos**: toda salida de plata en efectivo de la caja se carga 
 
 ## Horario de la ubicación con minutos (8:30)
 En «Horario de la ubicación» las horas se cargan ahora con selector de hora (de 5 en 5 minutos), así que se puede poner 8:30, 12:15, etc. El servidor guarda el horario exacto y descarta lo que llegue fuera de él. El APK (2.17) lee solo horas enteras, por eso a la app se le pasa el tramo ensanchado (8:30–18:15 → 8–19): el celular puede mandar un rato de más, pero el servidor lo filtra.
+
+## Señal de las ONU (potencia óptica) — parte de la app lista, falta el lector
+Pestaña **«Señal»** (para quien ve la Red): muestra las ONU que reciben **peor que -27 dBm** (el límite lo cambia el administrador ahí mismo), con el cliente, su domicilio y el puerto. Si hay alguna, la pestaña lleva un número rojo; la app lo actualiza sola cada 15 minutos. **Ojo:** una potencia *mejor* (por ejemplo -20) está bien; el problema es la más negativa (por ejemplo -29).
+- **Cómo llegan los datos:** el servidor no entra a la OLT. Un **lector** dentro de la red (la Proxmox, por ejemplo) consulta la OLT por SNMP y manda la lista a `POST /api/olt/ingest` con el cuerpo `{"lect":[{"sn":"TPLG1234ABCD","rx":-24.5,"tx":2.1,"est":"online","port":"1/3"}]}` y el encabezado `Authorization: Bearer <token>`. `sn` o `mac` es la serie/MAC de la ONU, `rx` la potencia recibida en dBm.
+- **Token:** el administrador lo genera en la pestaña Señal («Generar token del lector»); se muestra una sola vez y solo sirve para **mandar** lecturas.
+- **Cruce con clientes:** por la serie/MAC de la ONU, comparada con el campo «Equipo» de la ficha o con la ONU cargada en comodato (se ignoran mayúsculas, guiones y dos puntos). Los clientes de baja no se cruzan.
+- **Pendiente:** el lector. Falta saber qué datos entrega la OLT (TP-Link P1201-08) por SNMP o por su consola. No hace falta APK nuevo.
