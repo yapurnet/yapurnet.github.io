@@ -629,3 +629,6 @@ Pestaña **«Señal»** (para quien ve la Red): muestra las ONU que reciben **pe
 - **Token:** el administrador lo genera en la pestaña Señal («Generar token del lector»); se muestra una sola vez y solo sirve para **mandar** lecturas.
 - **Cruce con clientes:** por la serie/MAC de la ONU, comparada con el campo «Equipo» de la ficha o con la ONU cargada en comodato (se ignoran mayúsculas, guiones y dos puntos). Los clientes de baja no se cruzan.
 - **Pendiente:** el lector. Falta saber qué datos entrega la OLT (TP-Link P1201-08) por SNMP o por su consola. No hace falta APK nuevo.
+
+## Cobrar una mensualidad con 2 medios de pago
+En «Cobrar», al elegir **Mensualidad** (o deuda anterior) también aparece **«Cobrar con 2 medios de pago»** (antes solo estaba para instalación, reclamos y otros). Se eligen los dos medios y cuánto va en cada uno; lo que cubre cada mes se reparte entre los medios y queda **un solo recibo** con un renglón por mes y medio. Para más de 2 medios sigue estando «Pagar todo o la deuda».
