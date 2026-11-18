@@ -8,7 +8,7 @@ async function senalCargar(forzar){
 function senalBadge(){tabsHtml='';try{renderTabs();}catch(e){}}
 /* aviso para todos los que ven la red: cada 15 minutos mientras la app está abierta */
 function senalVigilar(){
-  if(!can('red')||S.role==='tecnico'||senalVigilar.on)return;senalVigilar.on=true;
+  if(!can('red')||senalVigilar.on)return;senalVigilar.on=true;
   const go=()=>{if(document.hidden||!NET.token)return;senalCargar(true).catch(()=>{});};
   setTimeout(go,4000);setInterval(go,15*60e3);
 }
@@ -22,10 +22,10 @@ VIEWS.senal={
     catch(err){box.textContent=err.network?'No se pudo conectar con el servidor.':err.message;}
   },
   html(d){
-    const viejo=d.visto&&Date.now()-d.visto>3*36e5;
-    let h=`<div class="card"><p>${d.visto?`Última lectura de la OLT: <b>${senalHace(d.visto)}</b>. ${d.total} ONU leídas.`:'Todavía no llegó ninguna lectura de la OLT.'}</p>
+    const viejo=d.visto&&Date.now()-d.visto>3*36e5,tec=S.role==='tecnico';   /* al técnico no se le muestran totales: solo las que tienen mala señal */
+    let h=`<div class="card"><p>${d.visto?`Última lectura de la OLT: <b>${senalHace(d.visto)}</b>.${tec?'':' '+d.total+' ONU leídas.'}`:'Todavía no llegó ninguna lectura de la OLT.'}</p>
       ${viejo?'<p class="chip bad">Hace más de 3 horas que no llega ninguna lectura: revisá el lector.</p>':''}
-      <p class="small muted">Se avisa cuando una ONU recibe <b>peor que ${d.umbral} dBm</b> (por ejemplo -29). Una potencia mejor, como -20, está bien.${d.sinCliente?` ${d.sinCliente} ONU leídas no coinciden con ningún cliente (revisá la serie o MAC cargada en su ficha).`:''}</p></div>`;
+      <p class="small muted">Se avisa cuando una ONU recibe <b>peor que ${d.umbral} dBm</b> (por ejemplo -29). Una potencia mejor, como -20, está bien.${d.sinCliente&&!tec?` ${d.sinCliente} ONU leídas no coinciden con ningún cliente (revisá la serie o MAC cargada en su ficha).`:''}</p></div>`;
     if(d.visto){
       h+=d.lista.length?`<h3>Con mala señal (${d.lista.length})</h3><div class="list">${d.lista.map(o=>`<div class="card sn-row" data-cid="${esc(o.cid||'')}"><div class="between"><b>${esc(o.cn||'ONU sin cliente')}</b><span class="chip bad">${o.rx} dBm</span></div><div class="small muted">${o.cd?esc(o.cd)+' · ':''}${o.port?'Puerto '+esc(o.port)+' · ':''}<span class="mono">${esc(o.k)}</span>${o.est?' · '+esc(o.est):''}</div></div>`).join('')}</div>`
         :'<div class="card"><p>✔ Ninguna ONU está por debajo del límite.</p></div>';
