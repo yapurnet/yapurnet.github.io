@@ -1546,7 +1546,7 @@ export class YapurDB extends DurableObject {
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
       const c = d && d.items && d.items[cid];
-      if (isPlain(c)) return c;
+      if (isPlain(c)) return c.id ? c : { ...c, id: cid };
     }
     return null;
   }
@@ -1577,8 +1577,9 @@ export class YapurDB extends DurableObject {
     const alta = (k, c) => { if (k.length >= 6 && !mapa.has(k)) mapa.set(k, c); };
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
-      for (const c of Object.values((d && d.items) || {})) {
-        if (!isPlain(c) || c.estado === 'baja') continue;
+      for (const [cid, c0] of Object.entries((d && d.items) || {})) {
+        if (!isPlain(c0) || c0.estado === 'baja') continue;
+        const c = c0.id ? c0 : { ...c0, id: cid };
         porId.set(c.id, c);
         alta(norm(c.equipo), c);
         for (const e of (Array.isArray(c.comodato) ? c.comodato : [])) if (isPlain(e) && /onu/i.test(String(e.t || ''))) alta(norm(e.s), c);
