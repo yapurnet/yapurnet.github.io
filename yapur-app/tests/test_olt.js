@@ -64,7 +64,7 @@ async function call(method, p, body, token) {
     t('el técnico no carga el mapa de la OLT', r.s === 403, r);
     r = await call('PUT', '/api/olt/mapa', { lista: [{ sn: 'TPLG-1234ABCD', port: '1/3' }, { sn: 'TPLGBBBB2222', port: '2/7' }, { sn: 'x', port: '9/9' }] }, A);
     t('el administrador carga el mapa serie → puerto/ID', r.s === 200 && r.j.onus === 2, r);
-    r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' }, f: { id: 'f', nombre: 'Vinculada Ana', estado: 'activo' }, g: { nombre: 'Sin Id Propio', estado: 'activo', equipo: 'TPLGBBBB2222' } } } }, A);
+    r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' }, f: { id: 'f', nombre: 'Vinculada Ana', estado: 'activo' }, g: { nombre: 'Sin Id Propio', estado: 'activo', equipo: 'TPLGBBBB2222' }, h: { nombre: 'Juan Pérez', estado: 'activo', nodo: 'PON_3' }, i: { nombre: 'Ana López', estado: 'activo' }, j: { nombre: 'Ana López (local)', estado: 'activo' } } } }, A);
     r = await call('GET', '/api/olt/cliente/e', undefined, T);
     t('el técnico ve la ONU del cliente con su puerto aunque no haya lectura', r.s === 200 && r.j.port === '2/7' && r.j.rx === null && r.j.sn === 'TPLGBBBB2222', r);
     r = await call('POST', '/api/olt/vincular', { cid: 'f', q: 'ab' }, T);
@@ -77,6 +77,18 @@ async function call(method, p, body, token) {
     t('el cliente vinculado muestra su serie y puerto', r.j.sn === 'TPLG1234ABCD' && r.j.port === '1/3', r.j);
     r = await call('GET', '/api/olt/cliente/g', undefined, T);
     t('un cliente cuyo registro no trae el campo id también se resuelve', r.s === 200 && r.j.sn === 'TPLGBBBB2222', r);
+    r = await call('POST', '/api/olt/ingest', { lect: [{ sn: 'TPLGAUTO0001', rx: -20, port: '3/9', name: 'Pérez Juan (Kiosco)' }, { sn: 'TPLGAUTO0002', rx: -21, port: '1/1', name: 'Lopez Ana' }, { sn: 'TPLGAUTO0003', rx: -22, port: '1/2', name: 'Nadie Conocido' }] }, TK);
+    r = await call('POST', '/api/olt/auto', {}, T);
+    t('el técnico no vincula en lote', r.s === 403, r);
+    r = await call('POST', '/api/olt/auto', {}, A);
+    t('la vinculación automática empieza mostrando qué haría y no cambia nada', r.s === 200 && r.j.aplicado === false && r.j.lista.seguras.some(x => x.k === 'TPLGAUTO0001' && x.cid === 'h'), r.j);
+    t('un nombre que coincide con dos clientes no se vincula solo', r.j.lista.dudosas.some(x => x.k === 'TPLGAUTO0002'), r.j.lista.dudosas);
+    t('un nombre que no existe queda como dudoso', r.j.lista.dudosas.some(x => x.k === 'TPLGAUTO0003' && /ningún cliente/.test(x.motivo)), r.j.lista.dudosas);
+    r = await call('GET', '/api/olt/cliente/h', undefined, T);
+    t('antes de aplicar el cliente sigue sin serie', r.j.sn === null, r.j);
+    r = await call('POST', '/api/olt/auto', { aplicar: true }, A);
+    r = await call('GET', '/api/olt/cliente/h', undefined, T);
+    t('al aplicar el cliente queda con su ONU y su lectura', r.j.sn === 'TPLGAUTO0001' && r.j.rx === -20, r.j);
     r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 'abc' }, T);
     t('una potencia que no es número se rechaza', r.s === 400, r);
     r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 5 }, T);

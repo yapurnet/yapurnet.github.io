@@ -1542,6 +1542,52 @@ export class YapurDB extends DurableObject {
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltvinc', JSON.stringify(v));
     return { ok: true, sn: hit[0], port: mapa[hit[0]] || '' };
   }
+  /* Vincula sola las ONU sin cliente comparando el nombre que tiene la ONU en la OLT con el de los clientes.
+     b.aplicar=false (por defecto) solo muestra qué haría; con aplicar=true guarda los vínculos seguros (nombre igual y único). */
+  oltAuto(b) {
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), cid0 = this.oltVinc();
+    const toks = (t, sinParen) => {
+      let x = String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+      if (sinParen) x = x.replace(/\([^)]*\)/g, ' ');
+      return x.replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(w => w.length > 1 && !/^(sr|sra|de|del|la|el|los|las|y)$/.test(w));
+    };
+    const clientes = [], conOnu = new Set(), serieDe = new Map();
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
+      for (const [cid, c0] of Object.entries((d && d.items) || {})) {
+        if (!isPlain(c0) || c0.estado === 'baja') continue;
+        const c = { id: cid, nombre: String(c0.nombre || ''), nodo: String(c0.nodo || ''), dir: String(c0.dir || '') };
+        c.t = new Set(toks(c.nombre, true)); c.tf = new Set(toks(c.nombre, false)); clientes.push(c);
+        for (const k of [norm(c0.equipo), ...(Array.isArray(c0.comodato) ? c0.comodato : []).filter(e => isPlain(e) && /onu/i.test(String(e.t || ''))).map(e => norm(e.s)), cid0[cid] || '']) if (k.length >= 6) { conOnu.add(cid); serieDe.set(k, cid); }
+      }
+    }
+    const res = { seguras: [], dudosas: [], sinNombre: [], yaTenian: 0 }, nuevos = {};
+    for (const o of this.q("SELECT * FROM onus WHERE k NOT LIKE 'CLI%'")) {
+      if (serieDe.has(o.k) || (o.k.length >= 8 && [...serieDe.keys()].some(k => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8))))) { res.yaTenian++; continue; }
+      const ot = new Set(toks(o.name, true)), otf = new Set(toks(o.name, false));
+      if (ot.size < 2) { res.sinNombre.push({ k: o.k, port: o.port, name: o.name }); continue; }
+      const puerto = String(o.port || '').split('/')[0];
+      const ok = [];
+      for (const c of clientes) {
+        if (c.t.size < 2) continue;
+        const inter = [...ot].filter(w => c.t.has(w)).length;
+        // mismas palabras sin contar lo que va entre paréntesis (el orden da igual: «Ruiz Oscar» = «Oscar Ruiz»)
+        const igual = inter === ot.size && inter === c.t.size;
+        const casi = !igual && inter >= 2 && inter >= Math.min(ot.size, c.t.size) && inter / Math.max(ot.size, c.t.size) >= 0.6;
+        if (igual || casi) ok.push({ c, igual, mismoPuerto: new RegExp('^PON_?' + puerto + '(\\D|$)', 'i').test(c.nodo) });
+      }
+      const fuertes = ok.filter(x => x.igual);
+      const pick = fuertes.length === 1 ? fuertes[0] : fuertes.length > 1 && fuertes.filter(x => x.mismoPuerto).length === 1 ? fuertes.find(x => x.mismoPuerto) : null;
+      const fila = { k: o.k, port: o.port, name: o.name };
+      if (pick && !conOnu.has(pick.c.id) && !nuevos[pick.c.id]) { res.seguras.push({ ...fila, cid: pick.c.id, cliente: pick.c.nombre, nodo: pick.c.nodo }); nuevos[pick.c.id] = o.k; }
+      else res.dudosas.push({ ...fila, opciones: (ok.length ? ok : []).slice(0, 4).map(x => ({ cid: x.c.id, cliente: x.c.nombre, nodo: x.c.nodo, igual: x.igual })), motivo: pick ? 'el cliente ya tiene otra ONU' : ok.length > 1 ? 'hay varios clientes parecidos' : ok.length ? 'el nombre solo se parece' : 'ningún cliente con ese nombre' });
+    }
+    if (b && b.aplicar === true && Object.keys(nuevos).length) {
+      const v = this.oltVinc(); for (const [cid, k] of Object.entries(nuevos)) v[cid] = k;
+      this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltvinc', JSON.stringify(v));
+    }
+    return { aplicado: !!(b && b.aplicar === true), seguras: res.seguras.length, dudosas: res.dudosas.length, sinNombre: res.sinNombre.length, yaTenian: res.yaTenian, lista: { seguras: res.seguras, dudosas: res.dudosas, sinNombre: res.sinNombre } };
+  }
   oltClienteDe(cid) {
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
@@ -3477,6 +3523,7 @@ export class YapurDB extends DurableObject {
     if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
     if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));
     if (p === '/api/olt/mapa' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltMapaGuardar(readBody(raw, 4e5))); }
+    if (p === '/api/olt/auto' && m === 'POST') { await this.needAdmin(request); return send(200, this.oltAuto(readBody(raw, 500))); }
     if (p === '/api/olt/vincular' && m === 'POST') return send(200, this.oltVincular((await this.needAuth(request)).user, readBody(raw, 500)));
     if (p === '/api/olt/medida' && m === 'POST') return send(200, this.oltMedida((await this.needAuth(request)).user, readBody(raw, 500)));
     { const mm = p.match(/^\/api\/olt\/cliente\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltCliente((await this.needAuth(request)).user, mm[1])); }
