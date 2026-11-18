@@ -7937,6 +7937,7 @@ VIEWS.senal={
       h+=d.lista.length?`<h3>Con mala señal (${d.lista.length})</h3><div class="list">${d.lista.map(o=>`<div class="card sn-row" data-cid="${esc(o.cid||'')}"><div class="between"><b>${esc(o.cn||'ONU sin cliente')}</b><span class="chip bad">${o.rx} dBm</span></div><div class="small muted">${o.cd?esc(o.cd)+' · ':''}${o.port?'Puerto '+esc(o.port)+' · ':''}<span class="mono">${esc(o.k)}</span>${o.est?' · '+esc(o.est):''}</div></div>`).join('')}</div>`
         :'<div class="card"><p>✔ Ninguna ONU está por debajo del límite.</p></div>';
     }
+    if(!tec&&d.sin&&d.sin.length)h+=`<div class="card"><details><summary><b>ONU sin cliente (${d.sin.length})</b></summary><p class="small muted">Buscá el cliente por su nombre y tocalo: la ONU queda vinculada y su potencia aparece en su ficha.</p><div class="list" id="sn-sin">${d.sin.map(o=>`<div class="sn-sin" data-k="${esc(o.k)}"><div class="between"><b>${esc(o.name||'(sin nombre en la OLT)')}</b>${o.rx!=null?`<span class="chip ${o.rx<d.umbral?'bad':''}">${o.rx} dBm</span>`:''}</div><div class="small muted">Puerto ${esc(o.port||'?')} · <span class="mono">${esc(o.k)}</span></div><input class="sn-q" placeholder="Buscar cliente…" autocomplete="off"><div class="sn-res"></div></div>`).join('')}</div></details></div>`;
     if(isAdmin())h+=`<div class="card"><h3>Configuración (administrador)</h3>
       ${F('Límite de alerta (dBm)','sn-um',`<input id="sn-um" inputmode="decimal" value="${d.umbral}">`,'Se avisa cuando la potencia recibida es peor (más negativa) que este valor.')}
       <div class="actions start"><button class="btn" type="button" id="sn-um-go">Guardar límite</button><button class="btn" type="button" id="sn-tok">${d.tok?'Generar otro token del lector':'Generar token del lector'}</button></div>
@@ -7944,6 +7945,20 @@ VIEWS.senal={
     return h;
   },
   bind(box,d){
+    const norm=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    $$('.sn-sin',box).forEach(fila=>{
+      const q=$('.sn-q',fila),res=$('.sn-res',fila);
+      q.addEventListener('input',()=>{
+        const w=norm(q.value).split(/\s+/).filter(x=>x.length>1);res.innerHTML='';if(!w.length)return;
+        const hit=[...S.clientes.values()].filter(c=>c.estado!=='baja'&&w.every(x=>norm(c.nombre).includes(x))).slice(0,6);
+        res.innerHTML=hit.length?hit.map(c=>`<button class="btn small" type="button" data-cid="${esc(c.id)}">${esc(c.nombre)}${c.dir?' · '+esc(c.dir):''}</button>`).join(''):'<span class="small muted">Ningún cliente con ese nombre.</span>';
+      });
+      res.addEventListener('click',async ev=>{
+        const bt=ev.target.closest('button[data-cid]');if(!bt)return;
+        try{const r=await NET.api('POST','/api/olt/vincular',{cid:bt.dataset.cid,q:fila.dataset.k});toast('ONU vinculada a '+bt.textContent.split(' · ')[0]);this.recargar(true);}
+        catch(err){toast(err.message,'bad');}
+      });
+    });
     $$('.sn-row',box).forEach(r=>r.addEventListener('click',()=>{const id=r.dataset.cid;if(id&&S.clientes.has(id))openClient(id);}));
     const um=$('#sn-um-go',box);if(um)um.addEventListener('click',async()=>{try{await NET.api('PUT','/api/olt/config',{umbral:num($('#sn-um',box).value)});toast('Límite guardado');this.recargar(true);}catch(err){toast(err.message,'bad');}});
     const tk=$('#sn-tok',box);if(tk)tk.addEventListener('click',async()=>{if(d.tok&&!confirm('El token anterior dejará de servir. ¿Generar uno nuevo?'))return;try{const r=await NET.api('POST','/api/olt/token',{});$('#sn-tokbox',box).innerHTML=`<p class="small">Copialo ahora, no se vuelve a mostrar:</p><p class="mono" style="word-break:break-all">${esc(r.token)}</p><button class="btn small" type="button" id="sn-cp">Copiar</button>`;$('#sn-cp',box).addEventListener('click',()=>copyText(r.token,'Token'));}catch(err){toast(err.message,'bad');}});
@@ -8087,7 +8102,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='e3ccade0f6';
+const BUILD='5fd0822da2';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

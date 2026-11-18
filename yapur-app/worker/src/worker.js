@@ -1637,7 +1637,10 @@ export class YapurDB extends DurableObject {
       return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
     });
     const mala = lista.filter(o => o.rx != null && o.rx < cfg.umbral).sort((a, b) => a.rx - b.rx);
-    return { umbral: cfg.umbral, visto: cfg.visto, tok: cfg.tok, total: lista.length, malas: mala.length, lista: mala, sinCliente: lista.filter(o => !o.cid).length };
+    const sin = lista.filter(o => !o.cid);
+    const nom = new Map(this.q("SELECT k, name FROM onus").map(o => [o.k, o.name]));
+    return { umbral: cfg.umbral, visto: cfg.visto, tok: cfg.tok, total: lista.length, malas: mala.length, lista: mala, sinCliente: sin.length,
+      sin: u.role === 'tecnico' ? [] : sin.filter(o => !o.k.startsWith('CLI')).map(o => ({ k: o.k, rx: o.rx, port: o.port, name: nom.get(o.k) || '' })).sort((x, y) => (x.name || '~').localeCompare(y.name || '~')) };
   }
 
   /* ===== Ventas de otra actividad (mismo CUIT, otro punto de venta): factura suelta, sin clientes, caja ni cobranzas de internet.

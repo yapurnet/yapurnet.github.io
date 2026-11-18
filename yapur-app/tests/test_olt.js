@@ -86,6 +86,10 @@ async function call(method, p, body, token) {
     t('un nombre que no existe queda como dudoso', r.j.lista.dudosas.some(x => x.k === 'TPLGAUTO0003' && /ningún cliente/.test(x.motivo)), r.j.lista.dudosas);
     r = await call('GET', '/api/olt/cliente/h', undefined, T);
     t('antes de aplicar el cliente sigue sin serie', r.j.sn === null, r.j);
+    r = await call('GET', '/api/olt', undefined, A);
+    t('el administrador ve la lista de ONU sin cliente con su nombre en la OLT', (r.j.sin || []).some(x => x.k === 'TPLGAUTO0003' && x.name === 'Nadie Conocido'), r.j.sin);
+    r = await call('GET', '/api/olt', undefined, T);
+    t('el técnico no recibe esa lista', r.s === 200 && Array.isArray(r.j.sin) && r.j.sin.length === 0, r.j);
     r = await call('POST', '/api/olt/auto', { aplicar: true }, A);
     r = await call('GET', '/api/olt/cliente/h', undefined, T);
     t('al aplicar el cliente queda con su ONU y su lectura', r.j.sn === 'TPLGAUTO0001' && r.j.rx === -20, r.j);
