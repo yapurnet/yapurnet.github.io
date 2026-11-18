@@ -634,3 +634,7 @@ Pestaña **«Señal»** (para quien ve la Red): muestra las ONU que reciben **pe
 
 ## Cobrar una mensualidad con 2 medios de pago
 En «Cobrar», al elegir **Mensualidad** (o deuda anterior) también aparece **«Cobrar con 2 medios de pago»** (antes solo estaba para instalación, reclamos y otros). Se eligen los dos medios y cuánto va en cada uno; lo que cubre cada mes se reparte entre los medios y queda **un solo recibo** con un renglón por mes y medio. Para más de 2 medios sigue estando «Pagar todo o la deuda».
+
+
+### Lector de potencia por SNMP (18/11)
+La OLT sí entrega la potencia de cada ONU por SNMP de solo lectura: OID `1.3.6.1.4.1.17409.2.8.4.4.1.4.<índice>.0.0` (Rx en centi-dBm; col. 5 = Tx), con índice = `0x01PPOOxx` (puerto = bits 8-15, ID de ONU = bits 0-7). El programa `olt_agente.py` (carpeta `conf` de la PC de la EMS, `lector_potencia.bat`) la lee cada 10 min y la manda a `/api/olt/ingest` con el token del lector; usa `mapa_onus.txt` (puerto|id|serie|nombre) para saber a qué serie corresponde cada ONU. Si la lectura tiene menos de 1 h, el botón «Potencia de la ONU» la muestra y la carga a mano queda plegada.
