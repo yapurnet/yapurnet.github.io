@@ -1527,6 +1527,21 @@ export class YapurDB extends DurableObject {
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltmapa', JSON.stringify(m));
     return { ok: true, onus: Object.keys(m).length };
   }
+  oltVinc() { const r = this.q1("SELECT v FROM meta WHERE k='oltvinc'"); try { const m = r ? JSON.parse(r.v) : {}; return isPlain(m) ? m : {}; } catch (e) { return {}; } }
+  /* el técnico, en el cliente, escribe los últimos caracteres de la serie impresa en la ONU y queda vinculada */
+  oltVincular(u, b) {
+    this.oltPermiso(u);
+    const c = this.oltClienteDe(String(b.cid || ''));
+    if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    const q = String(b.q || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (q.length < 4) throw httpErr(400, 'Escribí al menos los últimos 4 caracteres de la serie de la ONU.');
+    const mapa = this.oltMapa(), hit = Object.keys(mapa).filter(k => k.endsWith(q));
+    if (!hit.length) throw httpErr(404, 'Esa serie no está en la OLT. Revisá lo que escribiste.');
+    if (hit.length > 1) throw httpErr(409, 'Hay más de una ONU que termina así. Escribí más caracteres de la serie.');
+    const v = this.oltVinc(); v[c.id] = hit[0];
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltvinc', JSON.stringify(v));
+    return { ok: true, sn: hit[0], port: mapa[hit[0]] || '' };
+  }
   oltClienteDe(cid) {
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
@@ -1541,7 +1556,7 @@ export class YapurDB extends DurableObject {
     const c = this.oltClienteDe(String(cid || ''));
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
     const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), cfg = this.oltCfg();
-    const sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : '', mapa = this.oltMapa();
+    const mapa = this.oltMapa(), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || '');
     const l1 = sn ? this.q1('SELECT * FROM onus WHERE k=?', sn) : null, l2 = this.q1('SELECT * FROM onus WHERE k=?', 'CLI' + c.id);
     const o = l1 && l2 ? (l1.ts >= l2.ts ? l1 : l2) : (l1 || l2);
     return { umbral: cfg.umbral, sn: sn || null, port: (o && o.port && o.est !== 'manual' ? o.port : '') || (sn && mapa[sn]) || '', rx: o ? o.rx : null, est: o ? o.est : '', ts: o ? o.ts : null, manual: !!(o && o.est === 'manual'), por: o && o.est === 'manual' ? o.name : '' };
@@ -1552,7 +1567,7 @@ export class YapurDB extends DurableObject {
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
     const n = typeof b.rx === 'string' ? parseFloat(b.rx.replace(',', '.')) : b.rx;
     if (typeof n !== 'number' || !isFinite(n) || n >= 0 || n <= -60) throw httpErr(400, 'La potencia va en dBm y es negativa, por ejemplo -22,5.');
-    const rx = Math.round(n * 100) / 100, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo), k = sn.length >= 6 ? sn : 'CLI' + c.id, mapa = this.oltMapa();
+    const rx = Math.round(n * 100) / 100, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || ''), k = sn.length >= 6 ? sn : 'CLI' + c.id, mapa = this.oltMapa();
     this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, rx, null, 'manual', String((sn && mapa[sn]) || '').slice(0, 20), String(u.nombre || u.usuario || '').slice(0, 40), Date.now());
     return { ok: true, rx, mala: rx < this.oltCfg().umbral };
   }
@@ -1569,6 +1584,7 @@ export class YapurDB extends DurableObject {
         for (const e of (Array.isArray(c.comodato) ? c.comodato : [])) if (isPlain(e) && /onu/i.test(String(e.t || ''))) alta(norm(e.s), c);
       }
     }
+    for (const [cid, sn] of Object.entries(this.oltVinc())) { const c = porId.get(cid); if (c) alta(sn, c); }
     const lista = this.q('SELECT * FROM onus').map(o => {
       const c = (o.k.startsWith('CLI') && porId.get(o.k.slice(3))) || mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
       return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
@@ -3460,6 +3476,7 @@ export class YapurDB extends DurableObject {
     if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
     if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));
     if (p === '/api/olt/mapa' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltMapaGuardar(readBody(raw, 4e5))); }
+    if (p === '/api/olt/vincular' && m === 'POST') return send(200, this.oltVincular((await this.needAuth(request)).user, readBody(raw, 500)));
     if (p === '/api/olt/medida' && m === 'POST') return send(200, this.oltMedida((await this.needAuth(request)).user, readBody(raw, 500)));
     { const mm = p.match(/^\/api\/olt\/cliente\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltCliente((await this.needAuth(request)).user, mm[1])); }
     if (p === '/api/olt/config' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltConfig(readBody(raw, 500))); }

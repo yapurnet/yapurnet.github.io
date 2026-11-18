@@ -64,9 +64,17 @@ async function call(method, p, body, token) {
     t('el técnico no carga el mapa de la OLT', r.s === 403, r);
     r = await call('PUT', '/api/olt/mapa', { lista: [{ sn: 'TPLG-1234ABCD', port: '1/3' }, { sn: 'TPLGBBBB2222', port: '2/7' }, { sn: 'x', port: '9/9' }] }, A);
     t('el administrador carga el mapa serie → puerto/ID', r.s === 200 && r.j.onus === 2, r);
-    r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' } } } }, A);
+    r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' }, f: { id: 'f', nombre: 'Vinculada Ana', estado: 'activo' } } } }, A);
     r = await call('GET', '/api/olt/cliente/e', undefined, T);
     t('el técnico ve la ONU del cliente con su puerto aunque no haya lectura', r.s === 200 && r.j.port === '2/7' && r.j.rx === null && r.j.sn === 'TPLGBBBB2222', r);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: 'ab' }, T);
+    t('vincular pide al menos 4 caracteres', r.s === 400, r);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: 'ZZZZ9' }, T);
+    t('una serie que no está en la OLT da 404', r.s === 404, r);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: '1234abcd' }, T);
+    t('el técnico vincula la ONU por los últimos caracteres', r.s === 200 && r.j.sn === 'TPLG1234ABCD' && r.j.port === '1/3', r);
+    r = await call('GET', '/api/olt/cliente/f', undefined, T);
+    t('el cliente vinculado muestra su serie y puerto', r.j.sn === 'TPLG1234ABCD' && r.j.port === '1/3', r.j);
     r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 'abc' }, T);
     t('una potencia que no es número se rechaza', r.s === 400, r);
     r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 5 }, T);
