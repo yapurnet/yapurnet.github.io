@@ -7959,7 +7959,7 @@ async function openSenalCliente(id){
   openModal({title:'Potencia de la ONU · '+c.nombre,html:`<div class="stack">
     ${ult}
     <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
-    ${F('Potencia medida (dBm)','sg-rx','<input id="sg-rx" inputmode="decimal" placeholder="-22,5">',`Se ve en la EMS: ONU → «Onu Basic Information» → Received OpticalPower, o con el medidor de potencia. Va en negativo. Por debajo de ${d.umbral} dBm se avisa a todos.`)}
+    ${F('Potencia medida (dBm)','sg-rx','<input id="sg-rx" inputmode="decimal" placeholder="-22,5">',(S.realRole==='tecnico'?`Medí con el medidor de potencia óptica, en la fibra que llega a la ONU. Va en negativo. Por debajo de ${d.umbral} dBm se avisa a todos.`:`Se ve en la EMS: ONU → «Onu Basic Information» → Received OpticalPower, o con el medidor de potencia. Va en negativo. Por debajo de ${d.umbral} dBm se avisa a todos.`))}
     <div class="actions"><button class="btn primary" type="button" id="sg-go">Guardar medida</button></div></div>`,
   onClose:()=>setTimeout(()=>{if(S.clientes.has(id))openClient(id);},0),
   onMount(box){
@@ -8080,7 +8080,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='cfff60e156';
+const BUILD='28cca14741';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
