@@ -7960,11 +7960,16 @@ async function openSenalCliente(id){
   const ult=d.rx!=null?`<p>Última potencia: <span class="chip ${est(d.rx)}">${d.rx} dBm</span> · ${senalHace(d.ts)}${d.manual?' · cargada a mano'+(d.por?' por '+esc(d.por):''):' · leída de la OLT'}</p>${d.rx<d.umbral?`<p class="chip bad">Peor que ${d.umbral} dBm: tiene mala señal.</p>`:''}`:'<p class="muted">Todavía no hay ninguna lectura de esta ONU.</p>';
   openModal({title:'Potencia de la ONU · '+c.nombre,html:`<div class="stack">
     ${ult}
+    ${d.sn?'':`<div class="stack"><p class="small">Para ver la potencia automática, vinculá la ONU: escribí los últimos 6 caracteres de la serie (están en la etiqueta de la ONU, empieza con TPLG).</p><input id="sg-sn" placeholder="Ej: C70AD" autocapitalize="characters" autocomplete="off"><div class="actions"><button class="btn" type="button" id="sg-vinc">Vincular ONU</button></div></div>`}
     <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
     ${fresca?`<p class="small muted">La OLT actualiza esta lectura cada 10 minutos. No hace falta medir.</p><details><summary class="small">Cargar una medida a mano</summary>${campo_}</details>`:campo_}
     <div class="actions"><button class="btn primary" type="button" id="sg-go">Guardar medida</button></div></div>`,
   onClose:()=>setTimeout(()=>{if(S.clientes.has(id))openClient(id);},0),
   onMount(box){
+    const vb=$('#sg-vinc',box);if(vb)vb.addEventListener('click',async()=>{
+      try{const r=await NET.api('POST','/api/olt/vincular',{cid:id,q:$('#sg-sn',box).value});toast('ONU vinculada · puerto/ID '+(r.port||'?'));SENAL.t=0;closeModal();}
+      catch(err){toast(err.message,'bad');}
+    });
     $('#sg-go',box).addEventListener('click',async()=>{
       const v=num($('#sg-rx',box).value);if(!(v<0)){toast('Escribí la potencia en dBm, en negativo (por ejemplo -22,5)','bad');return;}
       try{const r=await NET.api('POST','/api/olt/medida',{cid:id,rx:v});toast(r.mala?'Guardada: mala señal, se avisa a todos':'Medida guardada');SENAL.t=0;closeModal();}
@@ -8082,7 +8087,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='a757792ba4';
+const BUILD='f22f97c71c';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
