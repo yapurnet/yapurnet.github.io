@@ -7915,7 +7915,7 @@ async function senalCargar(forzar){
 function senalBadge(){tabsHtml='';try{renderTabs();}catch(e){}}
 /* aviso para todos los que ven la red: cada 15 minutos mientras la app está abierta */
 function senalVigilar(){
-  if(!can('red')||senalVigilar.on)return;senalVigilar.on=true;
+  if(!can('red')||S.role==='tecnico'||senalVigilar.on)return;senalVigilar.on=true;
   const go=()=>{if(document.hidden||!NET.token)return;senalCargar(true).catch(()=>{});};
   setTimeout(go,4000);setInterval(go,15*60e3);
 }
@@ -8087,7 +8087,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='f22f97c71c';
+const BUILD='bbd45c311d';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -8178,7 +8178,7 @@ function allowedTabs(){
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
   if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
-  if(can('red')){t.push(['red','Red']);t.push(['senal','Señal']);}
+  if(can('red')){t.push(['red','Red']);if(S.role!=='tecnico')t.push(['senal','Señal']);}   /* la lista de ONU con mala señal es de la oficina: el técnico ve la potencia de cada cliente desde su ficha */
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
   if(can('verTecnicos'))t.push(['tecnicos','Técnicos']);
