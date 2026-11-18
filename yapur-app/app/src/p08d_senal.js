@@ -8,7 +8,7 @@ async function senalCargar(forzar){
 function senalBadge(){tabsHtml='';try{renderTabs();}catch(e){}}
 /* aviso para todos los que ven la red: cada 15 minutos mientras la app está abierta */
 function senalVigilar(){
-  if(!can('red')||senalVigilar.on)return;senalVigilar.on=true;
+  if(!can('red')||S.role==='tecnico'||senalVigilar.on)return;senalVigilar.on=true;
   const go=()=>{if(document.hidden||!NET.token)return;senalCargar(true).catch(()=>{});};
   setTimeout(go,4000);setInterval(go,15*60e3);
 }
