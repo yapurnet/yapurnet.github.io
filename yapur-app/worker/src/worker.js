@@ -1512,25 +1512,65 @@ export class YapurDB extends DurableObject {
         this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, num(x.rx), num(x.tx), String(x.est || '').toLowerCase().slice(0, 12), String(x.port || '').slice(0, 20), String(x.name || '').slice(0, 40), ts);
         n++;
       }
-      this.sql.exec('DELETE FROM onus WHERE ts<?', ts - 3 * 864e5);
+      this.sql.exec("DELETE FROM onus WHERE (est<>'manual' AND ts<?) OR ts<?", ts - 3 * 864e5, ts - 30 * 864e5);
       c.visto = ts; this.oltSave(c);
     });
     return { ok: true, guardadas: n };
   }
+  /* ----- medida a mano (el técnico en el cliente) y datos de la ONU de un cliente ----- */
+  oltMapa() { const r = this.q1("SELECT v FROM meta WHERE k='oltmapa'"); try { const m = r ? JSON.parse(r.v) : {}; return isPlain(m) ? m : {}; } catch (e) { return {}; } }
+  oltMapaGuardar(b) {
+    const lista = Array.isArray(b.lista) ? b.lista : [];
+    if (lista.length > 3000) throw httpErr(413, 'Demasiadas ONU.', 'quota_exceeded');
+    const m = {}, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    for (const x of lista) { if (!isPlain(x)) continue; const k = norm(x.sn).slice(0, 24); if (k.length >= 6) m[k] = String(x.port || '').slice(0, 12); }
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltmapa', JSON.stringify(m));
+    return { ok: true, onus: Object.keys(m).length };
+  }
+  oltClienteDe(cid) {
+    for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
+      let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
+      const c = d && d.items && d.items[cid];
+      if (isPlain(c)) return c;
+    }
+    return null;
+  }
+  oltPermiso(u) { if (u.role !== 'admin' && !effPerms(u).ubicacion && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver ni cargar la señal de la ONU.', 'permission_denied'); }
+  oltCliente(u, cid) {
+    this.oltPermiso(u);
+    const c = this.oltClienteDe(String(cid || ''));
+    if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), cfg = this.oltCfg();
+    const sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : '', mapa = this.oltMapa();
+    const l1 = sn ? this.q1('SELECT * FROM onus WHERE k=?', sn) : null, l2 = this.q1('SELECT * FROM onus WHERE k=?', 'CLI' + c.id);
+    const o = l1 && l2 ? (l1.ts >= l2.ts ? l1 : l2) : (l1 || l2);
+    return { umbral: cfg.umbral, sn: sn || null, port: (o && o.port && o.est !== 'manual' ? o.port : '') || (sn && mapa[sn]) || '', rx: o ? o.rx : null, est: o ? o.est : '', ts: o ? o.ts : null, manual: !!(o && o.est === 'manual'), por: o && o.est === 'manual' ? o.name : '' };
+  }
+  oltMedida(u, b) {
+    this.oltPermiso(u);
+    const c = this.oltClienteDe(String(b.cid || ''));
+    if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    const n = typeof b.rx === 'string' ? parseFloat(b.rx.replace(',', '.')) : b.rx;
+    if (typeof n !== 'number' || !isFinite(n) || n >= 0 || n <= -60) throw httpErr(400, 'La potencia va en dBm y es negativa, por ejemplo -22,5.');
+    const rx = Math.round(n * 100) / 100, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo), k = sn.length >= 6 ? sn : 'CLI' + c.id, mapa = this.oltMapa();
+    this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, rx, null, 'manual', String((sn && mapa[sn]) || '').slice(0, 20), String(u.nombre || u.usuario || '').slice(0, 40), Date.now());
+    return { ok: true, rx, mala: rx < this.oltCfg().umbral };
+  }
   oltVer(u) {
     if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver la señal de las ONU.', 'permission_denied');
-    const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = new Map();
+    const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = new Map(), porId = new Map();
     const alta = (k, c) => { if (k.length >= 6 && !mapa.has(k)) mapa.set(k, c); };
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
       for (const c of Object.values((d && d.items) || {})) {
         if (!isPlain(c) || c.estado === 'baja') continue;
+        porId.set(c.id, c);
         alta(norm(c.equipo), c);
         for (const e of (Array.isArray(c.comodato) ? c.comodato : [])) if (isPlain(e) && /onu/i.test(String(e.t || ''))) alta(norm(e.s), c);
       }
     }
     const lista = this.q('SELECT * FROM onus').map(o => {
-      const c = mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
+      const c = (o.k.startsWith('CLI') && porId.get(o.k.slice(3))) || mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
       return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
     });
     const mala = lista.filter(o => o.rx != null && o.rx < cfg.umbral).sort((a, b) => a.rx - b.rx);
@@ -3419,6 +3459,9 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
     if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
     if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));
+    if (p === '/api/olt/mapa' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltMapaGuardar(readBody(raw, 4e5))); }
+    if (p === '/api/olt/medida' && m === 'POST') return send(200, this.oltMedida((await this.needAuth(request)).user, readBody(raw, 500)));
+    { const mm = p.match(/^\/api\/olt\/cliente\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltCliente((await this.needAuth(request)).user, mm[1])); }
     if (p === '/api/olt/config' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltConfig(readBody(raw, 500))); }
     if (p === '/api/olt/token' && m === 'POST') { await this.needAdmin(request); return send(200, await this.oltToken()); }
     if (p === '/api/ventas' && m === 'GET') { await this.needVentas(request); return send(200, { ventas: this.ventasLista(), pv2: this.arcaCfg().pv2 || null }); }

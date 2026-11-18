@@ -57,6 +57,38 @@ async function call(method, p, body, token) {
     t('con límite -25 también alerta la de -26,8', r.j.malas === 4, r.j);
     r = await call('GET', '/api/olt', undefined, undefined);
     t('sin sesión no se ve', r.s === 401, r);
+    /* medida a mano del técnico + datos de la ONU del cliente */
+    await call('POST', '/api/users', { usuario: 'tec', nombre: 'Tecnico Uno', role: 'tecnico', clave: 'tecnico12' }, A);
+    const T = (await call('POST', '/api/login', { usuario: 'tec', clave: 'tecnico12' })).j.token;
+    r = await call('PUT', '/api/olt/mapa', { lista: [{ sn: 'TPLG-1234ABCD', port: '1/3' }, { sn: 'TPLGBBBB2222', port: '2/7' }] }, T);
+    t('el técnico no carga el mapa de la OLT', r.s === 403, r);
+    r = await call('PUT', '/api/olt/mapa', { lista: [{ sn: 'TPLG-1234ABCD', port: '1/3' }, { sn: 'TPLGBBBB2222', port: '2/7' }, { sn: 'x', port: '9/9' }] }, A);
+    t('el administrador carga el mapa serie → puerto/ID', r.s === 200 && r.j.onus === 2, r);
+    r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' } } } }, A);
+    r = await call('GET', '/api/olt/cliente/e', undefined, T);
+    t('el técnico ve la ONU del cliente con su puerto aunque no haya lectura', r.s === 200 && r.j.port === '2/7' && r.j.rx === null && r.j.sn === 'TPLGBBBB2222', r);
+    r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 'abc' }, T);
+    t('una potencia que no es número se rechaza', r.s === 400, r);
+    r = await call('POST', '/api/olt/medida', { cid: 'e', rx: 5 }, T);
+    t('una potencia positiva se rechaza', r.s === 400, r);
+    r = await call('POST', '/api/olt/medida', { cid: 'zzz', rx: -20 }, T);
+    t('un cliente inexistente da 404', r.s === 404, r);
+    r = await call('POST', '/api/olt/medida', { cid: 'e', rx: '-28,5' }, T);
+    t('el técnico carga una medida a mano y avisa que es mala señal', r.s === 200 && r.j.rx === -28.5 && r.j.mala === true, r);
+    r = await call('GET', '/api/olt/cliente/e', undefined, T);
+    t('la medida queda guardada con quién la cargó', r.j.rx === -28.5 && r.j.manual === true && r.j.por === 'Tecnico Uno' && r.j.port === '2/7', r.j);
+    r = await call('POST', '/api/olt/medida', { cid: 'd', rx: -31 }, T);
+    t('un cliente sin serie también guarda su medida', r.s === 200 && r.j.mala === true, r);
+    r = await call('GET', '/api/olt/cliente/d', undefined, T);
+    t('...y se la ve de nuevo', r.j.rx === -31 && r.j.sn === null && r.j.manual === true, r.j);
+    r = await call('GET', '/api/olt', undefined, O);
+    const Lm = r.j.lista || [];
+    t('las medidas a mano entran en las alertas y se cruzan con su cliente', Lm.some(o => o.cn === 'Con Mapa Luis' && o.rx === -28.5) && Lm.some(o => o.cn === 'Sin Equipo Rosa' && o.rx === -31), Lm);
+    r = await call('POST', '/api/olt/ingest', { lect: [{ sn: 'TPLGBBBB2222', rx: -19, port: '2/7' }] }, TK);
+    r = await call('GET', '/api/olt/cliente/e', undefined, T);
+    t('una lectura nueva del lector reemplaza la medida a mano', r.j.rx === -19 && r.j.manual === false, r.j);
+    r = await call('GET', '/api/olt/cliente/e', undefined, undefined);
+    t('sin sesión no se ve la ONU del cliente', r.s === 401, r);
   } finally { srv.stop && srv.stop(); }
   console.log('\n' + okN + ' ok, ' + failN + ' con fallas'); process.exit(failN ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -42,3 +42,24 @@ VIEWS.senal={
     const tk=$('#sn-tok',box);if(tk)tk.addEventListener('click',async()=>{if(d.tok&&!confirm('El token anterior dejará de servir. ¿Generar uno nuevo?'))return;try{const r=await NET.api('POST','/api/olt/token',{});$('#sn-tokbox',box).innerHTML=`<p class="small">Copialo ahora, no se vuelve a mostrar:</p><p class="mono" style="word-break:break-all">${esc(r.token)}</p><button class="btn small" type="button" id="sn-cp">Copiar</button>`;$('#sn-cp',box).addEventListener('click',()=>copyText(r.token,'Token'));}catch(err){toast(err.message,'bad');}});
   }
 };
+
+/* ----- el técnico en el cliente: ver la última potencia de su ONU y cargar la que midió (EMS o medidor) ----- */
+async function openSenalCliente(id){
+  const c=S.clientes.get(id);if(!c)return;
+  let d;try{d=await NET.api('GET','/api/olt/cliente/'+encodeURIComponent(id));}catch(err){toast(err.message,'bad');return;}
+  const est=rx=>rx==null?'':rx<d.umbral?'bad':rx<d.umbral+3?'warn':'ok';
+  const ult=d.rx!=null?`<p>Última potencia: <span class="chip ${est(d.rx)}">${d.rx} dBm</span> · ${senalHace(d.ts)}${d.manual?' · cargada a mano'+(d.por?' por '+esc(d.por):''):' · leída de la OLT'}</p>${d.rx<d.umbral?`<p class="chip bad">Peor que ${d.umbral} dBm: tiene mala señal.</p>`:''}`:'<p class="muted">Todavía no hay ninguna lectura de esta ONU.</p>';
+  openModal({title:'Potencia de la ONU · '+c.nombre,html:`<div class="stack">
+    ${ult}
+    <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
+    ${F('Potencia medida (dBm)','sg-rx','<input id="sg-rx" inputmode="decimal" placeholder="-22,5">',`Se ve en la EMS: ONU → «Onu Basic Information» → Received OpticalPower, o con el medidor de potencia. Va en negativo. Por debajo de ${d.umbral} dBm se avisa a todos.`)}
+    <div class="actions"><button class="btn primary" type="button" id="sg-go">Guardar medida</button></div></div>`,
+  onClose:()=>setTimeout(()=>{if(S.clientes.has(id))openClient(id);},0),
+  onMount(box){
+    $('#sg-go',box).addEventListener('click',async()=>{
+      const v=num($('#sg-rx',box).value);if(!(v<0)){toast('Escribí la potencia en dBm, en negativo (por ejemplo -22,5)','bad');return;}
+      try{const r=await NET.api('POST','/api/olt/medida',{cid:id,rx:v});toast(r.mala?'Guardada: mala señal, se avisa a todos':'Medida guardada');SENAL.t=0;closeModal();}
+      catch(err){toast(err.message,'bad');}
+    });
+  }});
+}
