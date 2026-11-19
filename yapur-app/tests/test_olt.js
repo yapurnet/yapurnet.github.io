@@ -120,6 +120,15 @@ async function call(method, p, body, token) {
     t('una lectura nueva del lector reemplaza la medida a mano', r.j.rx === -19 && r.j.manual === false, r.j);
     r = await call('GET', '/api/olt/cliente/e', undefined, undefined);
     t('sin sesión no se ve la ONU del cliente', r.s === 401, r);
+    const lista = []; for (let i = 1; i <= 60; i++) lista.push({ sn: 'TPLGMAPA' + String(1000 + i), port: '2/' + i });
+    r = await call('POST', '/api/olt/ingest', { lect: [], mapa: lista }, TK);
+    t('el lector manda la lista de ONU de la OLT y reemplaza el mapa', r.s === 200 && r.j.mapa === 60, r);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: 'MAPA1007' }, T);
+    t('una ONU nueva de la OLT se puede vincular sin pasar la configuración', r.s === 200 && r.j.port === '2/7', r);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: '1234abcd' }, T);
+    t('una ONU dada de baja en la OLT deja de poder vincularse', r.s === 404, r);
+    r = await call('POST', '/api/olt/ingest', { lect: [], mapa: lista.slice(0, 5) }, TK);
+    t('una lista chica no pisa el mapa (protege ante una lectura incompleta)', r.s === 200 && r.j.mapa === null, r);
   } finally { srv.stop && srv.stop(); }
   console.log('\n' + okN + ' ok, ' + failN + ' con fallas'); process.exit(failN ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

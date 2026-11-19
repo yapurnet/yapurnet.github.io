@@ -1503,7 +1503,7 @@ export class YapurDB extends DurableObject {
     const b = readBody(raw, 9e5), lect = Array.isArray(b.lect) ? b.lect : [];
     if (lect.length > 8000) throw httpErr(413, 'Demasiadas ONU en una tanda.', 'quota_exceeded');
     const ts = Date.now(), num = v => { const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v; return typeof n === 'number' && isFinite(n) && n > -60 && n < 30 ? Math.round(n * 100) / 100 : null; };
-    let n = 0;
+    let n = 0, mapaN = null;
     this.tx(() => {
       for (const x of lect) {
         if (!isPlain(x)) continue;
@@ -1513,9 +1513,11 @@ export class YapurDB extends DurableObject {
         n++;
       }
       this.sql.exec("DELETE FROM onus WHERE (est<>'manual' AND ts<?) OR ts<?", ts - 3 * 864e5, ts - 30 * 864e5);
+      /* el lector manda también la lista completa de ONU que la OLT tiene hoy (serie → puerto/ID): las altas y bajas se reflejan solas */
+      if (Array.isArray(b.mapa) && b.mapa.length >= 50 && b.mapa.length <= 3000) { const r = this.oltMapaGuardar({ lista: b.mapa }); mapaN = r.onus; }
       c.visto = ts; this.oltSave(c);
     });
-    return { ok: true, guardadas: n };
+    return { ok: true, guardadas: n, mapa: mapaN };
   }
   /* ----- medida a mano (el técnico en el cliente) y datos de la ONU de un cliente ----- */
   oltMapa() { const r = this.q1("SELECT v FROM meta WHERE k='oltmapa'"); try { const m = r ? JSON.parse(r.v) : {}; return isPlain(m) ? m : {}; } catch (e) { return {}; } }
