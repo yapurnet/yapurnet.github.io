@@ -75,6 +75,11 @@ async function call(method, p, body, token) {
     t('el técnico vincula la ONU por los últimos caracteres', r.s === 200 && r.j.sn === 'TPLG1234ABCD' && r.j.port === '1/3', r);
     r = await call('GET', '/api/olt/cliente/f', undefined, T);
     t('el cliente vinculado muestra su serie y puerto', r.j.sn === 'TPLG1234ABCD' && r.j.port === '1/3', r.j);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', quitar: true }, T);
+    t('se puede quitar un vínculo hecho por error', r.s === 200 && r.j.quitada === true, r);
+    r = await call('GET', '/api/olt/cliente/f', undefined, T);
+    t('sin vínculo el cliente vuelve a no tener serie', r.j.sn === null, r.j);
+    r = await call('POST', '/api/olt/vincular', { cid: 'f', q: '1234abcd' }, T);
     r = await call('GET', '/api/olt/cliente/g', undefined, T);
     t('un cliente cuyo registro no trae el campo id también se resuelve', r.s === 200 && r.j.sn === 'TPLGBBBB2222', r);
     r = await call('POST', '/api/olt/ingest', { lect: [{ sn: 'TPLGAUTO0001', rx: -20, port: '3/9', name: 'Pérez Juan (Kiosco)' }, { sn: 'TPLGAUTO0002', rx: -21, port: '1/1', name: 'Lopez Ana' }, { sn: 'TPLGAUTO0003', rx: -22, port: '1/2', name: 'Nadie Conocido' }] }, TK);
