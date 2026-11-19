@@ -1533,6 +1533,7 @@ export class YapurDB extends DurableObject {
     this.oltPermiso(u);
     const c = this.oltClienteDe(String(b.cid || ''));
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    if (b.quitar === true) { const v0 = this.oltVinc(); delete v0[c.id]; this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltvinc', JSON.stringify(v0)); return { ok: true, quitada: true }; }
     const q = String(b.q || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (q.length < 4) throw httpErr(400, 'Escribí al menos los últimos 4 caracteres de la serie de la ONU.');
     const mapa = this.oltMapa(), hit = Object.keys(mapa).filter(k => k.endsWith(q));
