@@ -7943,8 +7943,8 @@ function caidasHtml(c){
     }).join(''):`<p class="muted small">Todavía no llegan mediciones de los nodos. Para medirlos, el programa que corre en la PC de la EMS tiene que tener la lista de nodos (archivo <span class="mono">nodos.txt</span>) y estar instalado el «Monitor de nodos».</p>`}<p class="small muted">Se mide con un ping por minuto desde la red. Un nodo se da por caído cuando dos mediciones seguidas no tienen ninguna respuesta; si es un corte corto o un reinicio también queda anotado.</p></div>`;
   }
   const caidasTot=o.dias.reduce((a,d)=>a+d.n,0);
-  h+=`<div class="card"><h3>Caídas de las ONU (14 días)</h3><p class="small">${o.caidas?`<span class="chip bad">${o.caidas} ${o.caidas===1?'caída ahora':'caídas ahora'}</span> `:'<span class="chip ok">Ninguna ONU caída ahora</span> '}${caidasTot} ${caidasTot===1?'caída':'caídas'} en 14 días · ${o.total} ONU controladas</p>${cdBarras(o.dias)}`;
-  if(o.ahoraCaidas.length)h+=`<h4>Caídas ahora</h4><div class="list">${o.ahoraCaidas.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="small muted">desde ${cdFecha(x.desde)} · ${cdDur(c.ahora-x.desde)}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}<span class="mono">${esc(x.k)}</span></div></div>`).join('')}</div>`;
+  h+=`<div class="card"><h3>Caídas de las ONU (14 días)</h3><p class="small">${o.caidas?`<span class="chip bad">${o.caidas} ${o.caidas===1?'caída ahora':'caídas ahora'}</span> `:'<span class="chip ok">Ninguna ONU caída ahora</span> '}${caidasTot} ${caidasTot===1?'caída':'caídas'} en 14 días${o.total!=null?' · '+o.total+' ONU controladas':''}</p>${cdBarras(o.dias)}`;
+  if(o.ahoraCaidas.length)h+=`<h4>Caídas ahora</h4><p class="small muted">Las que figuran desde la primera medición pueden estar caídas desde antes: se anota desde que se empezó a medir.</p><div class="list">${o.ahoraCaidas.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="small muted">desde ${cdFecha(x.desde)} · ${cdDur(c.ahora-x.desde)}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}<span class="mono">${esc(x.k)}</span></div></div>`).join('')}</div>`;
   if(o.top.length)h+=`<h4>Las que más se cayeron (7 días)</h4><div class="list">${o.top.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="chip ${x.caidas>=3?'bad':'warn'}">${x.caidas} ${x.caidas===1?'caída':'caídas'}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}${cdDur(x.min*6e4)} sin servicio en total</div></div>`).join('')}</div>`;
   h+=`<p class="small muted">Una ONU se da por caída cuando no responde en dos lecturas seguidas de la OLT (cada 10 minutos). Un corte de luz en la casa del cliente también cuenta como caída.</p></div>`;
   return h;
@@ -8134,7 +8134,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='8e192ae23f';
+const BUILD='09708320ba';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

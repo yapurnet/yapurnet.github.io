@@ -1683,7 +1683,9 @@ export class YapurDB extends DurableObject {
     const top = [...cuenta].sort((a, b) => b[1].n - a[1].n || b[1].ms - a[1].ms).slice(0, 12).map(([k, a]) => ({ ...ficha(k), caidas: a.n, min: Math.round(a.ms / 6e4) }));
     const hoy = this.q("SELECT k, desde FROM est WHERE on_=0 AND k NOT LIKE 'N:%' ORDER BY desde").slice(0, 30).map(f => ({ ...ficha(f.k), desde: f.desde }));
     const tot = this.q1("SELECT COUNT(*) c, SUM(on_=0) off FROM est WHERE k NOT LIKE 'N:%'");
-    return { ahora, nodos, onus: { total: tot ? tot.c : 0, caidas: tot ? tot.off || 0 : 0, dias: dias.map(d => ({ d, n: porDia.get(d) })), top, ahoraCaidas: hoy } };
+    /* al técnico no se le muestra el total de ONU ni las que no tienen cliente: solo las caídas que puede atender */
+    const conCliente = a => tec ? a.filter(x => x.cid) : a;
+    return { ahora, nodos, onus: { total: tec ? null : (tot ? tot.c : 0), caidas: tec ? conCliente(hoy).length : (tot ? tot.off || 0 : 0), dias: dias.map(d => ({ d, n: porDia.get(d) })), top: conCliente(top), ahoraCaidas: conCliente(hoy) } };
   }
   oltClienteDe(cid) {
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
