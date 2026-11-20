@@ -7933,7 +7933,9 @@ function cdBarras(dias){   /* caídas de ONU por día, últimos 14 días */
   return `<svg viewBox="0 0 ${dias.length*w} ${H+16}" style="width:100%;height:auto;display:block" role="img" aria-label="Caídas de ONU por día">${dias.map((x,i)=>{const h=Math.round(x.n/max*H);return `<g><title>${x.d}: ${x.n}</title><rect x="${i*w+3}" y="${H-h}" width="${w-6}" height="${Math.max(h,x.n?2:1)}" rx="2" fill="${x.n?'var(--bad)':'var(--line)'}"/>${x.n?`<text x="${i*w+w/2}" y="${H-h-2}" font-size="7" text-anchor="middle" fill="currentColor">${x.n}</text>`:''}<text x="${i*w+w/2}" y="${H+11}" font-size="7" text-anchor="middle" fill="currentColor" opacity=".6">${+x.d.slice(8)}</text></g>`;}).join('')}</svg>`;
 }
 function caidasHtml(c){
-  const tec=S.role==='tecnico',n=c.nodos||[],o=c.onus||{dias:[],top:[],ahoraCaidas:[]};
+  /* en «Ver como técnico» el servidor ve al administrador: lo que el técnico no debe ver se oculta también acá */
+  const tec=S.role==='tecnico',n=tec?[]:(c.nodos||[]),o0=c.onus||{dias:[],top:[],ahoraCaidas:[]};
+  const o=tec?Object.assign({},o0,{total:null,top:o0.top.filter(x=>x.cid),ahoraCaidas:o0.ahoraCaidas.filter(x=>x.cid),caidas:o0.ahoraCaidas.filter(x=>x.cid).length}):o0;
   let h='';
   if(!tec){
     h+=`<div class="card"><h3>Nodos</h3>${n.length?n.map(x=>{
@@ -8134,7 +8136,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='09708320ba';
+const BUILD='efd4163f8c';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

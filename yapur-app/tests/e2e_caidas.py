@@ -79,6 +79,8 @@ async def main():
         check('muestra la tira de 24 h de cada nodo y las barras de ONU', await pg.locator('#sn-caidas svg[aria-label^="Estado"]').count() == 3 and await pg.locator('#sn-caidas svg[aria-label="Caídas de ONU por día"]').count() == 1)
         check('lista la ONU que sigue caída y la que más se cayó', 'Caídas ahora' in tx and 'Fabio Sosa' not in tx.split('Caídas ahora')[0] and 'TPLGMAPA1009' in tx and 'Las que más se cayeron' in tx, tx)
         await pg.screenshot(path='/tmp/caidas_senal.png', full_page=True)
+        vt = await pg.evaluate("(async()=>{const r=S.role;S.role='tecnico';try{const d=document.createElement('div');d.innerHTML=caidasHtml(await NET.api('GET','/api/caidas'));return d.textContent;}finally{S.role=r;}})()")
+        check('en «Ver como técnico» (el servidor ve al administrador) tampoco se muestra el total ni las ONU sin cliente ni los nodos', 'ONU controladas' not in vt and 'ONU sin cliente' not in vt and 'BOMBEROS05' not in vt and 'Caídas de las ONU' in vt, vt)
         await pg.evaluate("openClient('a')"); await pg.wait_for_selector('[data-act=senal]'); await pg.click('[data-act=senal]')
         await pg.wait_for_selector('#sg-rx')
         d = await pg.inner_text('[role=dialog]')
