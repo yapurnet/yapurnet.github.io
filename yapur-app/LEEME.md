@@ -649,3 +649,11 @@ En **Señal** (debajo de la lista de mala señal) hay dos tarjetas nuevas, y en 
 - **Instalarlo (una vez):** en la carpeta `conf` del escritorio, abrir `nodos.txt` y completar la **IP de cada nodo** (`NOMBRE|IP`); `probar_monitor.bat` muestra cuántos paquetes vuelven de cada uno; `instalar_monitor.bat` lo deja corriendo solo cada minuto, sin ventana (`quitar_monitor.bat` lo saca). Se anota en `monitor.log` cuando algún nodo no contesta.
 - **Qué no mide:** el tiempo de trabajo (uptime) real del router, porque eso lo sabe el router y no se ve con un ping. Un reinicio se nota como una caída corta. Cuando un nodo vuelve, la app muestra «Activo hace X»: es el tiempo desde que volvió a contestar.
 - **Plan gratis de Cloudflare:** el monitor son unas 1.440 consultas por día y el lector de ONU 144; las caídas se guardan solo cuando cambia el estado (los pings se resumen en tramos de 10 minutos) y se borran a los 60 días.
+
+## Consumo de los clientes (20/11)
+
+- **De dónde sale:** ADMIN02 tiene una cola simple por cliente (target = IP del cliente). `consumo_mikrotik.py` (PC de la EMS, tarea «Consumo clientes YAPUR», cada 5 min con `--una-vez`) lee por SNMP de solo lectura los contadores de 64 bits (`1.3.6.1.4.1.14988.1.1.2.1.1`: .2 nombre, .3 IP, .8 bytes de entrada = bajada, .9 salida = subida), suma las diferencias y **una vez por hora** manda los totales por cliente y por día a `POST /api/consumo/ingest` (mismo token del lector de la OLT). Así se gastan pocas escrituras del plan gratis (≈690 filas por hora).
+- **Servidor:** tablas `cons_dia(k,d,bi,bo,pk)` y `cons_cli(k,n,ip)` (ESQUEMA_V '5'), se guardan 120 días. `GET /api/consumo?dias=` y `GET /api/consumo/cliente?ip=`: solo administración y quien ve la red; **el técnico no**.
+- **App:** pestaña **Consumo** (junto a Nodos): totales, consumo por red (10.20.4x.x), lista de clientes con promedio diario, pico y etiqueta «Llega al límite de su plan» (pico ≥ 90% de la bajada del plan, con 3 días o más de datos) o «Casi no usa». El cliente se une por IP.
+- **Supuesto a verificar:** que «bytes de entrada» de la cola es la bajada del cliente (en todas las colas de la prueba el valor de entrada es mucho mayor que el de salida). Si resultara al revés, se invierten las dos columnas en `consumo_mikrotik.py`.
+- Pruebas: `tests/test_olt.js`, `tests/e2e_consumo.py`.
