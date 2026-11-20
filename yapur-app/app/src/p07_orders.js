@@ -86,6 +86,26 @@ function openOrderForm({id,clientId}){
       }else{
         box.innerHTML='<div class="field"><label>Cliente *</label><div id="of-pick"></div></div>';
         const pk=mountClientPicker($('#of-pick',box),{onPick:c=>{cid=c.id;drawClient();}});pk.focus();
+        /* persona que todavía no es cliente: se carga acá mismo (queda «pendiente», sin cobro) y la orden sigue sin salir de este formulario */
+        if(!old&&(can('editarClientes')||can('altaCampo'))){
+          const nb=document.createElement('div');
+          nb.innerHTML=`<button class="btn small" type="button" id="of-nw">No es cliente: cargar persona nueva</button><div id="of-nwf" hidden class="geo" style="margin-top:8px">
+            ${F('Nombre y apellido *','of-nw-n','<input id="of-nw-n" autocomplete="off">')}${F('Teléfono *','of-nw-t','<input id="of-nw-t" inputmode="tel">')}${F('Dirección (calle y número) *','of-nw-d','<input id="of-nw-d" autocomplete="off">')}
+            <div class="actions start"><button class="btn primary small" type="button" id="of-nw-ok">Cargar y seguir con la orden</button></div><p class="small muted">Queda como cliente pendiente (no se le cobra) hasta que se termine la instalación.</p></div>`;
+          box.appendChild(nb);
+          $('#of-nw',nb).addEventListener('click',()=>{$('#of-nwf',nb).hidden=false;$('#of-nw-n',nb).focus();});
+          $('#of-nw-ok',nb).addEventListener('click',async()=>{
+            const nombre=$('#of-nw-n',nb).value.trim(),tel=$('#of-nw-t',nb).value.trim(),dir=$('#of-nw-d',nb).value.trim();
+            if(!nombre||!tel||!dir)return toast('Completá nombre, teléfono y dirección','bad');
+            try{
+              const nid=newId();
+              await putItem('clientes',clientShard(nid),nid,{creado:Date.now(),mod:Date.now(),estado:'pendiente',nombre,tel,dir});
+              for(let i=0;i<40&&!S.clientes.has(nid);i++)await new Promise(r=>setTimeout(r,100));   /* el cliente llega por la sincronización: esperar a que figure */
+              if(!S.clientes.has(nid))return toast('Se guardó, pero tarda en aparecer: buscalo por su nombre','warn');
+              cid=nid;const t=$('#of-tipo',el);if(t)t.value='instalacion';drawClient();
+            }catch(err){dbError(err);}
+          });
+        }
       }
     };
     drawClient();
