@@ -168,6 +168,7 @@ async function call(method, p, body, token) {
     t('al volver, la caída queda con su duración y el nodo activo', r.j.nodos[0].on === 1 && r.j.nodos[0].ult[0].dur != null && r.j.nodos[0].disp7 !== null, r.j.nodos[0]);
     r = await call('GET', '/api/caidas', undefined, T);
     t('el técnico ve las caídas de las ONU pero no las de los nodos', r.s === 200 && r.j.nodos.length === 0 && Array.isArray(r.j.onus.dias), r.j);
+    t('al técnico no se le muestra el total de ONU ni las ONU sin cliente', r.j.onus.total === null && r.j.onus.top.every(x => x.cid) && r.j.onus.ahoraCaidas.every(x => x.cid), r.j.onus);
     r = await call('GET', '/api/caidas', undefined, undefined);
     t('sin sesión no se ven las caídas', r.s === 401, r);
   } finally { srv.stop && srv.stop(); }
