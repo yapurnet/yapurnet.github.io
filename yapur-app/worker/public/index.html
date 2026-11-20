@@ -7932,18 +7932,19 @@ function cdBarras(dias){   /* caídas de ONU por día, últimos 14 días */
   const max=Math.max(3,...dias.map(x=>x.n)),w=20,H=56;
   return `<svg viewBox="0 0 ${dias.length*w} ${H+16}" style="width:100%;height:auto;display:block" role="img" aria-label="Caídas de ONU por día">${dias.map((x,i)=>{const h=Math.round(x.n/max*H);return `<g><title>${x.d}: ${x.n}</title><rect x="${i*w+3}" y="${H-h}" width="${w-6}" height="${Math.max(h,x.n?2:1)}" rx="2" fill="${x.n?'var(--bad)':'var(--line)'}"/>${x.n?`<text x="${i*w+w/2}" y="${H-h-2}" font-size="7" text-anchor="middle" fill="currentColor">${x.n}</text>`:''}<text x="${i*w+w/2}" y="${H+11}" font-size="7" text-anchor="middle" fill="currentColor" opacity=".6">${+x.d.slice(8)}</text></g>`;}).join('')}</svg>`;
 }
-function caidasHtml(c){
-  /* en «Ver como técnico» el servidor ve al administrador: lo que el técnico no debe ver se oculta también acá */
-  const tec=S.role==='tecnico',n=tec?[]:(c.nodos||[]),o0=c.onus||{dias:[],top:[],ahoraCaidas:[]};
-  const o=tec?Object.assign({},o0,{total:null,top:o0.top.filter(x=>x.cid),ahoraCaidas:o0.ahoraCaidas.filter(x=>x.cid),caidas:o0.ahoraCaidas.filter(x=>x.cid).length}):o0;
-  let h='';
-  if(!tec){
-    h+=`<div class="card"><h3>Nodos</h3>${n.length?n.map(x=>{
+function nodosHtml(c){
+  const n=c.nodos||[];
+  return `<div class="card">${n.length?n.map(x=>{
       const est=x.on===1?`<span class="chip ok">Activo hace ${cdDur(c.ahora-x.desde)}</span>`:x.on===0?`<span class="chip bad">Caído hace ${cdDur(c.ahora-x.desde)}</span>`:'<span class="chip">Sin respuesta desde que se empezó a medir</span>';
       const caidas=x.ult.filter(e=>e.ts>c.ahora-7*864e5);
       return `<div class="sn-nodo" style="margin:12px 0 18px"><div class="between"><b>${esc(x.n)}</b>${est}</div>${cdTira(x.tira)}<div class="small muted">${x.disp7!=null?`Disponibilidad 7 días: <b>${x.disp7}%</b> · `:''}${x.caidas7} ${x.caidas7===1?'caída':'caídas'} en 7 días${x.min7?` (${cdDur(x.min7*6e4)} sin servicio)`:''}${x.ms!=null?` · ping ${x.ms} ms`:''}${x.on===1?` · hace ${cdDur(c.ahora-x.visto)} la última medición`:''}</div>${caidas.length?`<ul class="small" style="margin:6px 0 0;padding-left:18px">${caidas.slice(0,4).map(e=>`<li>${cdFecha(e.ts)} · ${e.dur==null?'<b>sigue caído</b>':'estuvo '+cdDur(e.dur)+' sin respuesta'}</li>`).join('')}</ul>`:''}</div>`;
     }).join(''):`<p class="muted small">Todavía no llegan mediciones de los nodos. Para medirlos, el programa que corre en la PC de la EMS tiene que tener la lista de nodos (archivo <span class="mono">nodos.txt</span>) y estar instalado el «Monitor de nodos».</p>`}<p class="small muted">Se mide con un ping por minuto desde la red. Un nodo se da por caído cuando dos mediciones seguidas no tienen ninguna respuesta; si es un corte corto o un reinicio también queda anotado.</p></div>`;
-  }
+}
+function caidasHtml(c){
+  /* en «Ver como técnico» el servidor ve al administrador: lo que el técnico no debe ver se oculta también acá */
+  const tec=S.role==='tecnico',o0=c.onus||{dias:[],top:[],ahoraCaidas:[]};
+  const o=tec?Object.assign({},o0,{total:null,top:o0.top.filter(x=>x.cid),ahoraCaidas:o0.ahoraCaidas.filter(x=>x.cid),caidas:o0.ahoraCaidas.filter(x=>x.cid).length}):o0;
+  let h='';
   const caidasTot=o.dias.reduce((a,d)=>a+d.n,0);
   h+=`<div class="card"><h3>Caídas de las ONU (14 días)</h3><p class="small">${o.caidas?`<span class="chip bad">${o.caidas} ${o.caidas===1?'caída ahora':'caídas ahora'}</span> `:'<span class="chip ok">Ninguna ONU caída ahora</span> '}${caidasTot} ${caidasTot===1?'caída':'caídas'} en 14 días${o.total!=null?' · '+o.total+' ONU controladas':''}</p>${cdBarras(o.dias)}`;
   if(o.ahoraCaidas.length)h+=`<h4>Caídas ahora</h4><p class="small muted">Las que figuran desde la primera medición pueden estar caídas desde antes: se anota desde que se empezó a medir.</p><div class="list">${o.ahoraCaidas.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="small muted">desde ${cdFecha(x.desde)} · ${cdDur(c.ahora-x.desde)}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}<span class="mono">${esc(x.k)}</span></div></div>`).join('')}</div>`;
@@ -8026,6 +8027,21 @@ async function openSenalCliente(id){
     });
   }});
 }
+
+/* ===== Nodos: estado y caídas de los routers de la red (solo quien administra; el técnico no ve esta pestaña) ===== */
+VIEWS.nodos={
+  mount(el){
+    this.el=el;el.innerHTML='<div class="head-row"><h2>Nodos</h2><button class="btn small" type="button" id="nd-re">Actualizar</button></div><div id="nd-cuerpo" class="muted">Cargando…</div>';
+    $('#nd-re',el).addEventListener('click',()=>this.recargar());this.recargar();
+    clearInterval(this.iv);this.iv=setInterval(()=>{if(S.tab==='nodos'&&!document.hidden)this.recargar();else if(S.tab!=='nodos')clearInterval(this.iv);},60e3);
+  },
+  update(){},
+  async recargar(){
+    const box=this.el&&$('#nd-cuerpo',this.el);if(!box)return;
+    try{const c=await NET.api('GET','/api/caidas');box.className='';box.innerHTML=nodosHtml(c);}
+    catch(err){box.textContent=err.network?'No se pudo conectar con el servidor.':err.message;}
+  }
+};
 
 /* ===== resumen ===== */
 /* clientes: altas y bajas por mes (últimos 6), para ver si la empresa crece o se achica. «Alta» es c.alta (fecha de alta vigente,
@@ -8136,7 +8152,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='efd4163f8c';
+const BUILD='c54fc584bd';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
@@ -8227,7 +8243,7 @@ function allowedTabs(){
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
   if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
-  if(can('red')){t.push(['red','Red']);t.push(['senal','Señal']);}
+  if(can('red')){t.push(['red','Red']);t.push(['senal','Señal']);if(S.role!=='tecnico')t.push(['nodos','Nodos']);}
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
   if(can('verTecnicos'))t.push(['tecnicos','Técnicos']);
