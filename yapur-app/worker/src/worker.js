@@ -659,7 +659,7 @@ export default {
 const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
 const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
-const ESQUEMA_V = '3';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
+const ESQUEMA_V = '4';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
 const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
 const USO_FLUSH_MS = 5e3;            // el contador de consumo se anota en la base como mucho cada 5 segundos
 /* servidor de respaldo (segunda cuenta de Cloudflare): ver «respaldo» más abajo */
@@ -870,6 +870,10 @@ export class YapurDB extends DurableObject {
       try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
       for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
       this.sql.exec('CREATE TABLE IF NOT EXISTS repcola(k TEXT PRIMARY KEY, ts INTEGER NOT NULL) WITHOUT ROWID');   /* cambios que faltan mandar al servidor de respaldo */
+      /* historial de caídas: evt = cada caída (k = serie de la ONU o «N:nombre» de un nodo; dur en ms cuando ya volvió), est = estado actual de cada uno, nodomin = pings por tramos de 10 minutos */
+      this.sql.exec('CREATE TABLE IF NOT EXISTS evt(k TEXT NOT NULL, ts INTEGER NOT NULL, dur INTEGER, PRIMARY KEY(k,ts)) WITHOUT ROWID');
+      this.sql.exec('CREATE TABLE IF NOT EXISTS est(k TEXT PRIMARY KEY, on_ INTEGER NOT NULL, desde INTEGER NOT NULL, miss INTEGER NOT NULL DEFAULT 0, t0 INTEGER, ts INTEGER NOT NULL) WITHOUT ROWID');
+      this.sql.exec('CREATE TABLE IF NOT EXISTS nodomin(n TEXT NOT NULL, b INTEGER NOT NULL, sent INTEGER NOT NULL, rec INTEGER NOT NULL, msum REAL NOT NULL DEFAULT 0, mcnt INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(n,b)) WITHOUT ROWID');
       this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('esquema',?)", ESQUEMA_V);
     }
     /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
@@ -1515,6 +1519,7 @@ export class YapurDB extends DurableObject {
       this.sql.exec("DELETE FROM onus WHERE (est<>'manual' AND ts<?) OR ts<?", ts - 3 * 864e5, ts - 30 * 864e5);
       /* el lector manda también la lista completa de ONU que la OLT tiene hoy (serie → puerto/ID): las altas y bajas se reflejan solas */
       if (Array.isArray(b.mapa) && b.mapa.length >= 50 && b.mapa.length <= 3000) { const r = this.oltMapaGuardar({ lista: b.mapa }); mapaN = r.onus; }
+      if (mapaN !== null && Array.isArray(b.off)) this.caidasONU(ts, b.mapa, b.off);
       c.visto = ts; this.oltSave(c);
     });
     return { ok: true, guardadas: n, mapa: mapaN };
@@ -1591,6 +1596,95 @@ export class YapurDB extends DurableObject {
     }
     return { aplicado: !!(b && b.aplicar === true), seguras: res.seguras.length, dudosas: res.dudosas.length, sinNombre: res.sinNombre.length, yaTenian: res.yaTenian, lista: { seguras: res.seguras, dudosas: res.dudosas, sinNombre: res.sinNombre } };
   }
+  /* ----- historial de caídas -----
+     ONU: el lector manda la lista completa de ONU registradas (mapa) y cuáles no respondieron esta vuelta (off). Una ONU se da por caída recién cuando falta en dos vueltas seguidas
+     (unos 10 a 20 minutos), con la hora de la primera que faltó; vuelve cuando aparece de nuevo. Si faltan demasiadas a la vez se toma como una lectura fallida y no se anota nada. */
+  caidasONU(ts, mapa, off) {
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+    const todas = new Set(mapa.filter(isPlain).map(x => norm(x.sn)).filter(k => k.length >= 6)), caidas = new Set(off.map(norm));
+    if (todas.size < 50 || caidas.size > todas.size * 0.3) return;
+    const filas = new Map(this.q("SELECT * FROM est WHERE k NOT LIKE 'N:%'").map(r => [r.k, r]));
+    const ins = (k, on, desde, miss, t0) => this.sql.exec('INSERT OR REPLACE INTO est(k,on_,desde,miss,t0,ts) VALUES(?,?,?,?,?,?)', k, on, desde, miss, t0, ts);
+    for (const k of todas) {
+      const f = filas.get(k), off1 = caidas.has(k);
+      if (!f) { ins(k, off1 ? 0 : 1, ts, 0, null); continue; }
+      if (off1) {
+        if (f.on_ !== 1) continue;
+        const miss = f.miss + 1, t0 = f.t0 || ts;
+        if (miss >= 2) { ins(k, 0, t0, 0, null); this.sql.exec('INSERT OR REPLACE INTO evt(k,ts,dur) VALUES(?,?,NULL)', k, t0); }
+        else ins(k, 1, f.desde, miss, t0);
+      } else if (f.on_ === 0) {
+        this.sql.exec('UPDATE evt SET dur=? WHERE k=? AND ts=?', Math.max(0, ts - f.desde), k, f.desde); ins(k, 1, ts, 0, null);
+      } else if (f.miss) ins(k, 1, f.desde, 0, null);
+    }
+    for (const k of filas.keys()) if (!todas.has(k)) this.sql.exec('DELETE FROM est WHERE k=?', k);
+    this.sql.exec('DELETE FROM evt WHERE ts<?', ts - 60 * 864e5);
+  }
+  /* Nodos (routers, torres, enlaces): un programa dentro de la red les hace ping cada minuto y manda cuántos paquetes volvieron. Dos pruebas seguidas sin ninguna respuesta = caída. */
+  async nodosIngest(request, raw) {
+    const ip = this.clientIp(request), key = 'olt|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
+    if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    const b = readBody(raw, 2e4), lista = Array.isArray(b.nodos) ? b.nodos.slice(0, 40) : [], ts = Date.now(), bk = Math.floor(ts / 6e5);
+    let n = 0;
+    this.tx(() => {
+      for (const x of lista) {
+        if (!isPlain(x)) continue;
+        const nom = String(x.n || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24), sent = Math.round(Number(x.sent)), rec = Math.round(Number(x.rec));
+        if (!nom || !(sent >= 1 && sent <= 30) || !(rec >= 0 && rec <= sent)) continue;
+        const ms = Number(x.ms), k = 'N:' + nom;
+        this.sql.exec('INSERT INTO nodomin(n,b,sent,rec,msum,mcnt) VALUES(?,?,?,?,?,?) ON CONFLICT(n,b) DO UPDATE SET sent=sent+excluded.sent, rec=rec+excluded.rec, msum=msum+excluded.msum, mcnt=mcnt+excluded.mcnt', nom, bk, sent, rec, rec > 0 && isFinite(ms) && ms >= 0 && ms < 60000 ? ms : 0, rec > 0 && isFinite(ms) && ms >= 0 && ms < 60000 ? 1 : 0);
+        const f = this.q1('SELECT * FROM est WHERE k=?', k), ins = (on, desde, miss, t0) => this.sql.exec('INSERT OR REPLACE INTO est(k,on_,desde,miss,t0,ts) VALUES(?,?,?,?,?,?)', k, on, desde, miss, t0, ts);
+        if (rec === 0) {
+          if (!f) ins(-1, ts, 1, ts);                       /* todavía nunca contestó: no se sabe si está caído o si no se lo alcanza desde acá */
+          else if (f.on_ === 1) { const miss = f.miss + 1, t0 = f.t0 || ts; if (miss >= 2) { ins(0, t0, 0, null); this.sql.exec('INSERT OR REPLACE INTO evt(k,ts,dur) VALUES(?,?,NULL)', k, t0); } else ins(1, f.desde, miss, t0); }
+          else this.sql.exec('UPDATE est SET ts=? WHERE k=?', ts, k);
+        } else if (!f || f.on_ === -1) ins(1, ts, 0, null);
+        else if (f.on_ === 0) { this.sql.exec('UPDATE evt SET dur=? WHERE k=? AND ts=?', Math.max(0, ts - f.desde), k, f.desde); ins(1, ts, 0, null); }
+        else if (f.miss) ins(1, f.desde, 0, null);
+        else this.sql.exec('UPDATE est SET ts=? WHERE k=?', ts, k);
+        n++;
+      }
+      if (bk % 6 === 0) { this.sql.exec('DELETE FROM nodomin WHERE b<?', bk - 14 * 144); this.sql.exec('DELETE FROM evt WHERE ts<?', ts - 60 * 864e5); }
+    });
+    return { ok: true, nodos: n };
+  }
+  /* tiempo caído (ms) de un k dentro de [desde, hasta], contando la caída que sigue abierta */
+  caidoMs(k, desde, hasta, ahora) {
+    let tot = 0, nro = 0;
+    for (const e of this.q('SELECT ts, dur FROM evt WHERE k=? AND (dur IS NULL OR ts+dur>=?) AND ts<=? ORDER BY ts', k, desde, hasta)) {
+      const fin = e.dur == null ? ahora : e.ts + e.dur;
+      tot += Math.max(0, Math.min(fin, hasta) - Math.max(e.ts, desde)); if (e.ts >= desde) nro++;
+    }
+    return { ms: tot, n: nro };
+  }
+  caidasVer(u) {
+    if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver las caídas.', 'permission_denied');
+    const ahora = Date.now(), tec = u.role === 'tecnico', D = 864e5, ind = this.oltIndice(), dia = ts => arTime(ts).fecha;
+    const nodos = tec ? [] : this.q("SELECT * FROM est WHERE k LIKE 'N:%' ORDER BY k").map(f => {
+      const n = f.k.slice(2), c7 = this.caidoMs(f.k, ahora - 7 * D, ahora, ahora), c30 = this.caidoMs(f.k, ahora - 30 * D, ahora, ahora), b0 = Math.floor(ahora / 6e5), pm = new Map(this.q('SELECT * FROM nodomin WHERE n=? AND b>?', n, b0 - 144).map(r => [r.b, r]));
+      const tira = []; for (let b = b0 - 143; b <= b0; b++) { const r = pm.get(b); tira.push(r ? Math.round(100 * (r.sent - r.rec) / r.sent) : -1); }
+      const ult = this.q('SELECT ts, dur FROM evt WHERE k=? ORDER BY ts DESC LIMIT 8', f.k).map(e => ({ ts: e.ts, dur: e.dur }));
+      const r1 = this.q1('SELECT SUM(msum) s, SUM(mcnt) c FROM nodomin WHERE n=? AND b>?', n, b0 - 6);
+      const vistoDesde = this.q1('SELECT MIN(b) b FROM nodomin WHERE n=?', n);
+      const ventana = vistoDesde && vistoDesde.b != null ? Math.min(7 * D, ahora - vistoDesde.b * 6e5) : 0;
+      return { n, on: f.on_, desde: f.desde, visto: f.ts, disp7: ventana > 0 ? Math.max(0, Math.round(1000 * (1 - c7.ms / ventana)) / 10) : null, caidas7: c7.n, caidas30: c30.n, min7: Math.round(c7.ms / 6e4), tira, ult, ms: r1 && r1.c ? Math.round(10 * r1.s / r1.c) / 10 : null };
+    });
+    const dias = []; for (let i = 13; i >= 0; i--) dias.push(dia(ahora - i * D));
+    const porDia = new Map(dias.map(d => [d, 0])), cuenta = new Map();
+    for (const e of this.q("SELECT k, ts, dur FROM evt WHERE k NOT LIKE 'N:%' AND ts>?", ahora - 14 * D)) {
+      const d = dia(e.ts); if (porDia.has(d)) porDia.set(d, porDia.get(d) + 1);
+      if (e.ts > ahora - 7 * D) { const a = cuenta.get(e.k) || { n: 0, ms: 0 }; a.n++; a.ms += (e.dur == null ? ahora - e.ts : e.dur); cuenta.set(e.k, a); }
+    }
+    const nom = new Map(this.q('SELECT k, name, port FROM onus').map(o => [o.k, o]));
+    const ficha = k => { const c = ind.mapa.get(k), o = nom.get(k) || {}; return { k, port: o.port || '', name: o.name || '', cid: c ? c.id : null, cn: c ? c.nombre : null }; };
+    const top = [...cuenta].sort((a, b) => b[1].n - a[1].n || b[1].ms - a[1].ms).slice(0, 12).map(([k, a]) => ({ ...ficha(k), caidas: a.n, min: Math.round(a.ms / 6e4) }));
+    const hoy = this.q("SELECT k, desde FROM est WHERE on_=0 AND k NOT LIKE 'N:%' ORDER BY desde").slice(0, 30).map(f => ({ ...ficha(f.k), desde: f.desde }));
+    const tot = this.q1("SELECT COUNT(*) c, SUM(on_=0) off FROM est WHERE k NOT LIKE 'N:%'");
+    return { ahora, nodos, onus: { total: tot ? tot.c : 0, caidas: tot ? tot.off || 0 : 0, dias: dias.map(d => ({ d, n: porDia.get(d) })), top, ahoraCaidas: hoy } };
+  }
   oltClienteDe(cid) {
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
@@ -1608,7 +1702,15 @@ export class YapurDB extends DurableObject {
     const mapa = this.oltMapa(), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || '');
     const l1 = sn ? this.q1('SELECT * FROM onus WHERE k=?', sn) : null, l2 = this.q1('SELECT * FROM onus WHERE k=?', 'CLI' + c.id);
     const o = l1 && l2 ? (l1.ts >= l2.ts ? l1 : l2) : (l1 || l2);
-    return { umbral: cfg.umbral, sn: sn || null, port: (o && o.port && o.est !== 'manual' ? o.port : '') || (sn && mapa[sn]) || '', rx: o ? o.rx : null, est: o ? o.est : '', ts: o ? o.ts : null, manual: !!(o && o.est === 'manual'), por: o && o.est === 'manual' ? o.name : '' };
+    const hist = sn ? this.histONU(sn) : null;
+    return { umbral: cfg.umbral, sn: sn || null, port: (o && o.port && o.est !== 'manual' ? o.port : '') || (sn && mapa[sn]) || '', rx: o ? o.rx : null, est: o ? o.est : '', ts: o ? o.ts : null, manual: !!(o && o.est === 'manual'), por: o && o.est === 'manual' ? o.name : '', hist };
+  }
+  /* caídas de una ONU en los últimos 14 días: cuántas, cuánto tiempo en total, las últimas y si está caída ahora */
+  histONU(sn) {
+    const ahora = Date.now(), f = this.q1('SELECT * FROM est WHERE k=?', sn);
+    if (!f) return null;
+    const c = this.caidoMs(sn, ahora - 14 * 864e5, ahora, ahora);
+    return { on: f.on_ === 1, desde: f.desde, caidas: c.n, min: Math.round(c.ms / 6e4), ult: this.q('SELECT ts, dur FROM evt WHERE k=? ORDER BY ts DESC LIMIT 6', sn).map(e => ({ ts: e.ts, dur: e.dur })) };
   }
   oltMedida(u, b) {
     this.oltPermiso(u);
@@ -1620,9 +1722,9 @@ export class YapurDB extends DurableObject {
     this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, rx, null, 'manual', String((sn && mapa[sn]) || '').slice(0, 20), String(u.nombre || u.usuario || '').slice(0, 40), Date.now());
     return { ok: true, rx, mala: rx < this.oltCfg().umbral };
   }
-  oltVer(u) {
-    if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver la señal de las ONU.', 'permission_denied');
-    const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = new Map(), porId = new Map();
+  /* serie de ONU → cliente (por el campo Equipo, el comodato y los vínculos hechos a mano) */
+  oltIndice() {
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = new Map(), porId = new Map();
     const alta = (k, c) => { if (k.length >= 6 && !mapa.has(k)) mapa.set(k, c); };
     for (const r of this.q('SELECT data FROM docs WHERE coll=?', 'clientes')) {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
@@ -1635,6 +1737,11 @@ export class YapurDB extends DurableObject {
       }
     }
     for (const [cid, sn] of Object.entries(this.oltVinc())) { const c = porId.get(cid); if (c) alta(sn, c); }
+    return { mapa, porId };
+  }
+  oltVer(u) {
+    if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver la señal de las ONU.', 'permission_denied');
+    const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), { mapa, porId } = this.oltIndice();
     const lista = this.q('SELECT * FROM onus').map(o => {
       const c = (o.k.startsWith('CLI') && porId.get(o.k.slice(3))) || mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
       return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
@@ -3526,6 +3633,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/certificado' && m === 'POST') { await this.needAdmin(request); return send(200, this.arcaCert(readBody(raw, 3e4))); }
     if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
+    if (p === '/api/nodos/ingest' && m === 'POST') return send(200, await this.nodosIngest(request, raw));
+    if (p === '/api/caidas' && m === 'GET') return send(200, this.caidasVer((await this.needAuth(request)).user));
     if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
     if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));
     if (p === '/api/olt/mapa' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltMapaGuardar(readBody(raw, 4e5))); }
