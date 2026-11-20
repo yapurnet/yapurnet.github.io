@@ -659,7 +659,7 @@ export default {
 const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
 const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
-const ESQUEMA_V = '4';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
+const ESQUEMA_V = '5';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
 const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
 const USO_FLUSH_MS = 5e3;            // el contador de consumo se anota en la base como mucho cada 5 segundos
 /* servidor de respaldo (segunda cuenta de Cloudflare): ver «respaldo» más abajo */
@@ -874,6 +874,9 @@ export class YapurDB extends DurableObject {
       this.sql.exec('CREATE TABLE IF NOT EXISTS evt(k TEXT NOT NULL, ts INTEGER NOT NULL, dur INTEGER, PRIMARY KEY(k,ts)) WITHOUT ROWID');
       this.sql.exec('CREATE TABLE IF NOT EXISTS est(k TEXT PRIMARY KEY, on_ INTEGER NOT NULL, desde INTEGER NOT NULL, miss INTEGER NOT NULL DEFAULT 0, t0 INTEGER, ts INTEGER NOT NULL) WITHOUT ROWID');
       this.sql.exec('CREATE TABLE IF NOT EXISTS nodomin(n TEXT NOT NULL, b INTEGER NOT NULL, sent INTEGER NOT NULL, rec INTEGER NOT NULL, msum REAL NOT NULL DEFAULT 0, mcnt INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(n,b)) WITHOUT ROWID');
+      /* consumo: lo que bajó y subió cada cliente por día (cons_dia) y a quién corresponde cada clave (cons_cli). Se guarda una fila por cliente y por día */
+      this.sql.exec('CREATE TABLE IF NOT EXISTS cons_dia(k TEXT NOT NULL, d TEXT NOT NULL, bi INTEGER NOT NULL DEFAULT 0, bo INTEGER NOT NULL DEFAULT 0, pk REAL NOT NULL DEFAULT 0, PRIMARY KEY(k,d)) WITHOUT ROWID');
+      this.sql.exec('CREATE TABLE IF NOT EXISTS cons_cli(k TEXT PRIMARY KEY, n TEXT NOT NULL, ip TEXT) WITHOUT ROWID');
       this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES('esquema',?)", ESQUEMA_V);
     }
     /* las sesiones que ya estaban abiertas antes de existir el registro de equipos quedan como equipos autorizados («Sesión anterior»);
@@ -1650,6 +1653,52 @@ export class YapurDB extends DurableObject {
       if (bk % 6 === 0) { this.sql.exec('DELETE FROM nodomin WHERE b<?', bk - 14 * 144); this.sql.exec('DELETE FROM evt WHERE ts<?', ts - 60 * 864e5); }
     });
     return { ok: true, nodos: n };
+  }
+  /* ----- consumo por cliente: el lector de la PC suma lo que pasó por la cola de cada cliente en el router y manda los totales por día (una vez por hora, para gastar pocas escrituras) ----- */
+  async consumoIngest(request, raw) {
+    const ip = this.clientIp(request), key = 'olt|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
+    if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    const b = readBody(raw, 6e5), lista = Array.isArray(b.q) ? b.q.slice(0, 3000) : [], hoy = arTime(Date.now()).fecha;
+    let n = 0;
+    this.tx(() => {
+      for (const x of lista) {
+        if (!isPlain(x)) continue;
+        const d = String(x.d || ''), bi = Math.round(Number(x.bi)), bo = Math.round(Number(x.bo)), pk = Number(x.pk) || 0;
+        const ipx = /^\d{1,3}(\.\d{1,3}){3}$/.test(String(x.ip || '')) ? String(x.ip) : '', nom = String(x.n || '').slice(0, 80), k = ipx || nom;
+        if (!k || !/^\d{4}-\d{2}-\d{2}$/.test(d) || d > hoy || !(bi >= 0 && bi < 1e14) || !(bo >= 0 && bo < 1e14) || pk < 0 || pk > 1e5) continue;
+        this.sql.exec('INSERT INTO cons_dia(k,d,bi,bo,pk) VALUES(?,?,?,?,?) ON CONFLICT(k,d) DO UPDATE SET bi=bi+excluded.bi, bo=bo+excluded.bo, pk=MAX(pk,excluded.pk)', k, d, bi, bo, pk);
+        const f = this.q1('SELECT n, ip FROM cons_cli WHERE k=?', k);
+        if (!f || f.n !== nom || (f.ip || '') !== ipx) this.sql.exec('INSERT OR REPLACE INTO cons_cli(k,n,ip) VALUES(?,?,?)', k, nom, ipx);
+        n++;
+      }
+      if (Math.floor(Date.now() / 36e5) % 24 === 3) this.sql.exec('DELETE FROM cons_dia WHERE d<?', arTime(Date.now() - 120 * 864e5).fecha);
+    });
+    return { ok: true, filas: n };
+  }
+  consumoPermiso(u) { if (u.role === 'tecnico' || (u.role !== 'admin' && !effPerms(u).red)) throw httpErr(403, 'Tu usuario no puede ver el consumo.', 'permission_denied'); }
+  consumoVer(u, dias) {
+    this.consumoPermiso(u);
+    dias = Math.max(1, Math.min(60, parseInt(dias, 10) || 30));
+    const hoy = arTime(Date.now()).fecha, desde = arTime(Date.now() - (dias - 1) * 864e5).fecha, cli = new Map(this.q('SELECT k, n, ip FROM cons_cli').map(r => [r.k, r]));
+    const por = new Map(), ult = [];
+    for (let i = 6; i >= 0; i--) ult.push(arTime(Date.now() - i * 864e5).fecha);
+    for (const r of this.q('SELECT k, d, bi, bo, pk FROM cons_dia WHERE d>=?', desde)) {
+      let f = por.get(r.k); if (!f) { const c = cli.get(r.k) || {}; f = { k: r.k, n: c.n || r.k, ip: c.ip || '', bi: 0, bo: 0, dias: 0, pk: 0, hoy: 0, u7: ult.map(() => 0) }; por.set(r.k, f); }
+      f.bi += r.bi; f.bo += r.bo; f.dias++; if (r.pk > f.pk) f.pk = Math.round(r.pk * 10) / 10;
+      if (r.d === hoy) f.hoy = r.bi;
+      const j = ult.indexOf(r.d); if (j >= 0) f.u7[j] = r.bi;
+    }
+    const clientes = [...por.values()];
+    return { ahora: Date.now(), dias, hoy, clientes, desde: (this.q1('SELECT MIN(d) d FROM cons_dia') || {}).d || null };
+  }
+  consumoCliente(u, ip, nom) {
+    this.consumoPermiso(u);
+    const k = /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) ? ip : String(nom || '').slice(0, 80);
+    if (!k) return { dias: [] };
+    return { k, dias: this.q('SELECT d, bi, bo, pk FROM cons_dia WHERE k=? ORDER BY d DESC LIMIT 60', k) };
   }
   /* tiempo caído (ms) de un k dentro de [desde, hasta], contando la caída que sigue abierta */
   caidoMs(k, desde, hasta, ahora) {
@@ -3636,6 +3685,9 @@ export class YapurDB extends DurableObject {
     if (p === '/api/arca/probar' && m === 'POST') { await this.needAdmin(request); try { return send(200, await this.arcaProbar()); } catch (e) { if (e && e.status) throw e; throw httpErr(502, (e && e.message) || 'No se pudo probar la conexión con ARCA.'); } }
     if (p === '/api/arca/emitir' && m === 'POST') return send(200, await this.arcaEmitir((await this.needAuth(request)).user, readBody(raw, 3e3)));
     if (p === '/api/nodos/ingest' && m === 'POST') return send(200, await this.nodosIngest(request, raw));
+    if (p === '/api/consumo/ingest' && m === 'POST') return send(200, await this.consumoIngest(request, raw));
+    if (p === '/api/consumo' && m === 'GET') return send(200, this.consumoVer((await this.needAuth(request)).user, url.searchParams.get('dias')));
+    if (p === '/api/consumo/cliente' && m === 'GET') return send(200, this.consumoCliente((await this.needAuth(request)).user, String(url.searchParams.get('ip') || ''), url.searchParams.get('n')));
     if (p === '/api/caidas' && m === 'GET') return send(200, this.caidasVer((await this.needAuth(request)).user));
     if (p === '/api/olt/ingest' && m === 'POST') return send(200, await this.oltIngest(request, raw));
     if (p === '/api/olt' && m === 'GET') return send(200, this.oltVer((await this.needAuth(request)).user));

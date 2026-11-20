@@ -171,6 +171,19 @@ async function call(method, p, body, token) {
     t('al técnico no se le muestra el total de ONU ni las ONU sin cliente', r.j.onus.total === null && r.j.onus.top.every(x => x.cid) && r.j.onus.ahoraCaidas.every(x => x.cid), r.j.onus);
     r = await call('GET', '/api/caidas', undefined, undefined);
     t('sin sesión no se ven las caídas', r.s === 401, r);
+    const hoyC = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    r = await call('POST', '/api/consumo/ingest', { q: [{ ip: '10.20.45.48', n: 'Raúl Santillan', d: hoyC, bi: 5e9, bo: 1e9, pk: 40.5 }] }, undefined);
+    t('sin token no se puede mandar el consumo', r.s === 401, r);
+    await call('POST', '/api/consumo/ingest', { q: [{ ip: '10.20.45.48', n: 'Raúl Santillan', d: hoyC, bi: 5e9, bo: 1e9, pk: 40.5 }, { ip: 'x', n: '', d: hoyC, bi: 1, bo: 1, pk: 1 }, { ip: '10.20.45.9', n: 'Otro', d: '2999-01-01', bi: 1, bo: 1, pk: 1 }] }, TK);
+    r = await call('POST', '/api/consumo/ingest', { q: [{ ip: '10.20.45.48', n: 'Raúl Santillan', d: hoyC, bi: 3e9, bo: 1e9, pk: 12 }] }, TK);
+    t('el consumo se acepta con el token del lector', r.s === 200 && r.j.filas === 1, r);
+    r = await call('GET', '/api/consumo?dias=30', undefined, A);
+    const cc = r.s === 200 && r.j.clientes.find(x => x.ip === '10.20.45.48');
+    t('el consumo del día se suma y el pico es el mayor; lo inválido se descarta', cc && cc.bi === 8e9 && cc.bo === 2e9 && cc.pk === 40.5 && cc.hoy === 8e9 && r.j.clientes.length === 1, r.j);
+    r = await call('GET', '/api/consumo/cliente?ip=10.20.45.48', undefined, A);
+    t('la ficha trae el consumo por día', r.s === 200 && r.j.dias.length === 1 && r.j.dias[0].bi === 8e9, r);
+    r = await call('GET', '/api/consumo', undefined, T);
+    t('el técnico no ve el consumo', r.s === 403, r);
   } finally { srv.stop && srv.stop(); }
   console.log('\n' + okN + ' ok, ' + failN + ' con fallas'); process.exit(failN ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
