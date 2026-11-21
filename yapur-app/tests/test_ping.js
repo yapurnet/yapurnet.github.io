@@ -177,6 +177,15 @@ const report = async (tk, q) => { const r = await fetch(BASE + '/api/router/ping
     t('lector: manda el resultado', r.s === 200 && r.j.ok === true, r);
     r = await call('GET', '/api/ping/' + idL, undefined, O);
     t('lector: la ficha ve 3 de 4 con 12,5 ms', r.s === 200 && r.j.ping.estado === 'hecho' && r.j.ping.rec === 3 && r.j.ping.sent === 4 && r.j.ping.avg === 12.5, r);
+    await call('POST', '/api/users', { usuario: 'tec4', nombre: 'tec4', role: 'tecnico', clave: 'cuatro1' }, A);
+    const T4 = (await call('POST', '/api/login', { usuario: 'tec4', clave: 'cuatro1' })).j.token;
+    r = await call('POST', '/api/ping', { cid: 'm9' }, T4);
+    const idT = r.j.ping && r.j.ping.id;
+    await lpoll(TK); await lrep(TK, 'id=' + idT + '&sent=4&rec=4&avg=3.0ms');
+    r = await call('GET', '/api/ping/' + idT, undefined, T4);
+    t('al técnico no se le muestra qué equipo hizo la prueba', r.s === 200 && r.j.ping.estado === 'hecho' && r.j.ping.router === '', r.j);
+    r = await call('GET', '/api/ping/' + idT, undefined, A);
+    t('el administrador sí ve qué equipo la hizo', r.s === 200 && /Proxmox/.test(r.j.ping.router), r.j);
     r = await lrep(TK, 'id=gaaaaaaaaaaaaaa&sent=4&rec=4');
     t('lector: una prueba que no existe da 404', r.s === 404, r);
     /* ---- se corta el router: no se aceptan más pruebas ---- */
