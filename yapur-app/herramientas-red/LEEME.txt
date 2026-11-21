@@ -1,0 +1,2 @@
+Programas que corren en el contenedor yapur-tools del Proxmox (172.16.53.10). No llevan secretos:
+el token (app_token.txt) y las comunidades SNMP (olt_comunidad.txt, mikrotik_comunidad.txt) se escriben a mano en el contenedor.
