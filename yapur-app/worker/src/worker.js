@@ -273,8 +273,8 @@ function guard(u, p, coll, existing, patch, ctx) {
         if (old[id] || !isPlain(nw) || (nw.concepto !== 'instalacion' && nw.concepto !== 'reinstalacion') || !isNum(nw.monto)) continue;
         const k = String(nw.c) + '|' + nw.concepto;
         let g = fijoGrupo.get(k);
-        if (!g) fijoGrupo.set(k, g = { cents: 0, n: 0, metodos: new Set(), recibos: new Set() });
-        g.cents += Math.round(nw.monto * 100); g.n++; g.metodos.add(nw.metodo); g.recibos.add(typeof nw.recibo === 'string' ? nw.recibo : '');
+        if (!g) fijoGrupo.set(k, g = { cents: 0, n: 0, metodos: new Set(), recibos: new Set(), conLista: 0 });
+        g.cents += Math.round(nw.monto * 100); g.n++; if ('lista' in nw) g.conLista++; g.metodos.add(nw.metodo); g.recibos.add(typeof nw.recibo === 'string' ? nw.recibo : '');
       }
     }
     for (const id of Object.keys(items)) {
@@ -292,7 +292,13 @@ function guard(u, p, coll, existing, patch, ctx) {
           if (nw.concepto === 'instalacion' || nw.concepto === 'reinstalacion') {
             const g = fijoGrupo.get(String(nw.c) + '|' + nw.concepto), nom = nw.concepto === 'instalacion' ? 'La instalación' : 'La reinstalación';
             const base = nom + ' se cobra a precio fijo: ' + pesos(fijos[nw.concepto]) + '. Lo define el administrador.';
-            if (g.n === 1) { if (nw.monto !== fijos[nw.concepto]) return base; }
+            if (g.conLista) {
+              /* pago parcial: el cliente entregó solo una parte; el precio de lista queda anotado para saber cuánto falta */
+              if (g.conLista !== g.n || nw.lista !== fijos[nw.concepto]) return 'El pago parcial tiene que llevar el precio fijo de ' + nom.toLowerCase() + ' (' + pesos(fijos[nw.concepto]) + ').';
+              if (g.cents < 1 || g.cents >= Math.round(fijos[nw.concepto] * 100)) return 'Un pago parcial tiene que ser menor que ' + pesos(fijos[nw.concepto]) + '. Si pagó todo, cobrá el precio completo.';
+              if (g.metodos.size !== g.n || g.n > METODOS_PAGO.length) return 'Si se paga con varios medios, no se puede repetir el medio.';
+              if (g.n > 1 && (g.recibos.size !== 1 || g.recibos.has(''))) return 'Los medios de un mismo cobro tienen que ir en el mismo recibo.';
+            } else if (g.n === 1) { if (nw.monto !== fijos[nw.concepto]) return base; }
             else {
               if (Math.round(nw.monto * 100) < 1) return 'El monto del cobro no es válido.';
               if (g.cents !== Math.round(fijos[nw.concepto] * 100) || g.metodos.size !== g.n || g.n > METODOS_PAGO.length) return base + ' Si se paga con varios medios, tienen que sumar ese monto y no repetir el medio.';
@@ -315,6 +321,8 @@ function guard(u, p, coll, existing, patch, ctx) {
             if (f) return 'A este cliente ya se le cobró la instalación' + (/^\d{4}-\d\d-\d\d$/.test(f) ? ' el ' + f.slice(8) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '') + '. Si se mudó, cobrá «Reinstalación (mudanza)».';
           } else if (nw.concepto === 'reinstalacion' && cl && cl.estado === 'pendiente') return 'Ese cliente todavía no está instalado: cobrá «Instalación».';
         }
+        /* precio de lista de un pago parcial de instalación o reinstalación: tiene que ser un número y el pago menor que él */
+        if ('lista' in nw && !((nw.concepto === 'instalacion' || nw.concepto === 'reinstalacion') && isNum(nw.lista) && nw.lista > 0 && nw.lista <= 1e8 && isNum(nw.monto) && nw.monto < nw.lista)) return 'El pago parcial no es válido.';
         if (u.role === 'admin' || p.cobrar) delete nw.comp;   /* el comprobante lo adjunta quien cobra en la calle */
         delete nw.wa;   /* el estado del aviso por WhatsApp lo escribe solo el servidor */
         nw.por = u.id; nw.porNombre = String(u.nombre || '').slice(0, 60); nw.srvTs = Date.now();

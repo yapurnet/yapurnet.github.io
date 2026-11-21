@@ -289,6 +289,8 @@ function openAnular(recibo){
    La señal es lo cobrado, no el estado del cliente: la oficina carga al abonado nuevo como «activo» y el técnico ni siquiera ve ese estado.
    El técnico solo ve sus propios cobros, así que acá es una ayuda; el servidor es el que controla de verdad. */
 const instCobrada=c=>!!c&&[...S.pagos.values()].some(p=>p.c===c.id&&p.concepto==='instalacion'&&!p.anulado);
+/* lo que falta cobrar de la instalación cuando el cliente pagó solo una parte: el pago parcial guarda el precio de lista (lista) y el saldo es lo que queda hasta llegar a él */
+const instSaldo=c=>{if(!c)return 0;let lista=0,pagado=0;S.pagos.forEach(p=>{if(p.c===c.id&&p.concepto==='instalacion'&&!p.anulado){pagado+=Number(p.monto)||0;if(Number(p.lista)>lista)lista=Number(p.lista);}});return lista>pagado+0.005?Math.round((lista-pagado)*100)/100:0;};
 const instalacionAbierta=c=>!!c&&[...S.ordenes.values()].some(o=>o.clientId===c.id&&o.tipo==='instalacion'&&ORD_OPEN(o));
 /* ¿hay una instalación por hacer? (cliente «Por instalar», o con una orden de instalación abierta y sin instalación cobrada) */
 const porInstalar=c=>!!c&&!instCobrada(c)&&(c.estado==='pendiente'||instalacionAbierta(c));
@@ -346,11 +348,16 @@ function openCobro(clientId,con1,pre){
         const pf=precioFijo(con);
         h.className='hint';
         if(con==='reconexion')h.textContent='Se cobra porque el cliente tiene deuda. Cargá la reconexión antes que el pago de la deuda: cuando la deuda queda en cero ya no se puede cobrar.';
-        else h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
+        else{
+          const sd=con==='instalacion'&&!campo?instSaldo(c):0,r=num(m.value)||0;
+          if(sd)h.textContent=`Ya pagó una parte de la instalación: faltan ${fmtMoney(sd)}.`+(r>0&&r<sd?` Con este cobro todavía quedan ${fmtMoney(sd-r)}.`:'');
+          else if(pf&&!campo&&r>0&&r<pf&&(con==='instalacion'||con==='reinstalacion'))h.textContent=`Precio de lista: ${fmtMoney(pf)}. Es un pago parcial: quedan ${fmtMoney(pf-r)} por cobrar.`;
+          else h.textContent=pf?(campo?`Precio fijo: ${fmtMoney(pf)}. Lo define el administrador.`:`Precio de lista: ${fmtMoney(pf)}.`):'';
+        }
       }
     };
     /* instalación y reinstalación: el monto lo pone el sistema (el técnico no puede cambiarlo; la oficina lo ve ya completado y puede ajustarlo) */
-    const precio=()=>{const m=$('#cb-monto',el),pf=precioFijo(con);if(pf){m.value=pf;m.readOnly=!!campo;}else m.readOnly=false;};
+    const precio=()=>{const m=$('#cb-monto',el),pf=precioFijo(con),sd=con==='instalacion'&&!campo?instSaldo(c):0;if(sd){m.value=sd;m.readOnly=false;}else if(pf){m.value=pf;m.readOnly=!!campo;}else m.readOnly=false;};
     $('#cb-con',el).addEventListener('click',e=>{const x=e.target.closest('[data-con]');if(!x)return;con=x.dataset.con;manual=false;
       $$('#cb-con button',el).forEach(b=>b.setAttribute('aria-pressed',String(b===x)));
       $('#cb-mens',el).hidden=con!=='mensualidad';$('#cb-otro',el).hidden=con==='mensualidad';
@@ -387,6 +394,11 @@ function openCobro(clientId,con1,pre){
         /* un registro por medio, mismo recibo; la foto del comprobante va solo en el de la transferencia */
         rp.medios.forEach((m,i)=>{const it=Object.assign({concepto:con,per:null,nota:$('#cb-nota-o',el).value.trim()},base,{metodo:m.metodo,monto:m.monto});if(!COMP_METODOS.includes(m.metodo))delete it.comp;items[newId()+i.toString(36)]=it;});
       }else items[newId()]=Object.assign({concepto:con,per:null,monto,nota:$('#cb-nota-o',el).value.trim()},base);
+      /* instalación o reinstalación cobrada en parte: queda anotado el precio de lista para saber cuánto falta */
+      if(con==='instalacion'||con==='reinstalacion'){
+        const pf2=precioFijo(con),sd2=con==='instalacion'?instSaldo(c):0,tot=Object.values(items).reduce((t,x)=>t+(Number(x.monto)||0),0);
+        if(!campo&&pf2&&(sd2?tot<sd2-0.005:tot<pf2-0.005))Object.values(items).forEach(x=>{x.lista=sd2?undefined:pf2;if(sd2)x.lista=Math.max(...[...S.pagos.values()].filter(p=>p.c===c.id&&p.concepto==='instalacion'&&!p.anulado).map(p=>Number(p.lista)||0));});
+      }
       const go=$('#cb-go',el);go.disabled=true;
       /* una cuenta con varios servicios guarda todo el recibo en un solo bloque (el de la cuenta principal): se graba entero o no se graba */
       const doc=payShard(fecha,gm?head.id:c.id);
@@ -655,6 +667,7 @@ async function cobrarOtro(c,o){
   const lista=o.medios&&o.medios.length>1?o.medios:[{metodo:o.metodo||'efectivo',monto:o.monto}],items={};
   lista.forEach((m,i)=>{
     const it=Object.assign({},base,{metodo:m.metodo,monto:m.monto});
+    if(o.lista)it.lista=o.lista;
     if(o.comp&&(lista.length===1||COMP_METODOS.includes(m.metodo)))it.comp=o.comp;
     items[i?id+i.toString(36):id]=it;
   });

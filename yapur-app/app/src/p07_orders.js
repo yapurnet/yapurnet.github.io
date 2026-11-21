@@ -5,7 +5,7 @@ const tecById=id=>S.ajustes.tecnicos.find(t=>t.id===id);
 const tecLabel=o=>{const t=tecById(o.tecnico);return t?t.nombre:(o.tecNombre||'');};
 /* una instalación se puede cerrar sin cobrar, pero hay que dejar dicho por qué; la oficina la ve «sin cobrar» hasta que se registre el pago */
 const SIN_COBRO={oficina:'El cliente va a pagar en la oficina',otro_dia:'El cliente va a pagar otro día',otro:'Otro motivo'};
-const ordSinCobrar=o=>!!o&&o.tipo==='instalacion'&&o.estado==='hecha'&&!!o.sinCobro&&!instCobrada(S.clientes.get(o.clientId));
+const ordSinCobrar=o=>!!o&&o.tipo==='instalacion'&&o.estado==='hecha'&&((!!o.sinCobro&&!instCobrada(S.clientes.get(o.clientId)))||instSaldo(S.clientes.get(o.clientId))>0);
 const ESTADO_ORD_CLS={pendiente:'warn',en_camino:'info',en_curso:'info',hecha:'ok',cancelada:''};
 /* «Cancelada el 06/11/2026 01:52 por Laura»: cuándo y quién (las canceladas antes de esta versión no tienen el nombre) */
 const cancelTxt=o=>{if(!o||o.estado!=='cancelada')return '';const c=String(o.cierre||'');return 'Cancelada'+(c?' el '+dmy(c.slice(0,10))+(c.length>10?' '+c.slice(11,16):''):'')+(o.cancelPor?' por '+o.cancelPor:'');};
@@ -47,7 +47,7 @@ function orderCard(o){
     <div><div class="t" style="font-weight:700;overflow-wrap:anywhere">${esc(c?c.nombre:'Cliente no encontrado')}</div>
       <div class="s muted" style="overflow-wrap:anywhere">${esc(c?(c.dir||'')+(c.loc?', '+c.loc:''):'')}${c&&c.ref?' · '+esc(c.ref):''}</div></div>
     ${o.notas?`<div>${esc(o.notas)}</div>`:''}${o.resultado?`<div class="notice info"><b>Resultado:</b> ${esc(o.resultado)}</div>`:''}
-    ${o.tipo==='instalacion'&&o.sinCobro&&o.estado==='hecha'?(ordSinCobrar(o)?`<div class="notice"><b>Instalación sin cobrar:</b> ${esc(SIN_COBRO[o.sinCobro]||o.sinCobro)}${o.sinCobroNota?' · '+esc(o.sinCobroNota):''}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar la instalación</button></div>':''}`:'<div class="small muted">La instalación se cobró después de cerrar la orden.</div>'):''}
+    ${o.tipo==='instalacion'&&o.estado==='hecha'&&instSaldo(S.clientes.get(o.clientId))>0?`<div class="notice"><b>Instalación cobrada en parte:</b> faltan ${fmtMoney(instSaldo(S.clientes.get(o.clientId)))}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar el saldo</button></div>':''}`:o.tipo==='instalacion'&&o.sinCobro&&o.estado==='hecha'?(ordSinCobrar(o)?`<div class="notice"><b>Instalación sin cobrar:</b> ${esc(SIN_COBRO[o.sinCobro]||o.sinCobro)}${o.sinCobroNota?' · '+esc(o.sinCobroNota):''}.</div>${can('cobrar')?'<div class="actions start"><button class="btn small primary" type="button" data-oact="cobrar">Cobrar la instalación</button></div>':''}`:'<div class="small muted">La instalación se cobró después de cerrar la orden.</div>'):''}
     <div class="small muted">${tec?'Asignada a <b>'+esc(tec)+'</b>':'Sin técnico asignado'}${o.estado==='cancelada'?' · '+esc(cancelTxt(o)):o.cierre?' · cerrada '+esc(o.cierre):''}</div>
     ${puedeComentarOrden(o)||(o.comentarios&&o.comentarios.length)?`<div class="actions start"><button class="btn small ghost" type="button" data-oact="comentarios">Comentarios${o.comentarios&&o.comentarios.length?' ('+o.comentarios.length+')':''}</button></div>`:''}
     ${o.estado==='cancelada'&&can('ordenesTodas')?'<div class="actions start"><button class="btn small" type="button" data-oact="reabrir">Reabrir la orden</button></div>':''}
@@ -140,6 +140,7 @@ function cobroOrdenHTML(o,c){
       ${F('Medio de pago','ff-met',`<select id="ff-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}</div>
       ${F('Monto cobrado','ff-monto',`<input id="ff-monto" type="text" inputmode="decimal" autocomplete="off"${precioFijo(con0)?` value="${precioFijo(con0)}"${soloCampo()?' readonly':''}`:''}>`,'')}
       <div class="hint" id="ff-fijo">${precioFijo(con0)&&soloCampo()?'Precio fijo: '+fmtMoney(precioFijo(con0))+'. Lo define el administrador.':''}</div>
+      <label class="per" id="ff-parc-box"${precioFijo(con0)?'':' hidden'}><input id="ff-parc" type="checkbox"><span class="grow">El cliente pagó solo una parte<br><span class="small muted">Cargá lo que te dio: el resto queda anotado como saldo para que la oficina lo cobre.</span></span></label>
       ${soloCampo()?compHTML('ff'):''}
       ${dividirHTML('ff')}
     </div>
@@ -177,14 +178,28 @@ function openFinishOrder(o){
       if(pf){m.value=pf;m.readOnly=campo;}else{if(m.readOnly)m.value='';m.readOnly=false;}
       $('#ff-fijo',el).textContent=pf&&campo?'Precio fijo: '+fmtMoney(pf)+'. Lo define el administrador.':'';
       if(dv)dv.reiniciar();
+      parcSync();
     });
+    /* cobro parcial de instalación / reinstalación: el monto se escribe a mano (menor al precio fijo) y el resto queda como saldo */
+    const parc=$('#ff-parc',el),parcBox=$('#ff-parc-box',el);
+    const parcTxt=()=>{const pf=selCon?precioFijo(selCon.value):null,r=num($('#ff-monto',el).value)||0;if(pf)$('#ff-fijo',el).textContent=r>0&&r<pf?`Precio de lista: ${fmtMoney(pf)}. Queda un saldo de ${fmtMoney(pf-r)}.`:`Precio de lista: ${fmtMoney(pf)}. Cargá lo que pagó (menos que eso).`;};
+    function parcSync(){
+      const pf=selCon?precioFijo(selCon.value):null,m=$('#ff-monto',el);
+      if(!parc||!m)return;
+      parcBox.hidden=!pf;if(!pf)parc.checked=false;
+      if(parc.checked){m.readOnly=false;m.value='';parcTxt();if(dv)dv.habilitar(false);}
+      else{if(pf){m.value=pf;m.readOnly=soloCampo();}$('#ff-fijo',el).textContent=pf&&soloCampo()?'Precio fijo: '+fmtMoney(pf)+'. Lo define el administrador.':'';if(dv)dv.habilitar(true);}
+    }
+    if(parc){parc.addEventListener('change',()=>{parcSync();if(parc.checked)$('#ff-monto',el).focus();});$('#ff-monto',el).addEventListener('input',()=>{if(parc.checked)parcTxt();});}
     $('#fform',el).addEventListener('submit',async e=>{
       e.preventDefault();
       const g=read?read():{empty:true};if(g.invalid)return toast('Revisá las coordenadas','bad');
       const nf=readNap?readNap():null;if(nf&&nf.bad)return toast(nf.bad,'bad');
-      const cobra=ckc&&ckc.checked,rp=cobra&&dv&&dv.activo()?dv.leer():null;   /* rp: cobro repartido entre 2 medios */
+      const cobra=ckc&&ckc.checked,esParc=!!(cobra&&parc&&parc.checked&&precioFijo($('#ff-con',el).value)),rp=cobra&&!esParc&&dv&&dv.activo()?dv.leer():null;   /* rp: cobro repartido entre 2 medios */
       if(rp&&rp.error)return toast(rp.error,'bad');
-      const fijoC=cobra&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(rp?rp.total:fijoC||num($('#ff-monto',el).value)):0;
+      const fijoC=cobra&&!esParc&&soloCampo()?precioFijo($('#ff-con',el).value):null,monto=cobra?(rp?rp.total:fijoC||num($('#ff-monto',el).value)):0;
+      const listaP=esParc?precioFijo($('#ff-con',el).value):0;
+      if(esParc&&(!monto||monto<=0||monto>=listaP))return toast(monto>=listaP?'Si pagó todo, destildá «pagó solo una parte»':'Ingresá cuánto pagó el cliente','bad');
       if(cobra&&(!monto||monto<=0))return toast('Ingresá el monto que cobraste','bad');
       const sinFoto=cobra&&comp?comp.falta():'';if(sinFoto)return toast(sinFoto,'bad');   /* antes de cerrar la orden: si falta la foto no se cierra nada */
       /* una instalación que se cierra sin cobrar lleva el motivo (y, si es «otro», qué pasó) */
@@ -205,10 +220,10 @@ function openFinishOrder(o){
         let rec=null;
         if(cobra){
           /* la orden ya quedó cerrada: si el cobro falla se avisa claro y se carga a mano, sin repetir nada */
-          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:rp?rp.medios[0].metodo:$('#ff-met',el).value,medios:rp?rp.medios:null,nota:TIPOS_ORD[o.tipo]||'',comp:comp?comp.id():null});}
+          try{rec=await cobrarOtro(c,{concepto:$('#ff-con',el).value,monto,metodo:rp?rp.medios[0].metodo:$('#ff-met',el).value,medios:rp?rp.medios:null,nota:(TIPOS_ORD[o.tipo]||'')+(esParc?' · pago parcial, faltan '+fmtMoney(listaP-monto):''),lista:esParc?listaP:0,comp:comp?comp.id():null});}
           catch(err2){toast('La orden se cerró, pero el cobro NO se registró. Cargalo con «Cobrar».','bad');}
         }
-        toast(rec?'Orden cerrada y cobro registrado':motivo?'Orden cerrada: la instalación queda «sin cobrar» para la oficina':'Orden cerrada');closeModal();
+        toast(rec?(esParc?'Orden cerrada: cobro parcial registrado, faltan '+fmtMoney(listaP-monto):'Orden cerrada y cobro registrado'):motivo?'Orden cerrada: la instalación queda «sin cobrar» para la oficina':'Orden cerrada');closeModal();
         if(rec)openReceipt(rec);
       }catch(err){dbError(err);}
     });
@@ -285,7 +300,7 @@ VIEWS.ordenes={
     who.innerHTML=iam?`<div class="hint">Trabajás como <b>${esc(S.perfil.nombre)}</b>.</div>`:'';
     /* a quien cobra en la oficina: las instalaciones que se cerraron sin cobrar y siguen sin cobrarse */
     const pend=$('#or-pend'),sinC=can('cobrar')?[...S.ordenes.values()].filter(ordSinCobrar):[];
-    if(pend)pend.innerHTML=sinC.length?`<div class="notice" role="status" style="margin-bottom:12px"><b>${sinC.length===1?'1 instalación sin cobrar':sinC.length+' instalaciones sin cobrar'}:</b> ${sinC.map(o=>{const c=S.clientes.get(o.clientId);return esc(c?c.nombre:'Cliente')+' ('+esc((SIN_COBRO[o.sinCobro]||o.sinCobro).replace(/^El cliente va a /,'va a '))+')';}).join(', ')}. Se cobran desde su orden cerrada o desde la ficha del cliente.</div>`:'';
+    if(pend)pend.innerHTML=sinC.length?`<div class="notice" role="status" style="margin-bottom:12px"><b>${sinC.length===1?'1 instalación sin cobrar':sinC.length+' instalaciones sin cobrar'}:</b> ${sinC.map(o=>{const c=S.clientes.get(o.clientId);const sd=instSaldo(c);return esc(c?c.nombre:'Cliente')+' ('+(sd>0?'faltan '+esc(fmtMoney(sd)):esc((SIN_COBRO[o.sinCobro]||o.sinCobro||'').replace(/^El cliente va a /,'va a ')))+')';}).join(', ')}. Se cobran desde su orden cerrada o desde la ficha del cliente.</div>`:'';
     const fs=[['abiertas','Abiertas'],['hechas','Cerradas'],['todas_est','Todas']];
     seg.innerHTML=(iam?[['mias','Mías'],['libres','Sin asignar']].map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${OR.scope===k}">${l}</button>`).join('')+'<span style="width:8px"></span>':'')
       +fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${OR.estado===k}">${l}</button>`).join('');

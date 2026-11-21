@@ -334,7 +334,7 @@ async function openSSE(token) {
     const T2 = r.j.token;
     r = await call('GET', '/api/doc/clientes/c01', undefined, T2);
     t('deuda anterior: a quien solo cobra en la calle no le llega', r.s === 200 && r.j.data.items.cv1 && r.j.data.items.cv1.deudaAnt === undefined && r.j.data.items.cv1.nombre === 'Vera Vigencia', r.j);
-    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cp1: { nombre: 'Pablo Pendiente', estado: 'pendiente' }, cinst: { nombre: 'Ines Instalada', estado: 'activo' }, cp2: { nombre: 'Paula Nueva', estado: 'activo' }, cp3: { nombre: 'Pedro Nuevo', estado: 'activo' } } } }, O);
+    r = await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cp1: { nombre: 'Pablo Pendiente', estado: 'pendiente' }, cinst: { nombre: 'Ines Instalada', estado: 'activo' }, cp2: { nombre: 'Paula Nueva', estado: 'activo' }, cp3: { nombre: 'Pedro Nuevo', estado: 'activo' }, cp4: { nombre: 'Paola Parcial', estado: 'activo' } } } }, O);
     t('cobros: se cargan un cliente por instalar y uno ya instalado', r.s === 200, r);
     const PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: Object.assign({ c: 'cp1', concepto: 'instalacion', monto: 65000, fecha: HOY, hora: '10:00', recibo: 'RT' + id, metodo: 'efectivo' }, o || {}) } } }, tok);
     const PATCH_PAGO = (tok, id, o) => call('PATCH', '/api/doc/pagos/' + PG, { data: { items: { [id]: o } } }, tok);
@@ -390,6 +390,21 @@ async function openSSE(token) {
     t('precio fijo: la reinstalación con otro monto se rechaza y dice cuánto es', r.s === 403 && /reinstalaci/i.test(r.j.error) && /35\.000/.test(r.j.error), r);
     r = await PAGO(T2, 'pf3', { monto: 65000.5 });
     t('precio fijo: tampoco con centavos de diferencia', r.s === 403, r);
+    /* pago parcial: el cliente entregó solo una parte; queda anotado el precio de lista */
+    r = await PAGO(T2, 'pp1', { c: 'cp4', monto: 35000 });
+    t('parcial: sin marcarlo como parcial, otro monto se rechaza', r.s === 403 && /65\.000/.test(r.j.error), r);
+    r = await PAGO(T2, 'pp2', { c: 'cp4', monto: 35000, lista: 60000 });
+    t('parcial: con un precio de lista que no es el fijo se rechaza', r.s === 403 && /parcial/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pp3', { c: 'cp4', monto: 65000, lista: 65000 });
+    t('parcial: no puede ser igual al precio completo', r.s === 403 && /menor/i.test(r.j.error), r);
+    r = await PAGO(T2, 'pp4', { c: 'cp4', monto: 35000, lista: 65000 });
+    t('parcial: el técnico carga lo que le dieron (35.000 de 65.000)', r.s === 200, r);
+    r = await PAGO(T2, 'pp5', { c: 'cp4', monto: 30000, recibo: 'RTpp5' });
+    t('parcial: el técnico no puede cobrar el resto por su cuenta (lo cobra la oficina)', r.s === 403, r);
+    r = await PATCH_PAGO(O, 'pp6', { c: 'cp4', concepto: 'instalacion', monto: 30000, fecha: HOY, hora: '11:10', recibo: 'ROpp6', metodo: 'efectivo' });
+    t('parcial: la oficina cobra el saldo', r.s === 200, r);
+    r = await PATCH_PAGO(O, 'pp7', { c: 'cp4', concepto: 'instalacion', monto: 70000, lista: 65000, fecha: HOY, hora: '11:11', recibo: 'ROpp7', metodo: 'efectivo' });
+    t('parcial: un pago parcial no puede ser mayor que el precio de lista', r.s === 403 && /parcial/i.test(r.j.error), r);
     r = await PAGO(T2, 'pf4', { concepto: 'reconexion', monto: 5000 });
     t('reconexión: el técnico no la cobra', r.s === 403 && /reconexion/i.test(r.j.error), r);
     r = await PAGO(T2, 'pf5', { concepto: 'otro', monto: 1234 });
@@ -550,7 +565,7 @@ async function openSSE(token) {
     r = await call('GET', '/api/sync', undefined, T2);
     t('cobros: la sincronización del técnico no trae pagos', r.s === 200 && !('pagos' in r.j.cols));
     r = await call('GET', '/api/mis-cobros', undefined, T2);
-    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pf5,pf8,pf9,pi1,pi2,pi6,pi8,pt1,pt2' && r.j.hoy === HOY, r);
+    t('cobros: «mis cobros» devuelve solo los suyos', r.s === 200 && r.j.docs.length === 1 && Object.keys(r.j.docs[0].data.items).sort().join() === 'pf5,pf8,pf9,pi1,pi2,pi6,pi8,pp4,pt1,pt2' && r.j.hoy === HOY, r);
     r = await call('GET', '/api/mis-cobros', undefined, T);
     t('cobros: otro técnico no ve los de Marcos', r.s === 200 && r.j.docs.length === 0, r);
     r = await call('GET', '/api/mis-cobros', undefined);
