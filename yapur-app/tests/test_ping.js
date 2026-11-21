@@ -186,6 +186,16 @@ const report = async (tk, q) => { const r = await fetch(BASE + '/api/router/ping
     t('al técnico no se le muestra qué equipo hizo la prueba', r.s === 200 && r.j.ping.estado === 'hecho' && r.j.ping.router === '', r.j);
     r = await call('GET', '/api/ping/' + idT, undefined, A);
     t('el administrador sí ve qué equipo la hizo', r.s === 200 && /Proxmox/.test(r.j.ping.router), r.j);
+    /* ---- respaldo en la PC (?de=pc): solo trabaja si el servidor del contenedor no consulta ---- */
+    const ppoll = async tk => { const r = await fetch(BASE + '/api/olt/ping?de=pc', { headers: { authorization: 'Bearer ' + tk } }); return { s: r.status, txt: await r.text() }; };
+    r = await call('POST', '/api/ping', { cid: 'm10' }, O);
+    const idP = r.j.ping && r.j.ping.id;
+    r = await ppoll(TK);
+    t('respaldo PC: con el servidor activo no se lleva la prueba pedida', r.s === 200 && !r.txt.includes(idP), r);
+    r = await lpoll(TK);
+    t('respaldo PC: la prueba sigue esperando al servidor, que sí la toma', r.txt.includes(idP + ':'), r);
+    r = await call('GET', '/api/routers', undefined, A);
+    t('respaldo PC: figura aparte en Routers', r.j.routers.some(x => /PC de la oficina/.test(x.nombre)) && r.j.routers.some(x => /Servidor \(Proxmox\)/.test(x.nombre)), r.j.routers.map(x => x.nombre));
     r = await lrep(TK, 'id=gaaaaaaaaaaaaaa&sent=4&rec=4');
     t('lector: una prueba que no existe da 404', r.s === 404, r);
     /* ---- se corta el router: no se aceptan más pruebas ---- */

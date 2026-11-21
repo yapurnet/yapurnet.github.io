@@ -2683,8 +2683,14 @@ export class YapurDB extends DurableObject {
     const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
     if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token inválido.', 'unauthenticated'); }
     this.clearFail(key);
-    let r = this.q1("SELECT * FROM routers WHERE id='lector'");
-    if (!r) { this.sql.exec("INSERT INTO routers(id,nombre,th,kinds,creado,pth) VALUES('lector','Servidor (Proxmox)','-','',?,'-')", Date.now()); r = this.q1("SELECT * FROM routers WHERE id='lector'"); }
+    /* ?de=pc: la PC de la oficina como respaldo; solo hace pruebas cuando el servidor del contenedor lleva más de 2 minutos sin consultar */
+    const pc = url.searchParams.get('de') === 'pc', [rid, rnom] = pc ? ['lector-pc', 'PC de la oficina (respaldo)'] : ['lector', 'Servidor (Proxmox)'];
+    let r = this.q1('SELECT * FROM routers WHERE id=?', rid);
+    if (!r) { this.sql.exec("INSERT INTO routers(id,nombre,th,kinds,creado,pth) VALUES(?,?,'-','',?,'-')", rid, rnom, Date.now()); r = this.q1('SELECT * FROM routers WHERE id=?', rid); }
+    if (pc && metodo === 'GET') {
+      const srv = this.q1("SELECT pvisto FROM routers WHERE id='lector'");
+      if (srv && srv.pvisto && Date.now() - srv.pvisto < 150e3) { if (!r.pvisto || Date.now() - r.pvisto > 25e3) this.sql.exec('UPDATE routers SET pvisto=? WHERE id=?', Date.now(), rid); return 's' + PING_SALTOS; }
+    }
     return metodo === 'GET' ? this.pingPollDe(r) : this.pingResultDe(r, url);
   }
   pingResultDe(r, url) {

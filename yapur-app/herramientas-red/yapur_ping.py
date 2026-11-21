@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """«Probar conexión» de la ficha de un cliente, hecho desde este servidor (en vez de un router): le pregunta a la app si alguien pidió probar
 a un cliente (una vez por minuto, y cada 10 s mientras alguien está probando), le hace 4 pings a esa IP y avisa cuántos volvieron.
-Solo hace ping: no cambia nada en ningún equipo. Usa el mismo app_token.txt que los demás programas."""
+Solo hace ping: no cambia nada en ningún equipo. Usa el mismo app_token.txt que los demás programas.
+Con --pc corre en la PC de la oficina (Windows) como respaldo: la app solo le da pruebas cuando el servidor del contenedor no está consultando."""
 import os, re, sys, time, subprocess, urllib.request, urllib.error, urllib.parse
 AQUI = os.path.dirname(os.path.abspath(__file__))
 BASE = 'https://yapur.mauroyapur.workers.dev/api/olt/ping'; CADA = 10
+PC = '--pc' in sys.argv; WIN = os.name == 'nt'
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) YapurPing/1.0'
 def leer(n): return open(os.path.join(AQUI, n), encoding='utf-8').read().strip()
 def log(txt):
@@ -16,12 +18,20 @@ def log(txt):
     try: print(txt, flush=True)
     except Exception: pass
 def http(tok, metodo='GET', query=''):
+    if PC: query = (query + '&' if query else '?') + 'de=pc'
     rq = urllib.request.Request(BASE + query, data=b'x' if metodo == 'POST' else None, method=metodo, headers={'Authorization': 'Bearer ' + tok, 'User-Agent': UA})
     return urllib.request.urlopen(rq, timeout=15).read().decode('utf-8', 'replace').strip()
 def ping(ip, n=4):
     """(enviados, recibidos, ms promedio o None). Solo IPv4 válidas: se valida antes de llamar al programa ping."""
     if not re.fullmatch(r'(\d{1,3}\.){3}\d{1,3}', ip) or any(int(x) > 255 for x in ip.split('.')): return None
-    try: out = subprocess.run(['ping', '-n', '-q', '-c', str(n), '-W', '2', '-i', '0.3', ip], capture_output=True, text=True, timeout=30).stdout
+    try:
+        if WIN:   # Windows (la salida cambia con el idioma: se leen los números)
+            out = subprocess.run(['ping', '-n', str(n), '-w', '2000', ip], capture_output=True, text=True, errors='replace', timeout=40, creationflags=0x08000000).stdout
+            rec = re.search(r'(?:Received|recibidos)\s*=\s*(\d+)', out, re.I)
+            if not rec: return None
+            a = re.search(r'(?:Average|Media)\s*=\s*(\d+)\s*ms', out, re.I)
+            return n, int(rec.group(1)), float(a.group(1)) if a else None
+        out = subprocess.run(['ping', '-n', '-q', '-c', str(n), '-W', '2', '-i', '0.3', ip], capture_output=True, text=True, timeout=30).stdout
     except Exception: return None
     m = re.search(r'(\d+) packets transmitted, (\d+) (?:packets )?received', out)
     if not m: return None
