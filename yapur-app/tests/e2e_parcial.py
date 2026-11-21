@@ -87,8 +87,31 @@ async def main():
         check('la orden dice que faltan $30.000', 'cobrada en parte' in card.lower() and '30.000' in card, card)
         await og.click('[data-oid="o1"] [data-oact=cobrar]'); await og.wait_for_selector('#cb-go')
         check('«Cobrar el saldo» propone los $30.000', await og.input_value('#cb-monto') == '30000', await og.input_value('#cb-monto'))
-        await og.click('#cb-go'); await og.wait_for_selector('.rc', timeout=8000)
+        # cobro junto: saldo de la instalación + mensualidad en un solo recibo
         await og.click('.sheet [data-close]')
+        api('PATCH', '/api/doc/clientes/' + shard('g'), {'data': {'items': {'g': {'estado': 'activo', 'alta': hoy, 'desde': hoy[:7]}}}}, TA)
+        await og.wait_for_function("S.clientes.get('g').estado==='activo'", timeout=8000)
+        await og.evaluate("openCobro('g')"); await og.wait_for_selector('#cb-go')
+        hay = await og.query_selector('#cb-sinst') is not None
+        check('con meses pendientes aparece «cobrar también el saldo»', hay)
+        if hay:
+            if not await og.evaluate("!![...document.querySelectorAll('[data-per]')].some(i=>i.checked)"): await og.click('[data-per]')
+            await og.click('#cb-sinst')
+            per = await og.evaluate("[...document.querySelectorAll('[data-per]')].filter(i=>i.checked).reduce((t,i)=>t+Number(i.dataset.rest),0)")
+            check('al tildar el saldo el monto suma meses + $30.000', float((await og.input_value('#cb-monto')).replace(',', '.')) == per + 30000, (per, await og.input_value('#cb-monto')))
+            await og.click('#cb-go')
+            try: await og.wait_for_selector('.rc', timeout=8000)
+            except Exception: print('DEBUG', await og.evaluate("[...document.querySelectorAll('.toast,[role=status],[role=alert]')].map(x=>x.innerText).join('|')"), await og.input_value('#cb-monto'), ERR); raise
+            rc2 = await og.inner_text('.rc')
+            cs = await og.evaluate("(()=>{const l=[...S.pagos.values()].filter(p=>p.c==='g'&&!p.anulado);return JSON.stringify({r:[...new Set(l.map(p=>p.recibo))].length,c:l.map(p=>p.concepto+':'+p.monto)})})()")
+            check('el saldo y la mensualidad se grabaron juntos', 'instalacion:30000' in cs and 'mensualidad' in cs, cs)
+            check('el saldo queda en cero', await og.evaluate("instSaldo(S.clientes.get('g'))") == 0)
+            await og.click('.sheet [data-close]')
+        else:
+            await og.click('.sheet [data-close]')
+            await og.evaluate("openCobro('g','instalacion')"); await og.wait_for_selector('#cb-go')
+            await og.click('#cb-go'); await og.wait_for_selector('.rc', timeout=8000)
+            await og.click('.sheet [data-close]')
         await og.wait_for_function("!document.querySelector('[data-oid=\"o1\"] [data-oact=cobrar]')", timeout=8000)
         check('con el saldo cobrado el aviso desaparece', await og.query_selector('#or-pend .notice') is None and await og.evaluate("instSaldo(S.clientes.get('g'))") == 0)
         await br.close()
