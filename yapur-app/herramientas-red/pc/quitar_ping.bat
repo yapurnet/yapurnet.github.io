@@ -1,6 +1,7 @@
 @echo off
 cd /d "%~dp0"
-schtasks /end /tn "YAPUR Ping respaldo" >nul 2>&1
+del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\YAPUR Ping respaldo.vbs" >nul 2>&1
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*yapur_ping.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 schtasks /delete /tn "YAPUR Ping respaldo" /f >nul 2>&1
-echo Respaldo de Probar conexion quitado. Si queda un proceso pythonw abierto, se cierra al reiniciar la PC.
+echo Respaldo de Probar conexion quitado.
 pause

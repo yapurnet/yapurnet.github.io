@@ -21,11 +21,14 @@ if not defined PYW (
 echo Descargando el programa...
 powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/yapurnet/yapurnet.github.io/main/yapur-app/herramientas-red/yapur_ping.py' -OutFile 'yapur_ping.py'"
 if errorlevel 1 ( echo No se pudo descargar. & pause & exit /b 1 )
-schtasks /end /tn "YAPUR Ping respaldo" >nul 2>&1
-schtasks /create /tn "YAPUR Ping respaldo" /tr "\"%PYW%\" \"%CD%\yapur_ping.py\" --pc" /sc onlogon /f >nul
-if errorlevel 1 ( echo No se pudo crear la tarea programada. Abrilo con clic derecho: Ejecutar como administrador. & pause & exit /b 1 )
-schtasks /run /tn "YAPUR Ping respaldo" >nul
+set "VBS=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\YAPUR Ping respaldo.vbs"
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*yapur_ping.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+echo Set s = CreateObject("WScript.Shell"^)> "%VBS%"
+echo s.CurrentDirectory = "%CD%">> "%VBS%"
+echo s.Run """%PYW%"" ""%CD%\yapur_ping.py"" --pc", 0, False>> "%VBS%"
+if not exist "%VBS%" ( echo No se pudo crear el inicio automatico. & pause & exit /b 1 )
+wscript "%VBS%"
 echo.
-echo Listo. El respaldo queda andando y se vuelve a prender solo cada vez que se inicia sesion en esta PC.
+echo Listo. El respaldo queda andando y se vuelve a prender solo cada vez que se inicia sesion en esta PC (carpeta Inicio).
 echo Para ver lo que hizo: abrir ping.log en esta carpeta. Para sacarlo: quitar_ping.bat
 pause
