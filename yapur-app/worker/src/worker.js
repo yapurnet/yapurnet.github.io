@@ -2591,9 +2591,9 @@ export class YapurDB extends DurableObject {
     const alguno = todos.find(vivo);
     return { suyo: null, ok: !!alguno, hay: todos.length > 0 };
   }
-  pingView(r) {
+  pingView(r, u) {
     const hecho = r.estado === 'hecho';
-    return { id: r.id, cid: r.cid, ip: r.ip, estado: r.estado, ts: r.ts, hecho: r.hecho || null, sent: hecho ? r.sent : null, rec: hecho ? r.rec : null, avg: hecho && r.avg != null ? r.avg : null, router: r.router ? ((this.q1('SELECT nombre FROM routers WHERE id=?', r.router) || {}).nombre || '') : '' };
+    return { id: r.id, cid: r.cid, ip: r.ip, estado: r.estado, ts: r.ts, hecho: r.hecho || null, sent: hecho ? r.sent : null, rec: hecho ? r.rec : null, avg: hecho && r.avg != null ? r.avg : null, router: r.router && !(u && u.role === 'tecnico') ? ((this.q1('SELECT nombre FROM routers WHERE id=?', r.router) || {}).nombre || '') : '' };
   }
   /* pasa a «vencido» lo que nadie atendió a tiempo */
   pingVencer() {
@@ -2610,7 +2610,7 @@ export class YapurDB extends DurableObject {
     if (!ip) throw httpErr(400, 'Este cliente no tiene una IP cargada en su ficha (o tiene más de una). Cargala para poder probarlo.');
     this.pingVencer();
     const ya = this.q1("SELECT * FROM pings WHERE cid=? AND estado IN ('pend','toma') AND ts>?", cid, Date.now() - 30e3);
-    if (ya) return this.pingView(ya);
+    if (ya) return this.pingView(ya, u);
     /* topes por persona: los técnicos tienen menos (la prueba es para usarla en un trabajo, no para repetirla ni recorrer clientes) */
     const topes = u.role === 'admin' ? [[60e3, 12, 'Hiciste muchas pruebas seguidas. Esperá un momento.']]
       : u.role === 'tecnico' ? [[60e3, 3, 'Hiciste varias pruebas seguidas. Esperá un minuto.'], [600e3, 10, 'Ya hiciste muchas pruebas en los últimos minutos. Probá de nuevo en un rato; si es urgente, pedile a la oficina.'], [864e5, 40, 'Llegaste al máximo de pruebas de hoy. Pedile a la oficina que lo pruebe.']]
@@ -2618,19 +2618,19 @@ export class YapurDB extends DurableObject {
     for (const [ms, max, msg] of topes) if (this.q1('SELECT COUNT(*) n FROM pings WHERE uid=? AND ts>?', u.id, Date.now() - ms).n >= max) throw httpErr(429, msg, 'resource_exhausted');
     const rr = this.pingRouterDe(c.nodo);
     if (!rr.ok) {
-      if (rr.suyo) throw httpErr(409, 'El router de este cliente (' + rr.suyo.nombre + ') no está atendiendo las pruebas ahora. Avisale al administrador.', 'failed_precondition');
+      if (rr.suyo) throw httpErr(409, u.role === 'tecnico' ? 'Las pruebas de conexión no están disponibles ahora. Avisale al administrador.' : 'El router de este cliente (' + rr.suyo.nombre + ') no está atendiendo las pruebas ahora. Avisale al administrador.', 'failed_precondition');
       throw httpErr(409, rr.hay ? 'Ningún router está atendiendo las pruebas ahora. Avisale al administrador.' : 'Todavía no hay un router configurado para hacer pruebas de conexión.', 'failed_precondition');
     }
     const id = 'g' + hex(rnd(7));
     this.sql.exec("INSERT INTO pings(id,cid,ip,nodo,uid,ts,estado) VALUES(?,?,?,?,?,?,'pend')", id, cid, ip, String(c.nodo || '').slice(0, 40), u.id, Date.now());
-    return this.pingView(this.q1('SELECT * FROM pings WHERE id=?', id));
+    return this.pingView(this.q1('SELECT * FROM pings WHERE id=?', id), u);
   }
   pingVer(u, id) {
     if (!effPerms(u).ping) throw httpErr(403, 'No tenés permiso para probar la conexión de los clientes.', 'permission_denied');
     this.pingVencer();
     const r = this.q1('SELECT * FROM pings WHERE id=?', id);
     if (!r || (r.uid !== u.id && u.role !== 'admin')) throw httpErr(404, 'No existe esa prueba.');
-    return this.pingView(r);
+    return this.pingView(r, u);
   }
   /* ¿hay que consultar seguido? Sí si alguien pidió una prueba hace poco o abrió la ficha de un cliente para pedirla (ver pingArmar) */
   pingActivo() {
