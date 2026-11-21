@@ -102,6 +102,7 @@ async function openSenalCliente(id){
   openModal({title:'Potencia de la ONU · '+c.nombre,html:`<div class="stack">
     ${ult}
     ${d.hist?`<div class="stack"><p class="small"><b>Caídas en 14 días: ${d.hist.caidas}</b>${d.hist.caidas?` · ${cdDur(d.hist.min*6e4)} sin servicio en total`:''}${d.hist.on?'':' · <span class="chip bad">caída ahora, desde '+cdFecha(d.hist.desde)+'</span>'}</p>${d.hist.ult.length?`<ul class="small muted" style="margin:0;padding-left:18px">${d.hist.ult.map(e=>`<li>${cdFecha(e.ts)} · ${e.dur==null?'sigue caída':cdDur(e.dur)+' sin respuesta'}</li>`).join('')}</ul>`:''}</div>`:''}
+    ${d.sn?'':'<div id="sg-sug"></div>'}
     ${d.sn?'':`<div class="stack"><p class="small">Para ver la potencia automática, vinculá la ONU: escribí los últimos 6 caracteres de la serie (están en la etiqueta de la ONU, empieza con TPLG).</p><input id="sg-sn" placeholder="Ej: C70AD" autocapitalize="characters" autocomplete="off"><div class="actions"><button class="btn" type="button" id="sg-vinc">Vincular ONU</button></div></div>`}
     <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
     ${fresca?`<p class="small muted">La OLT actualiza esta lectura cada 10 minutos. No hace falta medir.</p><details><summary class="small">Cargar una medida a mano</summary>${campo_}</details>`:campo_}
@@ -124,6 +125,14 @@ async function openSenalCliente(id){
       }catch(err){st.textContent=err.message;}
       la.disabled=false;
     });
+    /* ONU que parecen ser de este cliente (nombre parecido en la OLT, o recién aparecidas si el cliente es nuevo): se confirma con un toque */
+    const sg=$('#sg-sug',box);if(sg)NET.api('GET','/api/olt/sugerir/'+encodeURIComponent(id)).then(r=>{
+      if(!box.isConnected||!r.sug||!r.sug.length)return;
+      sg.innerHTML=`<div class="notice"><b>¿Es alguna de estas ONU?</b> Tocá la que corresponda para vincularla.</div><div class="list">${r.sug.map(o=>`<button class="btn" type="button" data-k="${esc(o.k)}" style="text-align:left"><b>${esc(o.name||'(sin nombre)')}</b> · ${o.port?'PON '+esc(o.port)+' · ':''}${o.rx!=null?o.rx+' dBm · ':''}<span class="mono">${esc(o.k)}</span><br><span class="small muted">${esc(o.motivo)}</span></button>`).join('')}</div>`;
+      sg.addEventListener('click',async ev=>{const b=ev.target.closest('button[data-k]');if(!b)return;b.disabled=true;
+        try{const v=await NET.api('POST','/api/olt/vincular',{cid:id,q:b.dataset.k});toast('ONU vinculada · puerto/ID '+(v.port||'?'));SENAL.t=0;closeModal();}
+        catch(err){toast(err.message,'bad');b.disabled=false;}});
+    }).catch(()=>{});
     const vb=$('#sg-vinc',box);if(vb)vb.addEventListener('click',async()=>{
       try{const r=await NET.api('POST','/api/olt/vincular',{cid:id,q:$('#sg-sn',box).value});toast('ONU vinculada · puerto/ID '+(r.port||'?'));SENAL.t=0;closeModal();}
       catch(err){toast(err.message,'bad');}

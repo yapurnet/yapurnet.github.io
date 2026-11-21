@@ -1533,7 +1533,9 @@ export class YapurDB extends DurableObject {
       if (mapaN !== null && Array.isArray(b.off)) this.caidasONU(ts, b.mapa, b.off);
       c.visto = ts; this.oltSave(c);
     });
-    return { ok: true, guardadas: n, mapa: mapaN };
+    /* las ONU nuevas se vinculan solas cuando el nombre que tienen en la OLT es el mismo que el del cliente (nunca si hay duda) */
+    let auto = 0; try { if (mapaN !== null) auto = this.oltAuto({ aplicar: true }).seguras; } catch (e) { /* una falla de la vinculación no tiene que perder las lecturas */ }
+    return { ok: true, guardadas: n, mapa: mapaN, vinculadas: auto };
   }
   /* ----- medida a mano (el técnico en el cliente) y datos de la ONU de un cliente ----- */
   oltMapa() { const r = this.q1("SELECT v FROM meta WHERE k='oltmapa'"); try { const m = r ? JSON.parse(r.v) : {}; return isPlain(m) ? m : {}; } catch (e) { return {}; } }
@@ -1561,6 +1563,55 @@ export class YapurDB extends DurableObject {
     this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltvinc', JSON.stringify(v));
     return { ok: true, sn: hit[0], port: mapa[hit[0]] || '' };
   }
+  /* serie de la ONU (como la conoce la OLT) de un cliente: campo Equipo, vínculo hecho a mano o ONU del comodato (la MAC termina igual que la serie: TPLGB09491A0 ↔ 6C:5A:B0:94:91:A0) */
+  oltSnDe(c, mapa) {
+    mapa = mapa || this.oltMapa();
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), keys = Object.keys(mapa);
+    const eq = norm(c.equipo), vi = this.oltVinc()[c.id] || '';
+    const cand = [eq, vi, ...(Array.isArray(c.comodato) ? c.comodato : []).filter(e => isPlain(e) && /onu/i.test(String(e.t || ''))).map(e => norm(e.s))].filter(x => x.length >= 6);
+    for (const k of cand) if (mapa[k] !== undefined) return k;
+    for (const k of cand) { const h = k.length >= 8 ? keys.find(x => x.length >= 8 && (x.endsWith(k.slice(-8)) || k.endsWith(x.slice(-8)))) : null; if (h) return h; }
+    return (eq.length >= 6 ? eq : vi) || '';
+  }
+  /* palabras de un nombre sin acentos ni mayúsculas, y parecido entre dos nombres (el orden da igual; una letra de diferencia en palabras de 5 o más se acepta: «Aveldano» ≈ «Avendaño») */
+  oltToks(t, sinParen) {
+    let x = String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    if (sinParen) x = x.replace(/\([^)]*\)/g, ' ');
+    return x.replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(w => w.length > 1 && !/^(sr|sra|de|del|la|el|los|las|y)$/.test(w));
+  }
+  oltPalabra(a, b) {
+    if (a === b) return true;
+    if (Math.min(a.length, b.length) < 5 || Math.abs(a.length - b.length) > 1) return false;
+    let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    let j = 0; while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+    return Math.max(a.length, b.length) - i - j <= 1;   /* queda a lo sumo una letra distinta (cambiada, de más o de menos) */
+  }
+  oltParecido(ta, tb) {   /* 0 a 1: cuántas palabras del nombre más corto aparecen (casi iguales) en el otro */
+    const A = [...ta], B = [...tb]; if (!A.length || !B.length) return 0;
+    const usadas = new Set(); let n = 0;
+    for (const a of A) { const j = B.findIndex((b, i) => !usadas.has(i) && this.oltPalabra(a, b)); if (j >= 0) { usadas.add(j); n++; } }
+    return n / Math.max(A.length, B.length);
+  }
+  /* ONU sugeridas para un cliente sin ONU vinculada: las sin cliente cuyo nombre se parece al suyo, y (si el cliente es nuevo) las que aparecieron hace poco en la OLT */
+  oltSugerir(u, cid) {
+    this.oltPermiso(u);
+    const c = this.oltClienteDe(String(cid || ''));
+    if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    const mapa = this.oltMapa();
+    if (this.oltSnDe(c, mapa) && this.q1('SELECT 1 AS x FROM onus WHERE k=?', this.oltSnDe(c, mapa))) return { sug: [] };
+    const { mapa: idx, porId } = this.oltIndice(), ahora = Date.now(), ct = new Set(this.oltToks(c.nombre, true));
+    const nuevo = c.estado === 'pendiente' || (/^\d{4}-\d\d-\d\d$/.test(String(c.creado || c.alta || '')) && ahora - Date.parse(String(c.creado || c.alta)) < 30 * 864e5);
+    const desde = new Map(this.q("SELECT k, desde FROM est WHERE k NOT LIKE 'N:%'").map(r => [r.k, r.desde]));
+    const sug = [];
+    for (const o of this.q("SELECT * FROM onus WHERE k NOT LIKE 'CLI%'")) {
+      if (this.oltDeOnu(o, idx, porId)) continue;
+      const ot = new Set(this.oltToks(o.name, true)), sc = this.oltParecido(ct, ot), igual = ot.size === ct.size && [...ot].every(w => ct.has(w)), reciente = (desde.get(o.k) || 0) > ahora - 3 * 864e5;
+      if (sc >= 0.5) sug.push({ k: o.k, port: o.port, rx: o.rx, name: o.name, sc, motivo: igual ? 'Tiene el mismo nombre en la OLT' : 'Tiene un nombre parecido en la OLT', d: desde.get(o.k) || 0 });
+      else if (nuevo && reciente) sug.push({ k: o.k, port: o.port, rx: o.rx, name: o.name, sc: 0.1, motivo: 'Apareció hace poco en la OLT', d: desde.get(o.k) || 0 });
+    }
+    sug.sort((a, b) => b.sc - a.sc || b.d - a.d);
+    return { sug: sug.slice(0, 3).map(({ d, sc, ...x }) => x) };
+  }
   /* Vincula sola las ONU sin cliente comparando el nombre que tiene la ONU en la OLT con el de los clientes.
      b.aplicar=false (por defecto) solo muestra qué haría; con aplicar=true guarda los vínculos seguros (nombre igual y único). */
   oltAuto(b) {
@@ -1575,7 +1626,7 @@ export class YapurDB extends DurableObject {
       let d; try { d = JSON.parse(r.data); } catch (e) { continue; }
       for (const [cid, c0] of Object.entries((d && d.items) || {})) {
         if (!isPlain(c0) || c0.estado === 'baja') continue;
-        const c = { id: cid, nombre: String(c0.nombre || ''), nodo: String(c0.nodo || ''), dir: String(c0.dir || '') };
+        const c = { id: cid, nombre: String(c0.nombre || ''), nodo: String(c0.nodo || ''), dir: String(c0.dir || ''), reciente: c0.estado === 'pendiente' || (/^\d{4}-\d\d-\d\d$/.test(String(c0.creado || c0.alta || '')) && Date.now() - Date.parse(String(c0.creado || c0.alta)) < 30 * 864e5) };
         c.t = new Set(toks(c.nombre, true)); c.tf = new Set(toks(c.nombre, false)); clientes.push(c);
         for (const k of [norm(c0.equipo), ...(Array.isArray(c0.comodato) ? c0.comodato : []).filter(e => isPlain(e) && /onu/i.test(String(e.t || ''))).map(e => norm(e.s)), cid0[cid] || '']) if (k.length >= 6) { conOnu.add(cid); serieDe.set(k, cid); }
       }
@@ -1594,9 +1645,10 @@ export class YapurDB extends DurableObject {
         const igual = inter === ot.size && inter === c.t.size;
         const casi = !igual && inter >= 2 && inter >= Math.min(ot.size, c.t.size) && inter / Math.max(ot.size, c.t.size) >= 0.6;
         if (igual || casi) ok.push({ c, igual, mismoPuerto: new RegExp('^PON_?' + puerto + '(\\D|$)', 'i').test(c.nodo) });
+        else if (c.reciente && this.oltParecido(ot, c.t) === 1 && this.oltParecido(c.t, ot) === 1) ok.push({ c, igual: false, fuzzy: true, mismoPuerto: false });   /* mismo nombre con una letra distinta («Aveldano» ≈ «Avendaño»), solo con clientes nuevos */
       }
-      const fuertes = ok.filter(x => x.igual);
-      const pick = fuertes.length === 1 ? fuertes[0] : fuertes.length > 1 && fuertes.filter(x => x.mismoPuerto).length === 1 ? fuertes.find(x => x.mismoPuerto) : null;
+      const fuertes = ok.filter(x => x.igual), fz = ok.filter(x => x.fuzzy);
+      const pick = fuertes.length === 1 ? fuertes[0] : fuertes.length > 1 && fuertes.filter(x => x.mismoPuerto).length === 1 ? fuertes.find(x => x.mismoPuerto) : (!fuertes.length && fz.length === 1 && ok.length === 1 ? fz[0] : null);
       const fila = { k: o.k, port: o.port, name: o.name };
       if (pick && !conOnu.has(pick.c.id) && !nuevos[pick.c.id]) { res.seguras.push({ ...fila, cid: pick.c.id, cliente: pick.c.nombre, nodo: pick.c.nodo }); nuevos[pick.c.id] = o.k; }
       else res.dudosas.push({ ...fila, opciones: (ok.length ? ok : []).slice(0, 4).map(x => ({ cid: x.c.id, cliente: x.c.nombre, nodo: x.c.nodo, igual: x.igual })), motivo: pick ? 'el cliente ya tiene otra ONU' : ok.length > 1 ? 'hay varios clientes parecidos' : ok.length ? 'el nombre solo se parece' : 'ningún cliente con ese nombre' });
@@ -1669,7 +1721,7 @@ export class YapurDB extends DurableObject {
     this.oltPermiso(u);
     const c = this.oltClienteDe(String(b.cid || ''));
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
-    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || ''), port = String(this.oltMapa()[sn] || '');
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = this.oltSnDe(c), port = String(this.oltMapa()[sn] || '');
     if (!sn || !/^\d+\/\d+$/.test(port)) throw httpErr(400, 'Este cliente no tiene la ONU vinculada: no se puede leer.');
     const ped = this.oltPedidosRaw(), ahora = Date.now();
     for (const k of Object.keys(ped)) if (!(ped[k].ts > ahora - 120e3)) delete ped[k];
@@ -1786,7 +1838,7 @@ export class YapurDB extends DurableObject {
     const c = this.oltClienteDe(String(cid || ''));
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
     const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), cfg = this.oltCfg();
-    const mapa = this.oltMapa(), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || '');
+    const mapa = this.oltMapa(), sn = this.oltSnDe(c, mapa);
     const l1 = sn ? this.q1('SELECT * FROM onus WHERE k=?', sn) : null, l2 = this.q1('SELECT * FROM onus WHERE k=?', 'CLI' + c.id);
     const o = l1 && l2 ? (l1.ts >= l2.ts ? l1 : l2) : (l1 || l2);
     const hist = sn ? this.histONU(sn) : null;
@@ -1805,7 +1857,7 @@ export class YapurDB extends DurableObject {
     if (!c) throw httpErr(404, 'No se encontró el cliente.');
     const n = typeof b.rx === 'string' ? parseFloat(b.rx.replace(',', '.')) : b.rx;
     if (typeof n !== 'number' || !isFinite(n) || n >= 0 || n <= -60) throw httpErr(400, 'La potencia va en dBm y es negativa, por ejemplo -22,5.');
-    const rx = Math.round(n * 100) / 100, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || ''), k = sn.length >= 6 ? sn : 'CLI' + c.id, mapa = this.oltMapa();
+    const rx = Math.round(n * 100) / 100, norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), mapa = this.oltMapa(), sn = this.oltSnDe(c, mapa), k = sn.length >= 6 ? sn : 'CLI' + c.id;
     this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, rx, null, 'manual', String((sn && mapa[sn]) || '').slice(0, 20), String(u.nombre || u.usuario || '').slice(0, 40), Date.now());
     return { ok: true, rx, mala: rx < this.oltCfg().umbral };
   }
@@ -1826,11 +1878,13 @@ export class YapurDB extends DurableObject {
     for (const [cid, sn] of Object.entries(this.oltVinc())) { const c = porId.get(cid); if (c) alta(sn, c); }
     return { mapa, porId };
   }
+  /* a qué cliente pertenece una ONU leída (por la serie, el comodato, un vínculo hecho a mano o una medida cargada a mano) */
+  oltDeOnu(o, mapa, porId) { return (o.k.startsWith('CLI') && porId.get(o.k.slice(3))) || mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null) || null; }
   oltVer(u) {
     if (u.role !== 'admin' && !effPerms(u).red) throw httpErr(403, 'Tu usuario no puede ver la señal de las ONU.', 'permission_denied');
     const cfg = this.oltCfg(), norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), { mapa, porId } = this.oltIndice();
     const lista = this.q('SELECT * FROM onus').map(o => {
-      const c = (o.k.startsWith('CLI') && porId.get(o.k.slice(3))) || mapa.get(o.k) || (o.k.length >= 8 ? [...mapa].find(([k]) => k.endsWith(o.k.slice(-8)) || o.k.endsWith(k.slice(-8)))?.[1] : null);
+      const c = this.oltDeOnu(o, mapa, porId);
       return { k: o.k, rx: o.rx, tx: o.tx, est: o.est, port: o.port, ts: o.ts, cid: c ? c.id : null, cn: c ? c.nombre : null, cd: c ? [c.dir, c.loc].filter(Boolean).join(', ') : null };
     });
     const mala = lista.filter(o => o.rx != null && o.rx < cfg.umbral).sort((a, b) => a.rx - b.rx);
@@ -3733,6 +3787,7 @@ export class YapurDB extends DurableObject {
     if (p === '/api/olt/leer-ahora' && m === 'POST') return send(200, this.oltLeerAhora((await this.needAuth(request)).user, readBody(raw, 500)));
     if (p === '/api/olt/pedidos' && m === 'GET') return send(200, await this.oltPedidos(request));
     if (p === '/api/olt/medida' && m === 'POST') return send(200, this.oltMedida((await this.needAuth(request)).user, readBody(raw, 500)));
+    { const mm = p.match(/^\/api\/olt\/sugerir\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltSugerir((await this.needAuth(request)).user, mm[1])); }
     { const mm = p.match(/^\/api\/olt\/cliente\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltCliente((await this.needAuth(request)).user, mm[1])); }
     if (p === '/api/olt/config' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltConfig(readBody(raw, 500))); }
     if (p === '/api/olt/token' && m === 'POST') { await this.needAdmin(request); return send(200, await this.oltToken()); }

@@ -196,6 +196,40 @@ async function call(method, p, body, token) {
     t('la ficha trae el consumo por día', r.s === 200 && r.j.dias.length === 1 && r.j.dias[0].bi === 8e9, r);
     r = await call('GET', '/api/consumo', undefined, T);
     t('el técnico no ve el consumo', r.s === 403, r);
+    /* ONU del comodato (por la MAC) y sugerencias / vinculación automática de clientes nuevos */
+    const relleno = Array.from({ length: 60 }, (_, i) => ({ sn: 'TPLGREL' + String(i).padStart(5, '0'), port: '1/' + (i + 1) }));
+    await call('PATCH', '/api/doc/clientes/c002', { data: { items: {
+      m1: { id: 'm1', nombre: 'Aveldaño Hector', estado: 'activo', comodato: [{ t: 'ONU', d: 'XN020', s: '6C:5A:B0:94:91:A0', n: 1, e: 'nuevo', o: '' }] },
+      m2: { id: 'm2', nombre: 'Isabel Landriel', estado: 'pendiente' },
+      m3: { id: 'm3', nombre: 'Avendano Mario', estado: 'pendiente' },
+      m4: { id: 'm4', nombre: 'Gonzalez Raul', estado: 'activo' } } } }, A);
+    r = await call('POST', '/api/olt/ingest', { lect: [
+      { sn: 'TPLGB09491A0', rx: -21.4, port: '3/102', name: '' },
+      { sn: 'TPLGNEW00001', rx: -22.7, port: '6/43', name: 'Landriel Isabel' },
+      { sn: 'TPLGNEW00002', rx: -23.1, port: '2/9', name: 'Aveldano Mario' },
+      { sn: 'TPLGNEW00003', rx: -20.2, port: '2/8', name: 'Gonzales Raul' }] }, TK);
+    r = await call('GET', '/api/olt/sugerir/m4', undefined, T);
+    t('sugerir: un cliente que no es nuevo solo recibe ONU con nombre parecido', r.s === 200 && r.j.sug.length === 1 && r.j.sug[0].k === 'TPLGNEW00003', r.j);
+    r = await call('GET', '/api/olt/sugerir/m2', undefined, T);
+    t('sugerir: el técnico recibe la ONU con el mismo nombre (apellido y nombre al revés)', r.s === 200 && r.j.sug[0] && r.j.sug[0].k === 'TPLGNEW00001' && /mismo nombre/.test(r.j.sug[0].motivo), r.j);
+    r = await call('GET', '/api/olt/sugerir/m3', undefined, T);
+    t('sugerir: una letra distinta («Aveldano» ≈ «Avendano») también aparece', r.j.sug.some(x => x.k === 'TPLGNEW00002' && /parecido/.test(x.motivo)), r.j);
+    r = await call('GET', '/api/olt/sugerir/zzz', undefined, T);
+    t('sugerir: cliente inexistente da 404', r.s === 404, r);
+    r = await call('GET', '/api/olt/sugerir/m2', undefined, undefined);
+    t('sugerir: sin sesión no se ve', r.s === 401, r);
+    r = await call('POST', '/api/olt/ingest', { lect: [{ sn: 'TPLGB09491A0', rx: -21.4, port: '3/102' }], mapa: relleno.concat([{ sn: 'TPLGB09491A0', port: '3/102' }, { sn: 'TPLGNEW00001', port: '6/43' }, { sn: 'TPLGNEW00002', port: '2/9' }, { sn: 'TPLGNEW00003', port: '2/8' }]) }, TK);
+    t('al mandar la lista completa se vinculan solas las ONU seguras', r.s === 200 && r.j.vinculadas >= 2, r.j);
+    r = await call('GET', '/api/olt/cliente/m2', undefined, T);
+    t('auto: «Landriel Isabel» queda vinculada al cliente nuevo «Isabel Landriel»', r.j.sn === 'TPLGNEW00001' && r.j.port === '6/43', r.j);
+    r = await call('GET', '/api/olt/cliente/m3', undefined, T);
+    t('auto: con una letra distinta también, pero solo porque el cliente es nuevo', r.j.sn === 'TPLGNEW00002', r.j);
+    r = await call('GET', '/api/olt/cliente/m4', undefined, T);
+    t('auto: a un cliente que no es nuevo no se le vincula una ONU de nombre solo parecido', r.j.sn === null || r.j.sn === '', r.j);
+    r = await call('GET', '/api/olt/cliente/m1', undefined, T);
+    t('la ficha encuentra la ONU por la MAC del comodato (TPLGB09491A0 ↔ 6C:5A:B0:94:91:A0)', r.j.sn === 'TPLGB09491A0' && r.j.port === '3/102' && r.j.rx === -21.4, r.j);
+    r = await call('POST', '/api/olt/leer-ahora', { cid: 'm1' }, T);
+    t('«Leer ahora» también la encuentra por el comodato', r.s === 200 && r.j.sn === 'TPLGB09491A0', r);
   } finally { srv.stop && srv.stop(); }
   console.log('\n' + okN + ' ok, ' + failN + ' con fallas'); process.exit(failN ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
