@@ -1,7 +1,7 @@
 # NOMBRE|IP  (IP de loopback de cada router, alcanzable por OSPF)
 BORDE01|10.0.0.100
 ADMIN02|10.0.0.50
-CRS03|
+CRS03|192.168.99.2
 FM04|10.0.0.101
 BOMBEROS05|10.0.1.101
 LEO06|10.0.2.101
