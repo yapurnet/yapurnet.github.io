@@ -567,7 +567,7 @@ function openClientForm(id){
       ${full&&can('precios')?'<div class="hint" id="cf-total"></div>':''}
       ${full&&old?`<div class="notice info" id="cf-vig" hidden><div class="field"><label for="cf-vig-mes">Los cambios de plan, precio o servicios rigen desde</label><input id="cf-vig-mes" type="month" max="${curMonth()}" value="${curMonth()}"${cfVigMin(old)?` min="${cfVigMin(old)}"`:''}></div>
         <div class="hint">Los meses anteriores quedan como estaban: lo que ya pagó no se vuelve deuda.</div>
-        <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses</span></label></div>`:''}
+        <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses (descarta los precios anteriores de este cliente)</span></label></div>`:''}
       ${puedePlan(old)?planPedidoHTML(c,'cf'):''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
       <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${nodoFieldHTML(c,'cf')}</div>
@@ -687,7 +687,8 @@ function openClientForm(id){
       if(full&&$('#cf-extras',el))patch.extras=$$('[data-extra]',el).filter(i=>i.checked).map(i=>i.dataset.extra);
       if(old&&full&&billChanged()){
         const fix=$('#cf-vig-fix',el).checked,eff=$('#cf-vig-mes',el).value,min=cfVigMin(old);
-        if(!fix){
+        if(fix){if(Array.isArray(old.hp)&&old.hp.length)patch.hp=[];}   /* error de carga: los valores nuevos rigen en todos los meses, también los que tenían un precio anterior guardado */
+        else{
           if(!/^\d{4}-\d{2}$/.test(eff)||eff>curMonth())return toast('Elegí desde qué mes rigen los cambios (este mes o uno anterior)','bad');
           if(min&&eff<min)return toast('Desde '+monthLabel(min)+' como mínimo: antes de eso ya figuran cambios anteriores','bad');
           if(!min||eff>min){   /* lo anterior queda como estaba hasta el mes previo */
