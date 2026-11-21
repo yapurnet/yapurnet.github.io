@@ -105,9 +105,25 @@ async function openSenalCliente(id){
     ${d.sn?'':`<div class="stack"><p class="small">Para ver la potencia automática, vinculá la ONU: escribí los últimos 6 caracteres de la serie (están en la etiqueta de la ONU, empieza con TPLG).</p><input id="sg-sn" placeholder="Ej: C70AD" autocapitalize="characters" autocomplete="off"><div class="actions"><button class="btn" type="button" id="sg-vinc">Vincular ONU</button></div></div>`}
     <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
     ${fresca?`<p class="small muted">La OLT actualiza esta lectura cada 10 minutos. No hace falta medir.</p><details><summary class="small">Cargar una medida a mano</summary>${campo_}</details>`:campo_}
+    ${d.sn&&d.port?`<div class="stack"><button class="btn" type="button" id="sg-ahora">Leer ahora</button><p class="small muted" id="sg-lr">Pide la potencia a la OLT en este momento (tarda unos segundos), sin esperar la lectura automática.</p></div>`:''}
     <div class="actions"><button class="btn primary" type="button" id="sg-go">Guardar medida</button></div></div>`,
   onClose:()=>setTimeout(()=>{if(S.clientes.has(id))openClient(id);},0),
   onMount(box){
+    const la=$('#sg-ahora',box);if(la)la.addEventListener('click',async()=>{
+      const st=$('#sg-lr',box);la.disabled=true;st.className='small';st.textContent='Pidiendo la lectura…';
+      try{
+        const r=await NET.api('POST','/api/olt/leer-ahora',{cid:id});
+        for(let i=0;i<24;i++){
+          await new Promise(res=>setTimeout(res,2500));
+          if(!box.isConnected)return;
+          st.textContent='Leyendo la ONU… '+(i+1)*2.5+' s';
+          const n=await NET.api('GET','/api/olt/cliente/'+encodeURIComponent(id));
+          if(n.ts>=r.desde&&n.rx!=null&&!n.manual){st.className='small';st.innerHTML=`Lectura nueva: <span class="chip ${est(n.rx)}">${n.rx} dBm</span> · recién leída de la OLT`;SENAL.t=0;la.disabled=false;return;}
+        }
+        st.textContent='La OLT no devolvió lectura: la ONU puede estar apagada o sin señal, o el lector no está en línea.';
+      }catch(err){st.textContent=err.message;}
+      la.disabled=false;
+    });
     const vb=$('#sg-vinc',box);if(vb)vb.addEventListener('click',async()=>{
       try{const r=await NET.api('POST','/api/olt/vincular',{cid:id,q:$('#sg-sn',box).value});toast('ONU vinculada · puerto/ID '+(r.port||'?'));SENAL.t=0;closeModal();}
       catch(err){toast(err.message,'bad');}

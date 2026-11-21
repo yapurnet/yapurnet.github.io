@@ -657,3 +657,9 @@ En **Señal** (debajo de la lista de mala señal) hay dos tarjetas nuevas, y en 
 - **App:** pestaña **Consumo** (junto a Nodos): totales, consumo por red (10.20.4x.x), lista de clientes con promedio diario, pico y etiqueta «Llega al límite de su plan» (pico ≥ 90% de la bajada del plan, con 3 días o más de datos) o «Casi no usa». El cliente se une por IP.
 - **Supuesto a verificar:** que «bytes de entrada» de la cola es la bajada del cliente (en todas las colas de la prueba el valor de entrada es mucho mayor que el de salida). Si resultara al revés, se invierten las dos columnas en `consumo_mikrotik.py`.
 - Pruebas: `tests/test_olt.js`, `tests/e2e_consumo.py`.
+
+## «Leer ahora» (lectura inmediata de una ONU) (21/11)
+
+- En la ficha de señal de un cliente con ONU vinculada hay un botón **Leer ahora** (lo ve también el técnico). `POST /api/olt/leer-ahora {cid}` deja un pedido en `meta('oltped')` (serie y puerto/ID); la app espera hasta 60 s la lectura nueva (`GET /api/olt/cliente/{id}`, `ts` posterior al pedido).
+- En el contenedor `yapur-tools` el servicio **yapur-pedidos** (`olt_pedidos.py`) consulta cada 5 s `GET /api/olt/pedidos` (mismo token del lector; entrega cada pedido una sola vez), lee solo esa ONU por SNMP (Rx/Tx) y la manda por `/api/olt/ingest`. Sin pedidos no escribe nada en la base; son ≈17.000 consultas por día (el límite gratis del Worker es 100.000).
+- Si la ONU está apagada o sin señal la OLT no devuelve potencia: la app lo avisa a los 60 s. Registro en `/opt/yapur/pedidos.log`.
