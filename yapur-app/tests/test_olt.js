@@ -64,6 +64,18 @@ async function call(method, p, body, token) {
     t('el técnico no carga el mapa de la OLT', r.s === 403, r);
     r = await call('PUT', '/api/olt/mapa', { lista: [{ sn: 'TPLG-1234ABCD', port: '1/3' }, { sn: 'TPLGBBBB2222', port: '2/7' }, { sn: 'x', port: '9/9' }] }, A);
     t('el administrador carga el mapa serie → puerto/ID', r.s === 200 && r.j.onus === 2, r);
+    r = await call('POST', '/api/olt/leer-ahora', { cid: 'a' }, T);
+    t('el técnico puede pedir «Leer ahora» de una ONU vinculada', r.s === 200 && r.j.port === '1/3' && r.j.sn === 'TPLG1234ABCD', r);
+    r = await call('POST', '/api/olt/leer-ahora', { cid: 'a' }, T);
+    t('pedir dos veces seguidas no duplica el pedido', r.s === 200, r);
+    r = await call('POST', '/api/olt/leer-ahora', { cid: 'zzz' }, T);
+    t('«Leer ahora» de un cliente que no existe da 404', r.s === 404, r);
+    r = await call('GET', '/api/olt/pedidos', undefined, undefined);
+    t('el programa del contenedor necesita el token para ver los pedidos', r.s === 401, r);
+    r = await call('GET', '/api/olt/pedidos', undefined, TK);
+    t('con el token ve el pedido con serie y puerto', r.s === 200 && r.j.p.length === 1 && r.j.p[0].sn === 'TPLG1234ABCD' && r.j.p[0].port === '1/3', r);
+    r = await call('GET', '/api/olt/pedidos', undefined, TK);
+    t('el pedido se entrega una sola vez', r.s === 200 && r.j.p.length === 0, r);
     r = await call('PATCH', '/api/doc/clientes/c001', { data: { items: { d: { id: 'd', nombre: 'Sin Equipo Rosa', estado: 'activo' }, e: { id: 'e', nombre: 'Con Mapa Luis', estado: 'activo', equipo: 'TPLGBBBB2222' }, f: { id: 'f', nombre: 'Vinculada Ana', estado: 'activo' }, g: { nombre: 'Sin Id Propio', estado: 'activo', equipo: 'TPLGBBBB2222' }, h: { nombre: 'Juan Pérez', estado: 'activo', nodo: 'PON_3' }, i: { nombre: 'Ana López', estado: 'activo' }, j: { nombre: 'Ana López (local)', estado: 'activo' } } } }, A);
     r = await call('GET', '/api/olt/cliente/e', undefined, T);
     t('el técnico ve la ONU del cliente con su puerto aunque no haya lectura', r.s === 200 && r.j.port === '2/7' && r.j.rx === null && r.j.sn === 'TPLGBBBB2222', r);

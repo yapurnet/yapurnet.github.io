@@ -6,7 +6,7 @@ D=/opt/yapur; R=https://raw.githubusercontent.com/yapurnet/yapurnet.github.io/ma
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq curl iputils-ping ca-certificates >/dev/null
 mkdir -p $D && cd $D
-for f in olt_agente.py olt_walk.py monitor_nodos.py consumo_mikrotik.py; do curl -fsSL "$R/$f" -o $f; done
+for f in olt_agente.py olt_pedidos.py olt_walk.py monitor_nodos.py consumo_mikrotik.py; do curl -fsSL "$R/$f" -o $f; done
 [ -f nodos.txt ] || curl -fsSL "$R/nodos.txt" -o nodos.txt
 sed -i "s#^HOST = '10.0.0.50'#HOST = '10.0.0.50'#" consumo_mikrotik.py
 mk() { # nombre, descripcion, comando
@@ -23,6 +23,10 @@ EOT
 }
 # lector de la OLT (cada 10 minutos): se ejecuta una vez y un temporizador lo repite
 mk yapur-olt "Lector de la OLT (potencia y caidas de ONU)" "/usr/bin/python3 $D/olt_agente.py --una-vez"; sed -i '/^Restart/d' /etc/systemd/system/yapur-olt.service
+# «Leer ahora» (lecturas pedidas por un técnico): queda corriendo y consulta cada 5 segundos
+mk yapur-pedidos "Leer ahora: lecturas de ONU pedidas por los tecnicos" "/usr/bin/python3 $D/olt_pedidos.py"
+sed -i '/^Restart/d' /etc/systemd/system/yapur-pedidos.service
+printf 'Restart=always\nRestartSec=10\n[Install]\nWantedBy=multi-user.target\n' >> /etc/systemd/system/yapur-pedidos.service
 # monitor de nodos (cada minuto) y consumo (cada 5 minutos): se ejecutan una vez y un temporizador los repite
 mk yapur-nodos "Monitor de nodos (ping)" "/usr/bin/python3 $D/monitor_nodos.py"; sed -i '/^Restart/d' /etc/systemd/system/yapur-nodos.service
 mk yapur-consumo "Consumo de clientes (SNMP a ADMIN02)" "/usr/bin/python3 $D/consumo_mikrotik.py --una-vez"; sed -i '/^Restart/d' /etc/systemd/system/yapur-consumo.service

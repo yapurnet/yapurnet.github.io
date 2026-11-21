@@ -1654,6 +1654,34 @@ export class YapurDB extends DurableObject {
     });
     return { ok: true, nodos: n };
   }
+  /* ----- «Leer ahora»: un técnico en el poste pide la potencia de una ONU sin esperar la ronda de 10 minutos. El pedido queda en meta('oltped');
+     el programa del contenedor consulta cada pocos segundos (GET /api/olt/pedidos con el token), lee solo esa ONU y manda la lectura como cualquier otra ----- */
+  oltPedidosRaw() { const r = this.q1("SELECT v FROM meta WHERE k='oltped'"); try { const m = r ? JSON.parse(r.v) : {}; return isPlain(m) ? m : {}; } catch (e) { return {}; } }
+  oltLeerAhora(u, b) {
+    this.oltPermiso(u);
+    const c = this.oltClienteDe(String(b.cid || ''));
+    if (!c) throw httpErr(404, 'No se encontró el cliente.');
+    const norm = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), sn = norm(c.equipo).length >= 6 ? norm(c.equipo) : (this.oltVinc()[c.id] || ''), port = String(this.oltMapa()[sn] || '');
+    if (!sn || !/^\d+\/\d+$/.test(port)) throw httpErr(400, 'Este cliente no tiene la ONU vinculada: no se puede leer.');
+    const ped = this.oltPedidosRaw(), ahora = Date.now();
+    for (const k of Object.keys(ped)) if (!(ped[k].ts > ahora - 120e3)) delete ped[k];
+    if (Object.keys(ped).length >= 20 && !ped[sn]) throw httpErr(429, 'Hay muchas lecturas pidiéndose a la vez. Probá en unos segundos.', 'resource_exhausted');
+    if (!ped[sn] || ped[sn].ts < ahora - 4e3) ped[sn] = { port, ts: ahora };
+    this.sql.exec('INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)', 'oltped', JSON.stringify(ped));
+    return { ok: true, desde: ahora, sn, port };
+  }
+  async oltPedidos(request) {
+    const ip = this.clientIp(request), key = 'olt|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
+    if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    const r = this.q1("SELECT v FROM meta WHERE k='oltped'");
+    if (!r) return { p: [] };
+    const ped = this.oltPedidosRaw(), ahora = Date.now(), p = Object.entries(ped).filter(([, x]) => x && x.ts > ahora - 120e3).map(([sn, x]) => ({ sn, port: x.port }));
+    this.sql.exec("DELETE FROM meta WHERE k='oltped'");
+    return { p };
+  }
   /* ----- consumo por cliente: el lector de la PC suma lo que pasó por la cola de cada cliente en el router y manda los totales por día (una vez por hora, para gastar pocas escrituras) ----- */
   async consumoIngest(request, raw) {
     const ip = this.clientIp(request), key = 'olt|' + ip;
@@ -3694,6 +3722,8 @@ export class YapurDB extends DurableObject {
     if (p === '/api/olt/mapa' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltMapaGuardar(readBody(raw, 4e5))); }
     if (p === '/api/olt/auto' && m === 'POST') { await this.needAdmin(request); return send(200, this.oltAuto(readBody(raw, 500))); }
     if (p === '/api/olt/vincular' && m === 'POST') return send(200, this.oltVincular((await this.needAuth(request)).user, readBody(raw, 500)));
+    if (p === '/api/olt/leer-ahora' && m === 'POST') return send(200, this.oltLeerAhora((await this.needAuth(request)).user, readBody(raw, 500)));
+    if (p === '/api/olt/pedidos' && m === 'GET') return send(200, await this.oltPedidos(request));
     if (p === '/api/olt/medida' && m === 'POST') return send(200, this.oltMedida((await this.needAuth(request)).user, readBody(raw, 500)));
     { const mm = p.match(/^\/api\/olt\/cliente\/([A-Za-z0-9_-]{1,40})$/); if (mm && m === 'GET') return send(200, this.oltCliente((await this.needAuth(request)).user, mm[1])); }
     if (p === '/api/olt/config' && m === 'PUT') { await this.needAdmin(request); return send(200, this.oltConfig(readBody(raw, 500))); }
