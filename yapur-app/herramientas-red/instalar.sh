@@ -30,5 +30,6 @@ mk yapur-consumo "Consumo de clientes (SNMP a ADMIN02)" "/usr/bin/python3 $D/con
 for t in "yapur-nodos 1min" "yapur-consumo 5min"; do set -- $t
   printf '[Unit]\nDescription=Repite %s\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=%s\nAccuracySec=5s\n[Install]\nWantedBy=timers.target\n' "$1" "$2" > /etc/systemd/system/$1.timer
 done
+curl -fsSL "$R/configurar.sh" -o configurar.sh; chmod +x configurar.sh
 systemctl daemon-reload
 echo "Programas instalados en $D. Faltan los archivos con secretos (los escribe Mauro): app_token.txt, olt_comunidad.txt, mikrotik_comunidad.txt"
