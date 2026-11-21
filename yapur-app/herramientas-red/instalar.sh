@@ -21,13 +21,12 @@ Restart=on-failure
 RestartSec=30
 EOT
 }
-# lector de la OLT: queda corriendo y lee cada 10 minutos
-mk yapur-olt "Lector de la OLT (potencia y caidas de ONU)" "/usr/bin/python3 $D/olt_agente.py"
-printf '[Install]\nWantedBy=multi-user.target\n' >> /etc/systemd/system/yapur-olt.service
+# lector de la OLT (cada 10 minutos): se ejecuta una vez y un temporizador lo repite
+mk yapur-olt "Lector de la OLT (potencia y caidas de ONU)" "/usr/bin/python3 $D/olt_agente.py --una-vez"; sed -i '/^Restart/d' /etc/systemd/system/yapur-olt.service
 # monitor de nodos (cada minuto) y consumo (cada 5 minutos): se ejecutan una vez y un temporizador los repite
 mk yapur-nodos "Monitor de nodos (ping)" "/usr/bin/python3 $D/monitor_nodos.py"; sed -i '/^Restart/d' /etc/systemd/system/yapur-nodos.service
 mk yapur-consumo "Consumo de clientes (SNMP a ADMIN02)" "/usr/bin/python3 $D/consumo_mikrotik.py --una-vez"; sed -i '/^Restart/d' /etc/systemd/system/yapur-consumo.service
-for t in "yapur-nodos 1min" "yapur-consumo 5min"; do set -- $t
+for t in "yapur-olt 10min" "yapur-nodos 1min" "yapur-consumo 5min"; do set -- $t
   printf '[Unit]\nDescription=Repite %s\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=%s\nAccuracySec=5s\n[Install]\nWantedBy=timers.target\n' "$1" "$2" > /etc/systemd/system/$1.timer
 done
 curl -fsSL "$R/configurar.sh" -o configurar.sh; chmod +x configurar.sh

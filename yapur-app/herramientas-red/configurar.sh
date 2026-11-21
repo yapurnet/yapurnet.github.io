@@ -7,5 +7,5 @@ pedir app_token.txt "Token de la app (app_token.txt)"
 pedir olt_comunidad.txt "Comunidad de la OLT (olt_comunidad.txt)"
 pedir mikrotik_comunidad.txt "Comunidad de MikroTik (mikrotik_comunidad.txt)"
 for f in app_token.txt olt_comunidad.txt mikrotik_comunidad.txt; do [ -s $f ] || { echo "Falta $f: no se prenden los servicios."; exit 1; }; done
-systemctl enable --now yapur-olt yapur-nodos.timer yapur-consumo.timer
+systemctl enable --now yapur-olt.timer yapur-nodos.timer yapur-consumo.timer
 echo "Listo: el contenedor mide solo. Avisale a Claude."
