@@ -228,6 +228,7 @@ function openClient(id){
     ${b.sinCargo&&(can('cobrar')||can('caja')||can('precios'))?`<div class="notice info"><b>Servicio sin cargo${c.sinCargoMotivo&&isAdmin()?': '+esc(c.sinCargoMotivo):''}.</b> No genera deuda y nunca se corta por falta de pago.</div>`:''}
     ${bajaBlock(c)}
     ${deudaAntBlock(c)}
+    ${can('cobrar')&&instSaldo(c)>0?`<div class="notice warn"><b>Instalación cobrada en parte:</b> faltan ${fmtMoney(instSaldo(c))}.<div class="actions start" style="margin-top:8px"><button class="btn small primary" type="button" data-act="cobrar-saldo">Cobrar el saldo</button></div></div>`:''}
     ${cuentaBlock(c)}
     <dl class="kv">${kv('Domicilio',esc((c.dir||'')+(c.loc?', '+c.loc:'')))}${kv('Referencia',esc(c.ref))}${kv('Teléfono',tel(c.tel))}${kv('Otro teléfono',tel(c.tel2))}${can('dni')?kv('DNI / CUIT / CUIL',esc(c.dni)):''}
       ${kv('Plan',pl?esc(pl.nombre)+' · '+esc(planSpeed(pl))+(can('precios')?' · '+fmtMoney(priceBase(c))+'/mes':''):(puedePlan(c)?'<span class="muted">Todavía sin elegir</span>':''))}${extrasVis(c).length?kv('Servicios adicionales',extrasVis(c).map(s=>esc(s.nombre)+(can('precios')?' · '+fmtMoney(planNow(s))+'/mes':'')).join('<br>')):''}${can('precios')&&extrasVis(c).length?kv('Total por mes','<b>'+fmtMoney(b.price)+'</b>'):''}${kv('Tecnología',esc(TECNOS[c.tec]||''))}${kv('Usuario',c.usuario?`<span class="mono">${esc(c.usuario)}</span>`:'')}${kv('IP',c.ip?`<span class="mono">${esc(c.ip)}</span>`:'')}${kv('Nodo o torre',esc(c.nodo))}${kv('Caja NAP',napLine(c))}${kv('Equipo',c.equipo?`<span class="mono">${esc(c.equipo)}</span>`:'')}
@@ -254,6 +255,7 @@ function openClient(id){
       else if(a.dataset.act==='nap')openRed(c.nap);
       else if(a.dataset.act==='mover-nap')openMoverNap(c.id,c.nap);
       else if(a.dataset.act==='cobrar')openCobro(c.id);
+      else if(a.dataset.act==='cobrar-saldo')openCobro(c.id,'instalacion');
       else if(a.dataset.act==='cobrar-da')openCobro(c.id,'deuda_anterior');
       else if(a.dataset.act==='pagar-deuda')openPagarDeuda(c.id);
       else if(a.dataset.act==='cuenta-abrir')openClient(a.dataset.id);
