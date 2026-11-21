@@ -85,6 +85,11 @@ async def main():
         await og.click('[data-f=hechas]'); await og.wait_for_selector('[data-oid="o1"] [data-oact=cobrar]')
         card = await og.inner_text('[data-oid="o1"]')
         check('la orden dice que faltan $30.000', 'cobrada en parte' in card.lower() and '30.000' in card, card)
+        await og.click('#tabs [data-tab=clientes]'); await og.wait_for_selector('#cl-seg [data-f=instsaldo]')
+        await og.click('#cl-seg [data-f=instsaldo]')
+        lst = await og.inner_text('#cl-list')
+        check('la lista de clientes tiene el filtro «Saldo de instalación» y marca lo que debe', 'Isabel Landriel' in lst and '30.000' in lst and 'instalación' in lst, lst)
+        await og.click('#tabs [data-tab=ordenes]'); await og.wait_for_selector('[data-oid="o1"] [data-oact=cobrar]')
         await og.click('[data-oid="o1"] [data-oact=cobrar]'); await og.wait_for_selector('#cb-go')
         check('«Cobrar el saldo» propone los $30.000', await og.input_value('#cb-monto') == '30000', await og.input_value('#cb-monto'))
         # cobro junto: saldo de la instalación + mensualidad en un solo recibo
