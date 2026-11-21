@@ -47,7 +47,12 @@ function clientRow(c){
     <div class="side">${c.estado==='activo'?'':estChip(c)}</div>
     <div class="tags">${pl?`<span class="chip accent">${esc(pl.nombre)} · ${esc(planSpeed(pl))}</span>`:(extrasVis(c).length||!verPlanDe(c)?'':'<span class="chip warn">Sin plan</span>')}${extrasVis(c).map(s=>`<span class="chip info">${esc(s.nombre)}</span>`).join('')}
     ${c.tec?`<span class="chip">${esc(TECNOS[c.tec]||c.tec)}</span>`:''}${c.nap&&redName(c.nap)?`<span class="chip">${esc(redName(c.nap))}${c.napPuerto?' · p. '+esc(c.napPuerto):''}</span>`:''}
-    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${cuentaChip(c)}${ctChip(c)}${billChip(c)}</div></button>`;
+    ${hasGeo(c)?'':'<span class="chip quiet">Sin ubicación</span>'}${instSaldoChip(c)}${cuentaChip(c)}${ctChip(c)}${billChip(c)}</div></button>`;
+}
+/* en la lista: el cliente que pagó solo una parte de la instalación */
+function instSaldoChip(c){
+  if(!(can('cobrar')||can('caja'))||c.estado==='baja')return '';
+  const v=instSaldo(c);return v>0?`<span class="chip warn">Debe ${fmtMoney(v)} de instalación</span>`:'';
 }
 /* en la lista: a qué cuenta pertenece cada servicio */
 function cuentaChip(c){
@@ -740,7 +745,7 @@ VIEWS.clientes={
     if(can('comodato')&&S.contratosOk)fs.push(['sincontrato','Sin contrato firmado']);
     if(can('contratosGestion')&&S.contratosOk)fs.push(['conrevision','Contrato en revisión']);
     if((can('cobrar')||can('caja')||can('precios'))&&[...S.clientes.values()].some(x=>x.sinCargo&&x.estado!=='baja'))fs.push(['sincargo','Sin cargo']);
-    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
+    if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['instsaldo','Saldo de instalación'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     if(veServicios())serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
@@ -753,6 +758,7 @@ VIEWS.clientes={
       if(CL.estado==='nonap')return c.estado!=='baja'&&c.estado!=='pendiente'&&!(c.nap&&S.red.has(c.nap));
       if(CL.estado==='deuda')return billing(c).vencidos>0;
       if(CL.estado==='dant')return deudaAntRest(c)>0;
+      if(CL.estado==='instsaldo')return c.estado!=='baja'&&instSaldo(c)>0;
       if(CL.estado.startsWith('sv:'))return c.estado!=='baja'&&Array.isArray(c.extras)&&c.extras.includes(CL.estado.slice(3));
       if(CL.estado==='c1'||CL.estado==='c2')return c.estado!=='baja'&&cicloOf(c)===Number(CL.estado[1]);
       return c.estado===CL.estado;

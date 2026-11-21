@@ -290,7 +290,8 @@ function openAnular(recibo){
    El técnico solo ve sus propios cobros, así que acá es una ayuda; el servidor es el que controla de verdad. */
 const instCobrada=c=>!!c&&[...S.pagos.values()].some(p=>p.c===c.id&&p.concepto==='instalacion'&&!p.anulado);
 /* lo que falta cobrar de la instalación cuando el cliente pagó solo una parte: el pago parcial guarda el precio de lista (lista) y el saldo es lo que queda hasta llegar a él */
-const instSaldo=c=>{if(!c)return 0;let lista=0,pagado=0;S.pagos.forEach(p=>{if(p.c===c.id&&p.concepto==='instalacion'&&!p.anulado){pagado+=Number(p.monto)||0;if(Number(p.lista)>lista)lista=Number(p.lista);}});return lista>pagado+0.005?Math.round((lista-pagado)*100)/100:0;};
+/* por cliente con el índice: rápido también en la lista de 5.000 */
+const instSaldo=c=>{if(!c)return 0;let lista=0,pagado=0;const f=p=>{if(p.c===c.id&&p.concepto==='instalacion'&&!p.anulado){pagado+=Number(p.monto)||0;if(Number(p.lista)>lista)lista=Number(p.lista);}};if(S.payByClient)(S.payByClient.get(c.id)||[]).forEach(f);else S.pagos.forEach(f);return lista>pagado+0.005?Math.round((lista-pagado)*100)/100:0;};
 const instalacionAbierta=c=>!!c&&[...S.ordenes.values()].some(o=>o.clientId===c.id&&o.tipo==='instalacion'&&ORD_OPEN(o));
 /* ¿hay una instalación por hacer? (cliente «Por instalar», o con una orden de instalación abierta y sin instalación cobrada) */
 const porInstalar=c=>!!c&&!instCobrada(c)&&(c.estado==='pendiente'||instalacionAbierta(c));
