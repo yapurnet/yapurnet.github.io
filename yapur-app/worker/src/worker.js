@@ -2611,7 +2611,11 @@ export class YapurDB extends DurableObject {
     this.pingVencer();
     const ya = this.q1("SELECT * FROM pings WHERE cid=? AND estado IN ('pend','toma') AND ts>?", cid, Date.now() - 30e3);
     if (ya) return this.pingView(ya);
-    if (this.q1('SELECT COUNT(*) n FROM pings WHERE uid=? AND ts>?', u.id, Date.now() - 60e3).n >= 12) throw httpErr(429, 'Hiciste muchas pruebas seguidas. Esperá un momento.', 'resource_exhausted');
+    /* topes por persona: los técnicos tienen menos (la prueba es para usarla en un trabajo, no para repetirla ni recorrer clientes) */
+    const topes = u.role === 'admin' ? [[60e3, 12, 'Hiciste muchas pruebas seguidas. Esperá un momento.']]
+      : u.role === 'tecnico' ? [[60e3, 3, 'Hiciste varias pruebas seguidas. Esperá un minuto.'], [600e3, 10, 'Ya hiciste muchas pruebas en los últimos minutos. Probá de nuevo en un rato; si es urgente, pedile a la oficina.'], [864e5, 40, 'Llegaste al máximo de pruebas de hoy. Pedile a la oficina que lo pruebe.']]
+      : [[60e3, 12, 'Hiciste muchas pruebas seguidas. Esperá un momento.'], [600e3, 60, 'Ya hiciste muchas pruebas en los últimos minutos. Probá de nuevo en un rato.']];
+    for (const [ms, max, msg] of topes) if (this.q1('SELECT COUNT(*) n FROM pings WHERE uid=? AND ts>?', u.id, Date.now() - ms).n >= max) throw httpErr(429, msg, 'resource_exhausted');
     const rr = this.pingRouterDe(c.nodo);
     if (!rr.ok) {
       if (rr.suyo) throw httpErr(409, 'El router de este cliente (' + rr.suyo.nombre + ') no está atendiendo las pruebas ahora. Avisale al administrador.', 'failed_precondition');
@@ -2644,8 +2648,8 @@ export class YapurDB extends DurableObject {
   /* el router consulta: devuelve «id:ip,id:ip» (texto simple, fácil de leer en RouterOS) y deja marcado que las tomó.
      Si nadie está probando nada, agrega «s5»: el script nuevo del router se saltea esas 5 corridas (consulta una vez por minuto en vez de cada 10 s).
      El script de antes no entiende «s5» y lo ignora (sigue consultando cada 10 s, pero ya no escribe en la base cada vez). */
-  async routerPingPoll(request) {
-    const r = await this.routerPingAuth(request);
+  async routerPingPoll(request) { return this.pingPollDe(await this.routerPingAuth(request)); }
+  pingPollDe(r) {
     if (!r.pvisto || Date.now() - r.pvisto > 25e3) this.sql.exec('UPDATE routers SET pvisto=? WHERE id=?', Date.now(), r.id);
     this.pingVencer();
     const mine = r.nombre.toLowerCase(), nombres = new Set(this.pingRouters().map(x => x.nombre.toLowerCase()));
@@ -2671,8 +2675,19 @@ export class YapurDB extends DurableObject {
     while ((m = re.exec(t))) { any = true; ms += Number(m[1]) * (m[2] === 's' ? 1000 : m[2] === 'us' ? 0.001 : 1); }
     return any ? Math.round(ms * 10) / 10 : null;
   }
-  async routerPingResult(request, url) {
-    const r = await this.routerPingAuth(request);
+  async routerPingResult(request, url) { return this.pingResultDe(await this.routerPingAuth(request), url); }
+  /* las pruebas de conexión también las puede hacer el servidor del contenedor (yapur_ping.py) con el token del lector: figura en Routers como «Servidor (Proxmox)» */
+  async lectorPing(request, url, metodo) {
+    const ip = this.clientIp(request), key = 'olt|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), c = this.oltRaw();
+    if (!c.th || !tk || !safeEq(await sha(tk), c.th)) { this.addFail(key, 8); throw httpErr(401, 'Token inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    let r = this.q1("SELECT * FROM routers WHERE id='lector'");
+    if (!r) { this.sql.exec("INSERT INTO routers(id,nombre,th,kinds,creado,pth) VALUES('lector','Servidor (Proxmox)','-','',?,'-')", Date.now()); r = this.q1("SELECT * FROM routers WHERE id='lector'"); }
+    return metodo === 'GET' ? this.pingPollDe(r) : this.pingResultDe(r, url);
+  }
+  pingResultDe(r, url) {
     const id = String(url.searchParams.get('id') || ''), sent = parseInt(url.searchParams.get('sent') || '', 10), rec = parseInt(url.searchParams.get('rec') || '', 10);
     if (!/^g[0-9a-f]{14}$/.test(id) || !(sent >= 1 && sent <= 10) || !(rec >= 0 && rec <= sent)) throw httpErr(400, 'Faltan datos del resultado (id, sent, rec).');
     let avg = this.pingMs(url.searchParams.get('avg'));
@@ -3765,6 +3780,7 @@ export class YapurDB extends DurableObject {
     }
     let mm;
     if (p === '/api/router/ingest' && m === 'POST') return send(200, await this.routerIngest(request, url, raw));
+    if (p === '/api/olt/ping' && (m === 'GET' || m === 'POST')) { const t = await this.lectorPing(request, url, m); return m === 'GET' ? send(200, t, { 'Content-Type': 'text/plain; charset=utf-8' }) : send(200, t); }
     if (p === '/api/router/ping' && m === 'GET') return send(200, await this.routerPingPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
     if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
     if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
