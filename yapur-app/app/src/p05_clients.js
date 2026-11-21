@@ -336,7 +336,7 @@ function pingBlock(c){
 const pingMs=v=>v==null?'':(v>=10?Math.round(v):Math.round(v*10)/10)+' ms';
 /* cómo se cuenta el resultado: responde / responde con pérdidas / no responde */
 function pingResultado(p){
-  const sent=p.sent||0,rec=p.rec||0,quien=p.router?' · desde '+esc(p.router):'',hora=p.hecho?' · '+pad(new Date(p.hecho).getHours())+':'+pad(new Date(p.hecho).getMinutes()):'';
+  const sent=p.sent||0,rec=p.rec||0,quien=p.router&&S.role!=='tecnico'?' · desde '+esc(p.router):'',hora=p.hecho?' · '+pad(new Date(p.hecho).getHours())+':'+pad(new Date(p.hecho).getMinutes()):'';
   if(rec>=sent&&sent>0)return ['ok',`<b>Responde</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}`];
   if(rec>0)return ['warn',`<b>Responde con pérdidas</b> · ${rec} de ${sent}${p.avg!=null?' · '+pingMs(p.avg):''}${quien}${hora}<br><span class="small">Contesta a veces: puede ser mala señal, interferencia o un equipo que se reinicia.</span>`];
   return ['bad',`<b>No responde</b> · 0 de ${sent}${quien}${hora}<br><span class="small">Puede estar apagado o sin luz, con el cable desconectado, o con el servicio cortado.</span>`];
