@@ -146,6 +146,39 @@ const report = async (tk, q) => { const r = await fetch(BASE + '/api/router/ping
     for (let i = 2; i < 14; i++) ult = await call('POST', '/api/ping', { cid: 'm' + i }, T1);
     t('hay un tope de pruebas por minuto por usuario', ult.s === 429, ult);
 
+    /* ---- topes de los técnicos: 3 por minuto ---- */
+    await call('POST', '/api/users', { usuario: 'tec3', nombre: 'tec3', role: 'tecnico', clave: 'tres123' }, A);
+    const T3 = (await call('POST', '/api/login', { usuario: 'tec3', clave: 'tres123' })).j.token;
+    const rs = [];
+    for (let i = 0; i < 4; i++) rs.push(await call('POST', '/api/ping', { cid: 'm' + (4 + i) }, T3));
+    t('técnico: las 3 primeras pruebas del minuto salen', rs.slice(0, 3).every(x => x.s === 200), rs.map(x => x.s));
+    t('técnico: la cuarta en el mismo minuto se frena y dice que espere', rs[3].s === 429 && /varias pruebas/.test(rs[3].j.error), rs[3]);
+    r = await call('POST', '/api/ping', { cid: 'm8' }, O);
+    t('la oficina tiene un tope más alto que el de los técnicos', r.s === 200, r);
+    /* ---- el servidor del contenedor (yapur_ping.py) hace las pruebas con el token del lector ---- */
+    const TK = (await call('POST', '/api/olt/token', {}, A)).j.token;
+    const lpoll = async tk => { const r = await fetch(BASE + '/api/olt/ping', { headers: { authorization: 'Bearer ' + tk } }); return { s: r.status, txt: await r.text() }; };
+    const lrep = async (tk, q) => { const r = await fetch(BASE + '/api/olt/ping?' + q, { method: 'POST', headers: { authorization: 'Bearer ' + tk }, body: 'x' }); let j = null; try { j = await r.json(); } catch (e) {} return { s: r.status, j }; };
+    r = await lpoll('olt.malo');
+    t('lector: un token inválido se rechaza', r.s === 401, r);
+    r = await lpoll(P1);
+    t('lector: el token de un router no sirve acá', r.s === 401, r);
+    await call('PATCH', '/api/doc/clientes/c01', { data: { items: { cL: { nombre: 'Lector Luis', ip: '10.9.0.7' } } } }, A);
+    r = await lpoll(TK);
+    t('lector: consulta con su token y recibe la lista de pruebas pendientes (o «s5» si no hay)', r.s === 200, r);
+    r = await call('GET', '/api/routers', undefined, A);
+    t('lector: figura como «Servidor (Proxmox)» atendiendo pruebas', r.j.routers.some(x => x.nombre === 'Servidor (Proxmox)' && x.ping === true && x.pingVisto > 0), r.j.routers.map(x => x.nombre));
+    r = await call('POST', '/api/ping', { cid: 'cL' }, O);
+    const idL = r.j.ping && r.j.ping.id;
+    t('lector: la oficina pide la prueba', r.s === 200 && /^g[0-9a-f]{14}$/.test(idL || ''), r);
+    r = await lpoll(TK);
+    t('lector: la toma y recibe «id:ip»', r.s === 200 && r.txt.split(',').includes(idL + ':10.9.0.7'), r);
+    r = await lrep(TK, 'id=' + idL + '&sent=4&rec=3&avg=12.5ms');
+    t('lector: manda el resultado', r.s === 200 && r.j.ok === true, r);
+    r = await call('GET', '/api/ping/' + idL, undefined, O);
+    t('lector: la ficha ve 3 de 4 con 12,5 ms', r.s === 200 && r.j.ping.estado === 'hecho' && r.j.ping.rec === 3 && r.j.ping.sent === 4 && r.j.ping.avg === 12.5, r);
+    r = await lrep(TK, 'id=gaaaaaaaaaaaaaa&sent=4&rec=4');
+    t('lector: una prueba que no existe da 404', r.s === 404, r);
     /* ---- se corta el router: no se aceptan más pruebas ---- */
     r = await call('POST', '/api/routers/' + R1.router.id + '/ping-token', {}, A);
     r = await poll(P1);

@@ -6,7 +6,7 @@ D=/opt/yapur; R=https://raw.githubusercontent.com/yapurnet/yapurnet.github.io/ma
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq curl iputils-ping ca-certificates >/dev/null
 mkdir -p $D && cd $D
-for f in olt_agente.py olt_pedidos.py olt_walk.py monitor_nodos.py consumo_mikrotik.py; do curl -fsSL "$R/$f" -o $f; done
+for f in olt_agente.py olt_pedidos.py olt_walk.py monitor_nodos.py consumo_mikrotik.py yapur_ping.py; do curl -fsSL "$R/$f" -o $f; done
 [ -f nodos.txt ] || curl -fsSL "$R/nodos.txt" -o nodos.txt
 sed -i "s#^HOST = '10.0.0.50'#HOST = '10.0.0.50'#" consumo_mikrotik.py
 mk() { # nombre, descripcion, comando
@@ -27,6 +27,10 @@ mk yapur-olt "Lector de la OLT (potencia y caidas de ONU)" "/usr/bin/python3 $D/
 mk yapur-pedidos "Leer ahora: lecturas de ONU pedidas por los tecnicos" "/usr/bin/python3 $D/olt_pedidos.py"
 sed -i '/^Restart/d' /etc/systemd/system/yapur-pedidos.service
 printf 'Restart=always\nRestartSec=10\n[Install]\nWantedBy=multi-user.target\n' >> /etc/systemd/system/yapur-pedidos.service
+# «Probar conexión» de la ficha del cliente: queda corriendo y consulta (una vez por minuto, o cada 10 s mientras alguien prueba)
+mk yapur-ping "Probar conexion de clientes (ping)" "/usr/bin/python3 $D/yapur_ping.py"
+sed -i '/^Restart/d' /etc/systemd/system/yapur-ping.service
+printf 'Restart=always\nRestartSec=10\n[Install]\nWantedBy=multi-user.target\n' >> /etc/systemd/system/yapur-ping.service
 # monitor de nodos (cada minuto) y consumo (cada 5 minutos): se ejecutan una vez y un temporizador los repite
 mk yapur-nodos "Monitor de nodos (ping)" "/usr/bin/python3 $D/monitor_nodos.py"; sed -i '/^Restart/d' /etc/systemd/system/yapur-nodos.service
 mk yapur-consumo "Consumo de clientes (SNMP a ADMIN02)" "/usr/bin/python3 $D/consumo_mikrotik.py --una-vez"; sed -i '/^Restart/d' /etc/systemd/system/yapur-consumo.service
