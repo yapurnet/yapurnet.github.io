@@ -833,7 +833,11 @@ const waUrl=(tel,text)=>'https://wa.me/'+waNumber(tel)+'?text='+encodeURICompone
 /* en la computadora: directo a WhatsApp Web (sin la pantalla intermedia de wa.me, que pide elegir entre la app y la web) */
 const waWebUrl=(tel,text)=>'https://web.whatsapp.com/send?phone='+waNumber(tel)+'&text='+encodeURIComponent(text);
 function geoActions(o){
-  if(!hasGeo(o))return '<span class="chip warn">Sin ubicación cargada</span>';
+  if(!hasGeo(o)){
+    /* sin coordenadas: se puede buscar la dirección escrita en el mapa (aproximado; la ubicación exacta se carga al visitar) */
+    const dir=String(o.dir||'').trim(),q=dir?[dir,String(o.loc||'Añatuya').trim(),'Santiago del Estero','Argentina'].join(', '):'';
+    return '<span class="chip warn">Sin ubicación cargada</span>'+(q?` <a class="btn small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}" target="_blank" rel="noopener">Buscar la dirección en el mapa</a>`:'');
+  }
   return `<a class="btn small primary" href="${mapsNav(o)}" target="_blank" rel="noopener">Cómo llegar</a>
   <a class="btn small" href="${wazeNav(o)}" target="_blank" rel="noopener">Waze</a>
   <a class="btn small" href="${mapsView(o)}" target="_blank" rel="noopener">Ver en mapa</a>
@@ -5394,7 +5398,7 @@ async function saveOrder(o,patch){
 function orderText(o,c){
   const lines=[`Orden de trabajo: ${TIPOS_ORD[o.tipo]||o.tipo}${o.prioridad==='urgente'?' (URGENTE)':''}`,`Cliente: ${c?c.nombre:'(sin cliente)'}`];
   if(c){lines.push(`Dirección: ${c.dir||''}${c.loc?', '+c.loc:''}`);if(c.ref)lines.push(`Referencia: ${c.ref}`);if(c.tel&&can('telefono'))lines.push(`Teléfono: ${c.tel}`);
-    lines.push(hasGeo(c)?`Cómo llegar: ${mapsNav(c)}`:'Ubicación: sin coordenadas cargadas');}
+    lines.push(hasGeo(c)?`Cómo llegar: ${mapsNav(c)}`:(String(c.dir||'').trim()?'Dirección en el mapa (aproximada): https://www.google.com/maps/search/?api=1&query='+encodeURIComponent([c.dir,c.loc||'Añatuya','Santiago del Estero','Argentina'].join(', ')):'Ubicación: sin coordenadas cargadas'));}
   if(o.fecha)lines.push(`Fecha: ${dmy(o.fecha)}`);if(o.notas)lines.push(`Notas: ${o.notas}`);
   return lines.join('\n');
 }
@@ -8263,7 +8267,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='31d3a00fcf';
+const BUILD='90b22e5b90';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

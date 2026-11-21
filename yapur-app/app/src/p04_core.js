@@ -425,7 +425,11 @@ const waUrl=(tel,text)=>'https://wa.me/'+waNumber(tel)+'?text='+encodeURICompone
 /* en la computadora: directo a WhatsApp Web (sin la pantalla intermedia de wa.me, que pide elegir entre la app y la web) */
 const waWebUrl=(tel,text)=>'https://web.whatsapp.com/send?phone='+waNumber(tel)+'&text='+encodeURIComponent(text);
 function geoActions(o){
-  if(!hasGeo(o))return '<span class="chip warn">Sin ubicación cargada</span>';
+  if(!hasGeo(o)){
+    /* sin coordenadas: se puede buscar la dirección escrita en el mapa (aproximado; la ubicación exacta se carga al visitar) */
+    const dir=String(o.dir||'').trim(),q=dir?[dir,String(o.loc||'Añatuya').trim(),'Santiago del Estero','Argentina'].join(', '):'';
+    return '<span class="chip warn">Sin ubicación cargada</span>'+(q?` <a class="btn small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}" target="_blank" rel="noopener">Buscar la dirección en el mapa</a>`:'');
+  }
   return `<a class="btn small primary" href="${mapsNav(o)}" target="_blank" rel="noopener">Cómo llegar</a>
   <a class="btn small" href="${wazeNav(o)}" target="_blank" rel="noopener">Waze</a>
   <a class="btn small" href="${mapsView(o)}" target="_blank" rel="noopener">Ver en mapa</a>

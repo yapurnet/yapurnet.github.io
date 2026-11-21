@@ -33,7 +33,7 @@ async function saveOrder(o,patch){
 function orderText(o,c){
   const lines=[`Orden de trabajo: ${TIPOS_ORD[o.tipo]||o.tipo}${o.prioridad==='urgente'?' (URGENTE)':''}`,`Cliente: ${c?c.nombre:'(sin cliente)'}`];
   if(c){lines.push(`Dirección: ${c.dir||''}${c.loc?', '+c.loc:''}`);if(c.ref)lines.push(`Referencia: ${c.ref}`);if(c.tel&&can('telefono'))lines.push(`Teléfono: ${c.tel}`);
-    lines.push(hasGeo(c)?`Cómo llegar: ${mapsNav(c)}`:'Ubicación: sin coordenadas cargadas');}
+    lines.push(hasGeo(c)?`Cómo llegar: ${mapsNav(c)}`:(String(c.dir||'').trim()?'Dirección en el mapa (aproximada): https://www.google.com/maps/search/?api=1&query='+encodeURIComponent([c.dir,c.loc||'Añatuya','Santiago del Estero','Argentina'].join(', ')):'Ubicación: sin coordenadas cargadas'));}
   if(o.fecha)lines.push(`Fecha: ${dmy(o.fecha)}`);if(o.notas)lines.push(`Notas: ${o.notas}`);
   return lines.join('\n');
 }
