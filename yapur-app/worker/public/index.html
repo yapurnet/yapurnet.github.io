@@ -6939,7 +6939,7 @@ function openCobro(clientId,con1,pre){
     ${!campo&&!pre&&tieneDeuda(c)?'<div class="actions start"><button class="btn small" type="button" id="cb-deuda">Pagar todo o la deuda (escribir el monto, varios medios)</button></div>':''}
     <div class="seg" id="cb-con">${Object.entries(CONCEPTOS).filter(([k])=>k==='mensualidad'?mens:k==='deuda_anterior'?daRest>0:permitidos.includes(k)).map(([k,v])=>`<button type="button" data-con="${k}" aria-pressed="${k===con0}">${v}</button>`).join('')}</div>
     ${campo?`<div class="hint">${porInstalar(c)?'Es una instalación nueva: se cobra «Instalación». ':'«Instalación» es para un abonado nuevo; si un cliente ya instalado se mudó, cobrá «Reinstalación (mudanza)». '}Queda registrado a tu nombre y suma a la caja del día.</div>`:''}
-    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
+    <div id="cb-mens" class="list"${con0==='mensualidad'?'':' hidden'}>${!campo&&open.length&&instSaldo(c)>0?`<label class="per"><input type="checkbox" id="cb-sinst"> Cobrar también el saldo de la instalación (faltan ${fmtMoney(instSaldo(c))})</label>`:''}${open.length?bm.filter(x=>x.open.length).map(x=>(gm?`<div class="small" style="margin:8px 0 2px;overflow-wrap:anywhere"><b>${esc(x.m.nombre)}</b> <span class="muted">· ${esc(servicioTxt(x.m))}${x.m.dir?' · '+esc(x.m.dir):''}</span></div>`:'')+x.open.map(p=>`<label class="per"><input type="checkbox" data-cid="${esc(x.m.id)}" data-per="${p.per}" data-rest="${p.rest}"${p.per<=cur?' checked':''}><span class="grow"><b>${esc(monthLabel(p.per))}</b><br><span class="small muted">plazo hasta el ${esc(dm(p.due))} · corte ${esc(dm(p.cut))}${p.paid?' · ya pagó '+fmtMoney(p.paid):''}</span></span>${p.venc&&p.per<=cur?'<span class="chip bad">Vencido</span>':(p.per>cur?'<span class="chip">Adelantado</span>':'<span class="chip info">A vencer</span>')}<b class="tnum">${fmtMoney(p.rest)}</b></label>`).join('')).join(''):'<div class="notice info">No hay meses pendientes.</div>'}</div>
     <div id="cb-otro"${con0==='mensualidad'?' hidden':''}>${gm?`<div class="hint">Este cobro se registra en el servicio ${esc(c.nombre)}.</div>`:''}${F('Detalle','cb-nota-o','<input id="cb-nota-o" autocomplete="off">')}</div>
     <div class="grid2">${F('Medio de pago','cb-met',`<select id="cb-met">${Object.entries(METODOS).map(([k,v])=>opt(k,v,k==='efectivo')).join('')}</select>`)}${F('Fecha del cobro','cb-fecha',`<input id="cb-fecha" type="date" value="${todayStr()}"${campo?' disabled':''}>`)}</div>
     ${campo?compHTML('cb'):''}
@@ -6961,8 +6961,9 @@ function openCobro(clientId,con1,pre){
     const sum=()=>{
       const m=$('#cb-monto',el),h=$('#cb-sum',el);
       if(con==='mensualidad'){
-        if(!manual)m.value=total()||'';
-        const rd=dv&&dv.activo()?dv.leer():null,r=rd&&!rd.error?rd.total:num(m.value)||0,t=total();
+        const ex=$('#cb-sinst',el)&&$('#cb-sinst',el).checked?instSaldo(c):0;
+        if(!manual)m.value=(total()+ex)||'';
+        const rd=dv&&dv.activo()?dv.leer():null,r=rd&&!rd.error?rd.total:num(m.value)||0,t=total()+ex;
         h.className='hint'+(r<t?' bad':'');
         h.textContent=!sel().length?(gm?'Marcá lo que paga.':'Marcá los meses que paga.'):r===t?(gm?`Cubre ${sel().length} ${sel().length===1?'mensualidad':'mensualidades'}.`:`Cubre ${sel().length} ${sel().length===1?'mes':'meses'}.`):r<t?`Pago parcial: faltan ${fmtMoney(t-r)}. Se aplica a los meses más viejos primero.`:`Sobran ${fmtMoney(r-t)}: quedan como saldo a favor en el último mes marcado.`;
       }else if(con==='deuda_anterior'){
@@ -7008,12 +7009,20 @@ function openCobro(clientId,con1,pre){
       if(con==='mensualidad'){
         if(!mens)return toast('Este cliente todavía no paga mensualidad','bad');
         const s=sel();if(!s.length)return toast('Marcá al menos un mes','bad');
-        if(rp){   /* 2 medios: lo que cubre cada mes se reparte entre los medios en orden; un renglón por mes y medio, mismo recibo */
-          const q=rp.medios.map(m=>({metodo:m.metodo,r:Math.round(m.monto*100)}));let k=0,n=0;
-          allocate(s,monto).forEach(a=>{let r=Math.round(a.monto*100);
+        /* cobro junto: primero se cubre el saldo de la instalación y el resto va a los meses, todo en el mismo recibo */
+        const sdI=$('#cb-sinst',el)&&$('#cb-sinst',el).checked&&!campo?instSaldo(c):0;let q0=null;
+        if(sdI){
+          if(monto<=sdI+0.005)return toast('Con ese monto solo alcanza para el saldo de la instalación: usá «Cobrar el saldo»','bad');
+          q0=(rp?rp.medios:[{metodo,monto}]).map(m=>({metodo:m.metodo,r:Math.round(m.monto*100)}));
+          let need=Math.round(sdI*100),n0=0;
+          for(const x of q0){if(need<=0)break;const t=Math.min(need,x.r);if(t>0){const it=Object.assign({concepto:'instalacion',per:null,monto:t/100,nota:''},base,{metodo:x.metodo});if(!COMP_METODOS.includes(x.metodo))delete it.comp;items[newId()+'i'+(n0++).toString(36)]=it;x.r-=t;need-=t;}}
+        }
+        if(rp||sdI){   /* 2 medios: lo que cubre cada mes se reparte entre los medios en orden; un renglón por mes y medio, mismo recibo */
+          const q=q0||rp.medios.map(m=>({metodo:m.metodo,r:Math.round(m.monto*100)}));let k=0,n=0;
+          allocate(s,monto-sdI).forEach(a=>{let r=Math.round(a.monto*100);
             while(r>0&&k<q.length){if(q[k].r<=0){k++;continue;}const t=Math.min(r,q[k].r),it=Object.assign({concepto:'mensualidad',per:a.per,monto:t/100},base,{metodo:q[k].metodo,c:a.cid||c.id});
               if(!COMP_METODOS.includes(q[k].metodo))delete it.comp;items[newId()+a.per.slice(5)+(n++).toString(36)]=it;r-=t;q[k].r-=t;}});
-        }else allocate(s,monto).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
+        }else allocate(s,monto-sdI).forEach(a=>{items[newId()+a.per.slice(5)]=Object.assign({concepto:'mensualidad',per:a.per,monto:a.monto},base,{c:a.cid||c.id});});
       }else if(rp){
         /* un registro por medio, mismo recibo; la foto del comprobante va solo en el de la transferencia */
         rp.medios.forEach((m,i)=>{const it=Object.assign({concepto:con,per:null,nota:$('#cb-nota-o',el).value.trim()},base,{metodo:m.metodo,monto:m.monto});if(!COMP_METODOS.includes(m.metodo))delete it.comp;items[newId()+i.toString(36)]=it;});
@@ -8307,7 +8316,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='beaf2c0014';
+const BUILD='b4200f497b';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
