@@ -15,7 +15,7 @@ const respHost=u=>{try{return new URL(u).host;}catch(e){return String(u||'');}};
 function respBar(){
   const b=$('#respBar');if(!b)return;
   const r=NET.respaldo;
-  if(!r||!NET.hasSession()||!S.ready){b.hidden=true;return;}
+  if(!r||!NET.hasSession()||!S.ready||S.role==='tecnico'){b.hidden=true;return;}   /* al técnico no le importa el estado de los servidores: eso lo ve quien administra */
   if(r.caido&&r.url){
     b.className='jrbar bad';b.hidden=false;
     b.innerHTML=`<span><b>${r.limite?'El servidor llegó al límite de hoy.':'El servidor no responde.'}</b> Hay un servidor de respaldo (${esc(respHost(r.url))}): se abre con tu misma sesión; si te pide entrar, usá tu mismo usuario y clave.</span><span class="jr-btns"><button class="btn small primary" type="button" id="resp-abrir">Abrir el respaldo</button></span>`;
