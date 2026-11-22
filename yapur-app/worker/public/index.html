@@ -8010,10 +8010,10 @@ const senalHace=ts=>{if(!ts)return 'nunca';const m=Math.round((Date.now()-ts)/6e
 /* ----- caídas: duración legible, hora legible y gráficas simples en SVG (sin librerías) ----- */
 const cdDur=ms=>{const m=Math.round(ms/6e4);if(m<1)return 'menos de 1 min';if(m<60)return m+' min';const h=Math.floor(m/60);if(h<24)return h+' h'+(m%60?' '+(m%60)+' min':'');const d=Math.floor(h/24);return d+' d'+(h%24?' '+(h%24)+' h':'');};
 const cdFecha=ts=>{const d=new Date(ts-3*36e5),p=n=>String(n).padStart(2,'0');return p(d.getUTCDate())+'/'+p(d.getUTCMonth()+1)+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes());};
-const cdColor=p=>p<0?'var(--line)':p===0?'var(--ok)':p<50?'var(--warn)':'var(--bad)';
+const cdColor=p=>p<0?'var(--line)':p===0?'var(--ok)':p<90?'var(--warn)':'var(--bad)';   /* rojo solo si casi no volvió ningún ping (caída real); las pérdidas parciales van en amarillo */
 function cdTira(tira,ahora){   /* 144 tramos de 10 minutos = las últimas 24 horas; verde sin pérdidas, amarillo con pérdidas, rojo sin respuesta, gris sin datos */
   const hs=[24,18,12,6,0].map(h=>h?cdFecha((ahora||Date.now())-h*36e5).slice(6):'ahora');
-  return `<svg viewBox="0 0 144 12" preserveAspectRatio="none" style="width:100%;height:22px;display:block;border-radius:5px" role="img" aria-label="Estado de las últimas 24 horas">${tira.map((p,i)=>`<rect x="${i}" y="0" width="0.82" height="12" fill="${cdColor(p)}"/>`).join('')}${[36,72,108].map(x=>`<line x1="${x}" x2="${x}" y1="0" y2="12" stroke="var(--surface)" stroke-width=".35" opacity=".7"/>`).join('')}</svg><div class="between small muted" style="font-size:11px;margin-top:2px">${hs.map(t=>`<span>${t}</span>`).join('')}</div><div class="gleg"><span><i style="background:var(--ok)"></i>Sin pérdidas</span><span><i style="background:var(--warn)"></i>Con pérdidas</span><span><i style="background:var(--bad)"></i>Sin respuesta</span><span><i style="background:var(--line)"></i>Sin datos</span></div>`;
+  return `<svg viewBox="0 0 144 12" preserveAspectRatio="none" style="width:100%;height:22px;display:block;border-radius:5px" role="img" aria-label="Estado de las últimas 24 horas">${tira.map((p,i)=>`<rect x="${i}" y="0" width="0.82" height="12" fill="${cdColor(p)}"><title>${cdFecha((ahora||Date.now())-(143-i)*6e5).slice(6)} · ${p<0?'sin datos':p===0?'sin pérdidas':p+'% de pérdidas'}</title></rect>`).join('')}${[36,72,108].map(x=>`<line x1="${x}" x2="${x}" y1="0" y2="12" stroke="var(--surface)" stroke-width=".35" opacity=".7"/>`).join('')}</svg><div class="between small muted" style="font-size:11px;margin-top:2px">${hs.map(t=>`<span>${t}</span>`).join('')}</div><div class="gleg"><span><i style="background:var(--ok)"></i>Sin pérdidas</span><span><i style="background:var(--warn)"></i>Con pérdidas (se perdió parte de los pings)</span><span><i style="background:var(--bad)"></i>Sin respuesta (caída)</span><span><i style="background:var(--line)"></i>Sin datos</span></div>`;
 }
 function cdBarras(dias){   /* caídas de ONU por día, últimos 14 días: con escala, promedio y el día de hoy resaltado */
   const max=Math.max(4,...dias.map(x=>x.n)),w=20,H=56,W=dias.length*w,top=max%2?max+1:max,avg=dias.reduce((a,x)=>a+x.n,0)/(dias.length||1),yv=v=>H-v/top*H;
@@ -8370,7 +8370,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='b504782d1e';
+const BUILD='d516b04427';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
