@@ -29,7 +29,7 @@ def ping(nodo):
     try: out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=cf, errors='replace').stdout
     except Exception: return {'n': n, 'sent': PINGS, 'rec': 0}
     # cuenta las respuestas reales («TTL=» sale en cualquier idioma; «host inaccesible» también responde pero no tiene TTL)
-    rec = len(re.findall(r'TTL=', out, re.I)); t = [int(x) for x in re.findall(r'(?:tiempo|time)\s*[=<]\s*(\d+)\s*ms', out, re.I)]
+    rec = len(re.findall(r'TTL=', out, re.I)); t = [float(x.replace(',', '.')) for x in re.findall(r'(?:tiempo|time)\s*[=<]\s*(\d+(?:[.,]\d+)?)\s*ms', out, re.I)]
     r = {'n': n, 'sent': PINGS, 'rec': min(rec, PINGS)}
     if t: r['ms'] = round(sum(t) / len(t), 1)
     return r
