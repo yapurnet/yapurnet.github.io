@@ -1780,7 +1780,8 @@ export class YapurDB extends DurableObject {
       const j = ult.indexOf(r.d); if (j >= 0) f.u7[j] = r.bi;
     }
     const clientes = [...por.values()];
-    return { ahora: Date.now(), dias, hoy, clientes, desde: (this.q1('SELECT MIN(d) d FROM cons_dia') || {}).d || null };
+    const serie = this.q('SELECT d, SUM(bi) bi, SUM(bo) bo FROM cons_dia WHERE d>=? GROUP BY d ORDER BY d', desde).map(r => ({ d: r.d, bi: r.bi, bo: r.bo }));
+    return { ahora: Date.now(), dias, hoy, clientes, serie, desde: (this.q1('SELECT MIN(d) d FROM cons_dia') || {}).d || null };
   }
   consumoCliente(u, ip, nom) {
     this.consumoPermiso(u);
