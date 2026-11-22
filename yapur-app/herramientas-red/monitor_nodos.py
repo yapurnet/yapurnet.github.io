@@ -33,18 +33,52 @@ def ping(nodo):
     r = {'n': n, 'sent': PINGS, 'rec': min(rec, PINGS)}
     if t: r['ms'] = round(sum(t) / len(t), 1)
     return r
-def main():
-    lista = nodos(); tok = leer('app_token.txt')
-    if not lista: log(time.strftime('%d/%m %H:%M:%S') + ' nodos.txt no tiene ningún nodo con IP: completalo (NOMBRE|IP).'); return
-    with ThreadPoolExecutor(max_workers=8) as ex: res = list(ex.map(ping, lista))
-    cuerpo = json.dumps({'nodos': res}).encode(); ult = None
+ACUM = os.path.join(AQUI, 'nodos_acum.json')
+def cargar_acum():
+    try: return json.load(open(ACUM, encoding='utf-8'))
+    except Exception: return {}
+def mandar(res):
+    cuerpo = json.dumps({'nodos': res}).encode(); tok = leer('app_token.txt'); ult = None
     for url in URLS:
         rq = urllib.request.Request(url, data=cuerpo, method='POST', headers={'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) YapurMonitor/1.0', 'Accept': 'application/json'})
-        try: urllib.request.urlopen(rq, timeout=20).read(); ult = None; break
+        try: urllib.request.urlopen(rq, timeout=20).read(); return None
         except urllib.error.HTTPError as e: ult = '%s -> HTTP %d: %s' % (url.split('/')[2], e.code, e.read()[:200].decode('utf-8', 'replace'))
         except Exception as e: ult = '%s -> %s' % (url.split('/')[2], e)
-    if ult: log(time.strftime('%d/%m %H:%M:%S') + ' Error: ' + ult)
-    elif '--detalle' in sys.argv or any(r['rec'] == 0 for r in res): log(time.strftime('%d/%m %H:%M:%S') + ' ' + ', '.join('%s %d/%d' % (r['n'], r['rec'], r['sent']) for r in res))
+    return ult
+def main():
+    """Hace ping cada minuto, pero junta las pruebas y manda UN resumen cada 10 minutos (la app guarda por tramos de 10 minutos y el plan gratis de Cloudflare limita las escrituras por día).
+    Si algún nodo no contesta ningún ping se manda enseguida, así la caída se detecta igual de rápido."""
+    lista = nodos()
+    if not lista: log(time.strftime('%d/%m %H:%M:%S') + ' nodos.txt no tiene ningún nodo con IP: completalo (NOMBRE|IP).'); return
+    with ThreadPoolExecutor(max_workers=8) as ex: res = list(ex.map(ping, lista))
+    ac = cargar_acum(); ya = '--ahora' in sys.argv or '--detalle' in sys.argv
+    fin_tramo = int(time.time() // 60) % 10 == 9                  # último minuto del tramo de 10 minutos de la app
+    envio, tocados = [], []
+    for r in res:
+        a = ac.get(r['n']) or {'sent': 0, 'rec': 0, 'ms': 0.0, 'mc': 0, 'caido': False}
+        if r['rec'] == 0 or a.get('caido') or ya:
+            # sin respuesta, o recién vuelve, o pedido a mano: se manda esta prueba sola y enseguida (así la caída y la vuelta se detectan al minuto)
+            e = {'n': r['n'], 'sent': r['sent'], 'rec': r['rec']}
+            if 'ms' in r: e['ms'] = r['ms']
+            envio.append(e); tocados.append((r['n'], r['rec'] == 0))
+        else:
+            a['sent'] += r['sent']; a['rec'] += r['rec']
+            if 'ms' in r: a['ms'] += r['ms']; a['mc'] += 1
+            if a['sent'] > 30:                                      # tope que acepta la app por tramo (si no se pudo mandar, se descartan las más viejas)
+                f = 30 / a['sent']; a['sent'] = 30; a['rec'] = min(30, round(a['rec'] * f)); a['ms'] *= f; a['mc'] = round(a['mc'] * f)
+            if fin_tramo and a['sent']:
+                e = {'n': r['n'], 'sent': a['sent'], 'rec': a['rec']}
+                if a['mc']: e['ms'] = round(a['ms'] / a['mc'], 1)
+                envio.append(e); tocados.append((r['n'], False))
+        ac[r['n']] = a
+    if envio:
+        ult = mandar(envio)
+        if ult: log(time.strftime('%d/%m %H:%M:%S') + ' Error: ' + ult)
+        else:
+            for n, cae in tocados: ac[n] = {'sent': 0, 'rec': 0, 'ms': 0.0, 'mc': 0, 'caido': cae}
+            if any(c for _, c in tocados): log(time.strftime('%d/%m %H:%M:%S') + ' ' + ', '.join('%s %d/%d' % (r['n'], r['rec'], r['sent']) for r in res))
+    try: json.dump(ac, open(ACUM, 'w', encoding='utf-8'))
+    except Exception: pass
     if '--detalle' in sys.argv: print('\n'.join('%s: %d de %d%s' % (r['n'], r['rec'], r['sent'], ' (%s ms)' % r['ms'] if 'ms' in r else '') for r in res))
 if __name__ == '__main__':
     try: main()
