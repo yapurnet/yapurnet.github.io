@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Mide cuánto consume cada cliente: lee por SNMP (solo lectura) los contadores de las colas simples de ADMIN02 cada vez que corre
-(la tarea programada lo ejecuta cada 5 minutos con --una-vez), suma lo que pasó desde la lectura anterior y una vez por hora manda a la app
+(la tarea programada lo ejecuta cada 5 minutos con --una-vez), suma lo que pasó desde la lectura anterior y cada 2 horas y media manda a la app
 los totales del día por cliente. Archivos al lado de este programa: mikrotik_comunidad.txt, app_token.txt (el mismo del lector de la OLT).
 Guarda su memoria en consumo_estado.json; si falla un envío, sigue sumando y lo manda en la próxima."""
 import os, sys, time, socket, json, urllib.request, urllib.error
 from olt_walk import pdu, parse_resp
 AQUI = os.path.dirname(os.path.abspath(__file__))
-HOST = '10.0.0.50'; URLS = ['https://yapur.mauroyapur.workers.dev/api/consumo/ingest']; ENVIAR_CADA = 55 * 60
+HOST = '10.0.0.50'; URLS = ['https://yapur.mauroyapur.workers.dev/api/consumo/ingest']; ENVIAR_CADA = 150 * 60
 B = '1.3.6.1.4.1.14988.1.1.2.1.1.'
 def leer(n): return open(os.path.join(AQUI, n), encoding='utf-8').read().strip()
 def log(txt):
