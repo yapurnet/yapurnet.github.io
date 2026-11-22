@@ -669,7 +669,7 @@ const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de es
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
 const ESQUEMA_V = '5';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
 const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
-const USO_FLUSH_MS = 5e3;            // el contador de consumo se anota en la base como mucho cada 5 segundos
+const USO_FLUSH_MS = 60e3;           // el contador de uso se anota en la base como mucho cada minuto (los lectores consultan cada pocos segundos: a 5 s gastaba ~17.000 escrituras por día)
 /* servidor de respaldo (segunda cuenta de Cloudflare): ver «respaldo» más abajo */
 const REP_DEB_MS = 20e3;             // los cambios se mandan al respaldo 20 segundos después del primero (varios cambios seguidos viajan juntos)
 const REP_LOTE = 120;                // elementos por envío
@@ -1519,12 +1519,15 @@ export class YapurDB extends DurableObject {
     if (lect.length > 8000) throw httpErr(413, 'Demasiadas ONU en una tanda.', 'quota_exceeded');
     const ts = Date.now(), num = v => { const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v; return typeof n === 'number' && isFinite(n) && n > -60 && n < 30 ? Math.round(n * 100) / 100 : null; };
     let n = 0, mapaN = null;
+    const igual = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(a - b) < 0.3), prev = new Map(this.q('SELECT k, rx, tx, est, port, name, ts FROM onus').map(r => [r.k, r]));
     this.tx(() => {
       for (const x of lect) {
         if (!isPlain(x)) continue;
         const k = String(x.sn || x.mac || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
         if (k.length < 6) continue;
-        this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, num(x.rx), num(x.tx), String(x.est || '').toLowerCase().slice(0, 12), String(x.port || '').slice(0, 20), String(x.name || '').slice(0, 40), ts);
+        const rx = num(x.rx), tx = num(x.tx), est = String(x.est || '').toLowerCase().slice(0, 12), port = String(x.port || '').slice(0, 20), name = String(x.name || '').slice(0, 40), p0 = prev.get(k);
+        /* plan gratis: solo se escribe la ONU si algo cambió (potencia más de 0,3 dB, estado, puerto o nombre) o si su lectura guardada ya tiene más de 30 minutos */
+        if (!(p0 && p0.est !== 'manual' && p0.est === est && p0.port === port && p0.name === name && igual(p0.rx, rx) && igual(p0.tx, tx) && ts - p0.ts < 30 * 6e4)) this.sql.exec('INSERT OR REPLACE INTO onus(k,rx,tx,est,port,name,ts) VALUES(?,?,?,?,?,?,?)', k, rx, tx, est, port, name, ts);
         n++;
       }
       this.sql.exec("DELETE FROM onus WHERE (est<>'manual' AND ts<?) OR ts<?", ts - 3 * 864e5, ts - 30 * 864e5);
