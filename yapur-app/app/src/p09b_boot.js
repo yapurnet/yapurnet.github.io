@@ -35,6 +35,7 @@ function allowedTabs(){
   const cli=['clientes',can('clientesTodos')?'Clientes':'Mis clientes'],ord=['ordenes','Órdenes'];
   if(S.role==='tecnico')t.push(ord,cli);else t.push(cli,ord);
   if(can('ordenesTodas'))t.push(['instalaciones','Instalaciones']);   /* cuántas se hicieron por día, semana y mes: lo ve quien ve las órdenes de todos */
+  if(crmOn())t.push(['crm','CRM']);   /* en prueba: solo si el administrador lo prendió en este aparato (Ajustes) */
   if(can('red')){t.push(['red','Red']);t.push(['senal','Señal']);if(S.role!=='tecnico'){t.push(['nodos','Nodos']);t.push(['consumo','Consumo']);}}
   if(soloCampo())t.push(['miscobros','Mis cobros']);
   if(can('precios'))t.push(['planes','Planes']);
