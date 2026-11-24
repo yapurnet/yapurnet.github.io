@@ -74,8 +74,8 @@ async def main():
         check('abre WhatsApp al número del cliente', href.startswith('https://wa.me/5493854123456?text='), href)
         texto = urllib.parse.unquote(href.split('text=', 1)[1])
         check('saluda según el momento del día', texto.startswith('¡Buen día!') or texto.startswith('¡Buenas tardes!') or texto.startswith('¡Buenas noches!'), texto)
-        check('se presenta con el nombre del técnico asignado', 'Soy el técnico Pedro, de YAPUR.NET.' in texto, texto)
-        check('avisa que ya sale, dejando domicilio/comercio para que el técnico borre el que no va', 'saliendo hacia su domicilio/comercio' in texto, texto)
+        check('nombra al cliente y se presenta con el nombre del técnico asignado', 'Cordoba Alicia, soy el técnico Pedro, de YAPUR.NET.' in texto, texto)
+        check('avisa que ya sale hacia su domicilio', 'saliendo hacia su domicilio.' in texto, texto)
         check('se despide con cordialidad', texto.strip().endswith('¡Hasta ahora!'), texto)
         check('el enlace abre en una pestaña aparte, sin tapar la app', await link.get_attribute('target') == '_blank')
         # 2) un técnico ajeno a una orden YA asignada a otro no la ve (filtro de «mías»/«libres»), así que no puede avisar nada
@@ -93,7 +93,7 @@ async def main():
         check('se ofrece igual de grande que «Salgo para allá» (btn primary, no small)', 'primary' in (await link2.get_attribute('class') or ''), await link2.get_attribute('class'))
         href2 = await link2.get_attribute('href')
         texto2 = urllib.parse.unquote(href2.split('text=', 1)[1])
-        check('se presenta con SU propio nombre aunque todavía no la tomó', 'Soy el técnico Otro, de YAPUR.NET.' in texto2, texto2)
+        check('se presenta con SU propio nombre aunque todavía no la tomó', 'el técnico Otro, de YAPUR.NET.' in texto2, texto2)
         async with ctx2.expect_page() as pop2:
             await link2.click()
         pop2p = await pop2.value; await pop2p.close()
@@ -109,7 +109,7 @@ async def main():
         check('una técnica con «ver todas las órdenes» también tiene «Avisar que salgo» en su propia orden', await linkf.count() == 1)
         hreff = await linkf.get_attribute('href')
         textof = urllib.parse.unquote(hreff.split('text=', 1)[1])
-        check('se presenta con su propio nombre', 'Soy el técnico Fernanda, de YAPUR.NET.' in textof, textof)
+        check('se presenta con su propio nombre', 'el técnico Fernanda, de YAPUR.NET.' in textof, textof)
         check('sigue viendo también el selector de técnico (no el filtro de mías/libres, propio de quien ve todas las órdenes)', await pf.query_selector('#or-tec') is not None)
         # 3) la oficina no tiene este enlace (tiene el suyo propio, «Enviar por WhatsApp», con los datos de la orden),
         #    ni en la orden asignada ni en una sin asignar
