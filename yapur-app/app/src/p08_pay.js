@@ -185,6 +185,9 @@ function mandarReciboWA(ev,d,tel,href){
   const via=reciboVia(),afuera=()=>NET.openExternal(href);
   if(!via){if(window.YapurApp){ev.preventDefault();afuera();}return;}   /* sin imagen posible: el enlace con el texto del recibo (en el APK lo abre el puente) */
   ev.preventDefault();
+  if(via==='portapapeles'||via==='descarga'){   /* en la computadora: se abre el chat del cliente en WhatsApp Web con el texto del recibo ya escrito, sin imagen */
+    abrirWhatsAppWeb(waWebUrl(tel,(d.anulado?'RECIBO ANULADO (sin validez) ':'Recibo ')+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total)));return;
+  }
   const nombre='Recibo-'+(d.anulado?'ANULADO-':'')+String(d.nro).replace(/[^A-Za-z0-9_-]/g,'')+'.png',cap=(d.anulado?'RECIBO ANULADO (sin validez) ':'Recibo ')+d.nro+' · '+(d.cliente.nombre||'')+' · '+fmtMoney(d.total);   /* el texto que acompaña la imagen dice a nombre de quién es: el abonado */
   try{
     const cv=receiptCanvas(d);
@@ -232,7 +235,7 @@ function openReceipt(recibo){
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
     ${arcaReciboHTML(ps)}
-    ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${reciboVia()==='portapapeles'?'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo.':'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.'}</div>`:''}
+    ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">En la computadora: se abre WhatsApp Web con el chat del cliente y el texto del recibo ya escrito. Solo tenés que mandarlo.</div>`:''}
     <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
