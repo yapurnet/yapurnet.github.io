@@ -687,6 +687,30 @@ function cuitOk(s){
   let v=11-t%11;if(v===11)v=0;else if(v===10)v=9;
   return v===Number(d[10]);
 }
+/* Pasar a un cliente de un ciclo de cobro al otro. Cada mes se cobra desde el «día de inicio» del ciclo hasta el mismo día del mes siguiente (sin incluirlo).
+   Al cambiar, el último período ya facturado llega hasta una fecha y el primero del ciclo nuevo empieza en otra: si empieza antes, hay días que ya están pagados (a favor del cliente);
+   si empieza después, quedan días sin cubrir (se le cobran). Los días se valoran al precio del mes siguiente dividido los días de ese mes.
+   Devuelve null si no hay nada que calcular (mismo ciclo, sin cobro, sin períodos). */
+function cicloCambio(c,nuevo){
+  nuevo=Number(nuevo)===2?2:1;const act=cicloOf(c);if(nuevo===act)return null;
+  const b=billing(c);if(!b.aplica)return null;
+  const cur=todayStr().slice(0,7),ult=b.periods.filter(p=>p.per<=cur).pop();if(!ult)return null;
+  const ini=(per,cy)=>per+'-'+pad(Math.min(cicloCfg(cy).desde,daysIn(per))),sig=addMonths(ult.per,1);
+  const hasta=ini(sig,act),desdeN=ini(sig,nuevo);
+  const dias=Math.round((new Date(desdeN+'T12:00:00')-new Date(hasta+'T12:00:00'))/864e5);
+  const precio=priceAt(c,sig),monto=Math.round(Math.abs(dias)*precio/daysIn(sig));
+  return {act,nuevo,ult:ult.per,debe:ult.rest,hasta,desdeN,dias,precio,monto,sig};
+}
+function cicloCambioTxt(r){
+  if(!r)return '';
+  const f=d=>dmy(d),m=monthLabel(r.ult),ms=monthLabel(r.sig);
+  let t=`Hoy el último mes facturado es ${m} (ciclo ${r.act}) y cubre hasta el ${f(dateAdd(r.hasta,-1))}. En el ciclo ${r.nuevo}, ${ms} empieza el ${f(r.desdeN)}. `;
+  if(r.debe>0)t+=`Antes de cambiar conviene cobrarle ${m} (debe ${fmtMoney(r.debe)}): si se cambia antes, cambian las fechas de vencimiento y de corte de ese mes. `;
+  if(r.dias<0)t+=`Hay ${-r.dias} día${r.dias===-1?'':'s'} que ya tiene pagados: a ${ms} cobrale ${fmtMoney(r.precio-r.monto)} en vez de ${fmtMoney(r.precio)} (descuento de ${fmtMoney(r.monto)}).`;
+  else if(r.dias>0)t+=`Quedan ${r.dias} día${r.dias===1?'':'s'} sin cubrir (del ${f(r.hasta)} al ${f(dateAdd(r.desdeN,-1))}): cobrale ${fmtMoney(r.monto)} por esos días, además de ${ms} (${fmtMoney(r.precio)}).`;
+  else t+='Los períodos empalman justo: no hay nada que ajustar.';
+  return t;
+}
 const cicloTxt=n=>{const k=cicloCfg(n);return `paga del ${k.desde} al ${k.hasta}, corte el ${k.corte}`;};
 const dm=d=>d?d.slice(8,10)+'/'+d.slice(5,7):'';
 const dateAdd=(d,n)=>{const [y,m,dd]=d.split('-').map(Number);const x=new Date(y,m-1,dd+n);return x.getFullYear()+'-'+pad(x.getMonth()+1)+'-'+pad(x.getDate());};
@@ -1907,7 +1931,7 @@ function openClientForm(id){
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
       <div class="grid2">${F('Fecha de alta','cf-alta',`<input id="cf-alta" type="date" value="${esc(c.alta||'')}">`)}${F('Cobrar desde (mes)','cf-desde',`<input id="cf-desde" type="month" value="${esc(c.desde||'')}">`,'Nuevo instalado: dejá el mes siguiente. Cliente que ya existía y falta cargar: poné este mes para cobrarle desde ahora.')}</div>
-      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
+      <div class="grid2">${F('Ciclo de cobro','cf-ciclo',`<select id="cf-ciclo"${old&&cuentaHead(old)!==old?' disabled':''}>${[1,2].map(n=>opt(n,'Ciclo '+n+': '+cicloTxt(n),cicloOf(c)===n)).join('')}</select>`,old&&cuentaHead(old)!==old?'Sigue el ciclo de la cuenta de '+esc(cuentaHead(old).nombre)+'. Para cambiarlo, cambialo en la cuenta principal.':'')}${old?'<div class="notice info" id="cf-ciclo-calc" hidden></div>':''}${F('Precio especial del plan (opcional)','cf-precio',`<input id="cf-precio" type="text" inputmode="decimal" autocomplete="off" value="${c.precio==null?'':esc(c.precio)}">`,'Reemplaza el precio del plan de internet; los servicios adicionales se suman aparte. <span id="cf-precio-h"></span>')}</div>
       <div class="grid2">${F('Deuda anterior que falta cobrar ($)','cf-da',`<input id="cf-da" type="text" inputmode="decimal" autocomplete="off" value="${deudaAntRest(c)?esc(deudaAntRest(c)):''}">`,'Lo que debía antes de empezar de cero. Va aparte: no genera cortes ni figura como moroso.')}${F('De qué meses','cf-dad',`<input id="cf-dad" autocomplete="off" placeholder="Octubre 2026" value="${esc(c.deudaAnt&&c.deudaAnt.det||'')}">`)}</div>
       ${isAdmin()?`<label class="per"><input id="cf-sc" type="checkbox"${c.sinCargo?' checked':''}><span class="grow"><b>Servicio sin cargo</b><br><span class="small muted">No paga ni genera deuda, figura «Al día» y nunca aparece para cortar. Para la casa del dueño, de la familia, etc.</span></span></label>
       <div id="cf-sc-box"${c.sinCargo?'':' hidden'}>${F('Motivo (opcional)','cf-scm',`<input id="cf-scm" autocomplete="off" maxlength="80" placeholder="Casa de Mauro" value="${esc(c.sinCargoMotivo||'')}">`,'Solo lo ves vos.')}
@@ -1942,6 +1966,7 @@ function openClientForm(id){
     }
     const read=bindGeoField(el);const readNap=bindNapField(el,old&&old.id);const v=i=>{const n=$('#'+i,el);return n?n.value.trim():undefined;};
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
+    const cicSel=$('#cf-ciclo',el);if(old&&cicSel&&!cicSel.disabled){const calc=()=>{const n=$('#cf-ciclo-calc',el),r=cicloCambio(old,cicSel.value);n.hidden=!r;n.textContent=r?cicloCambioTxt(r):'';};cicSel.addEventListener('change',calc);}   /* al pasar de un ciclo al otro, calcula solo lo que corresponde ajustar */
     const scChk=$('#cf-sc',el);if(scChk){const sync=()=>{$('#cf-sc-box',el).hidden=!scChk.checked;const w=$('#cf-sc-warn',el);if(w)w.hidden=!scChk.checked;};scChk.addEventListener('change',sync);sync();}
     const docIn=$('#cf-dni',el),docH=$('#cf-dni-h',el);
     if(docIn&&docH){const dm0=docH.textContent,chk=()=>{const d=docDigits(docIn.value);docH.className='';docH.textContent=dm0;
@@ -8370,7 +8395,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='6bc9c9c261';
+const BUILD='99c90ee201';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
