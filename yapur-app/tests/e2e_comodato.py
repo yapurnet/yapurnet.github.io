@@ -113,12 +113,12 @@ async def main():
         # 1b) el administrador mira y completa los modelos de equipos que van a elegir los técnicos
         await pa.click('#ct-aj-mod'); await pa.wait_for_selector('#cmmform')
         mods = await pa.evaluate("[...document.querySelectorAll('#cmm-rows .cm-modelo')].map(r=>r.querySelector('select').value+'|'+r.querySelector('input').value)")
-        check('en Ajustes ya están los modelos de la empresa: ONU Huawei, antena LiteBeam, inyector PoE y fuente de la ONU', mods == ['ONU|Huawei HG8145V5', 'Antena|CPE Ubiquiti LiteBeam Gen2', 'Fuente o adaptador|Inyector de corriente PoE', 'Fuente o adaptador|Fuente de corriente de la ONU'], mods)
+        check('en Ajustes ya están los modelos de la empresa: ONU Huawei y TP-Link, antena LiteBeam, inyector PoE y fuente de la ONU', mods == ['ONU|Huawei HG8145V5', 'ONU|TP-Link XZ000-G3', 'Antena|CPE Ubiquiti LiteBeam Gen2', 'Fuente o adaptador|Inyector de corriente PoE', 'Fuente o adaptador|Fuente de corriente de la ONU'], mods)
         await shot(pa, 'comodato-modelos.png')
-        await pa.click('#cmm-add'); await pa.fill('#cmm-d4', 'ZTE F670L')
+        await pa.click('#cmm-add'); await pa.fill('#cmm-d5', 'ZTE F670L')
         await pa.click('#cmmform button[type=submit]'); await pa.wait_for_selector('#cmmform', state='detached', timeout=5000)
         st, mj = api('GET', '/api/comodato/modelos', None, TA)
-        check('suma otra ONU (ZTE F670L) y queda guardada en el servidor', [m['d'] for m in mj['modelos'] if m['t'] == 'ONU'] == ['Huawei HG8145V5', 'ZTE F670L'], mj)
+        check('suma otra ONU (ZTE F670L) y queda guardada en el servidor', [m['d'] for m in mj['modelos'] if m['t'] == 'ONU'] == ['Huawei HG8145V5', 'TP-Link XZ000-G3', 'ZTE F670L'], mj)
 
         # 2) el técnico carga los equipos del cliente
         ctxT = await nuevo(br, 390, 844)
@@ -133,7 +133,7 @@ async def main():
         await pt.click('[data-cm=editar]'); await pt.wait_for_selector('#cmform')
         check('la lista de un cliente de fibra arranca con la ONU ya con el modelo de la lista (solo falta la MAC) y su fuente', await pt.input_value('#cm-t0') == 'ONU' and await pt.input_value('#cm-m0') == 'Huawei HG8145V5' and await pt.input_value('#cm-s0') == '' and await pt.input_value('#cm-t1') == 'Fuente o adaptador' and await pt.input_value('#cm-m1') == 'Fuente de corriente de la ONU')
         opts = await pt.evaluate("[...document.querySelectorAll('#cm-m0 option')].map(o=>o.value)")
-        check('el modelo se elige de la lista (con la ONU que sumó el administrador) y siempre se puede escribir otro', opts == ['Huawei HG8145V5', 'ZTE F670L', '__otro'], opts)
+        check('el modelo se elige de la lista (con la ONU que sumó el administrador) y siempre se puede escribir otro', opts == ['Huawei HG8145V5', 'TP-Link XZ000-G3', 'ZTE F670L', '__otro'], opts)
         check('mientras hay un modelo elegido, el cuadro para escribirlo está escondido', await pt.is_hidden('#cm-d0'))
         await pt.select_option('#cm-m0', '__otro')
         check('«Otro modelo» muestra el cuadro para escribirlo', await pt.is_visible('#cm-d0'))

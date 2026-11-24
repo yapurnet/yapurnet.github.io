@@ -494,6 +494,7 @@ function guardComodato(p, nw, prev) {
    De arranque están los que ya usa la empresa: la ONU de fibra, la antena de siempre con su inyector PoE y la fuente de la ONU. */
 const COMODATO_MODELOS_DEF = [
   { t: 'ONU', d: 'Huawei HG8145V5' },
+  { t: 'ONU', d: 'TP-Link XZ000-G3' },
   { t: 'Antena', d: 'CPE Ubiquiti LiteBeam Gen2' },
   { t: 'Fuente o adaptador', d: 'Inyector de corriente PoE' },
   { t: 'Fuente o adaptador', d: 'Fuente de corriente de la ONU' }
