@@ -1,4 +1,4 @@
-# Pasar a un cliente de un ciclo de cobro al otro: la app calcula cuánto ajustar (días ya pagados a favor / días sin cubrir) y lo avisa en la ficha de edición. Chromium real contra workerd.
+# Pasar a un cliente de un ciclo de cobro al otro: la app avisa que no hay prorrateo, lo que debe y desde cuándo paga en el ciclo nuevo, en la ficha de edición. Chromium real contra workerd.
 # según la hora, su nombre, que ya sale). Es un enlace editable de WhatsApp (nunca se manda solo), no una acción de la orden.
 # Se ofrece igual de grande que «Salgo para allá» tanto en la orden propia como en una sin asignar todavía (ahí firma el que
 # está por tomarla, y al tocarlo de paso la toma y la pasa a «en camino», como si hubiera tocado «Salgo para allá»). También
@@ -52,20 +52,16 @@ async def main():
         ctx = await br.new_context(viewport={'width': 420, 'height': 900}, bypass_csp=True)
         await ctx.route('**/fonts.g*/**', lambda r: r.abort())
         pg = await login(ctx, 'mauro', 'claveSegura1')
-        sig = (datetime.date(hoy.year + (hoy.month // 12), hoy.month % 12 + 1, 1)).strftime('%Y-%m')
         r = await pg.evaluate("cicloCambio(S.clientes.get('r'), 1)")
-        check('del ciclo 2 al 1 hay 12 días ya pagados (el mes nuevo empieza el 1 y lo facturado llega al 13)', r and r['dias'] == -12 and r['nuevo'] == 1 and r['act'] == 2, r)
-        import calendar
-        dm = calendar.monthrange(int(sig[:4]), int(sig[5:]))[1]
-        check('el descuento es de 12 días al precio diario del mes siguiente', r and r['monto'] == round(12 * 23000 / dm) and r['precio'] == 23000, r)
+        check('del ciclo 2 al 1 no hay descuento: avisa lo que debe y desde cuándo paga del 1 al 10', r and r['nuevo'] == 1 and r['act'] == 2 and r['debe'] == 23000 and r['desde'] == 1 and r['hasta'] == 10 and r['precio'] == 23000 and 'dias' not in r, r)
         r2 = await pg.evaluate("cicloCambio(S.clientes.get('u'), 2)")
-        check('del ciclo 1 al 2 quedan 12 días sin cubrir (se cobran)', r2 and r2['dias'] == 12 and r2['monto'] == round(12 * 23000 / dm), r2)
+        check('del ciclo 1 al 2 paga del 13 al 20', r2 and r2['desde'] == 13 and r2['hasta'] == 20, r2)
         check('con el mismo ciclo no hay nada que calcular', await pg.evaluate("cicloCambio(S.clientes.get('r'), 2)") is None)
         await pg.evaluate("openClientForm('r')"); await pg.wait_for_selector('#cf-ciclo')
         check('al abrir la ficha el aviso está oculto', await pg.is_hidden('#cf-ciclo-calc'))
         await pg.select_option('#cf-ciclo', '1')
         tx = await pg.inner_text('#cf-ciclo-calc')
-        check('al elegir el otro ciclo el aviso dice cuántos días y cuánto cobrar', '12 días' in tx and 'cobrale' in tx and 'en vez de' in tx and 'conviene cobrarle' in tx, tx)
+        check('al elegir el otro ciclo el aviso dice que no hay ajuste, cuánto debe y desde cuándo paga', 'no hay descuento ni recargo' in tx and 'cobrale eso antes de cambiar' in tx and 'del 1 al 10' in tx, tx)
         await pg.select_option('#cf-ciclo', '2')
         check('al volver al ciclo actual el aviso se oculta', await pg.is_hidden('#cf-ciclo-calc'))
         await br.close()
