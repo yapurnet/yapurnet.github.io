@@ -81,7 +81,7 @@ function comodatoBind(el,c){
 /* ----- cargar o editar los equipos prestados ----- */
 /* Los modelos se eligen de una lista (la edita el administrador en Ajustes) para que el técnico solo escriba la MAC.
    Esta copia es la de arranque: se usa si todavía no se pudo pedir la del servidor (mismos modelos que el servidor). */
-const CM_MODELOS_DEF=[{t:'ONU',d:'Huawei HG8145V5'},{t:'Antena',d:'CPE Ubiquiti LiteBeam Gen2'},{t:'Fuente o adaptador',d:'Inyector de corriente PoE'},{t:'Fuente o adaptador',d:'Fuente de corriente de la ONU'}];
+const CM_MODELOS_DEF=[{t:'ONU',d:'Huawei HG8145V5'},{t:'ONU',d:'TP-Link XZ000-G3'},{t:'Antena',d:'CPE Ubiquiti LiteBeam Gen2'},{t:'Fuente o adaptador',d:'Inyector de corriente PoE'},{t:'Fuente o adaptador',d:'Fuente de corriente de la ONU'}];
 const CM_SIN_MAC=['Fuente o adaptador','Cable de fibra'];   /* estos no tienen MAC ni serie que anotar */
 const CM_OTRO='__otro';
 S.cmModelos=null;

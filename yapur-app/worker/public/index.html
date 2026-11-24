@@ -2183,7 +2183,7 @@ function comodatoBind(el,c){
 /* ----- cargar o editar los equipos prestados ----- */
 /* Los modelos se eligen de una lista (la edita el administrador en Ajustes) para que el técnico solo escriba la MAC.
    Esta copia es la de arranque: se usa si todavía no se pudo pedir la del servidor (mismos modelos que el servidor). */
-const CM_MODELOS_DEF=[{t:'ONU',d:'Huawei HG8145V5'},{t:'Antena',d:'CPE Ubiquiti LiteBeam Gen2'},{t:'Fuente o adaptador',d:'Inyector de corriente PoE'},{t:'Fuente o adaptador',d:'Fuente de corriente de la ONU'}];
+const CM_MODELOS_DEF=[{t:'ONU',d:'Huawei HG8145V5'},{t:'ONU',d:'TP-Link XZ000-G3'},{t:'Antena',d:'CPE Ubiquiti LiteBeam Gen2'},{t:'Fuente o adaptador',d:'Inyector de corriente PoE'},{t:'Fuente o adaptador',d:'Fuente de corriente de la ONU'}];
 const CM_SIN_MAC=['Fuente o adaptador','Cable de fibra'];   /* estos no tienen MAC ni serie que anotar */
 const CM_OTRO='__otro';
 S.cmModelos=null;
@@ -8370,7 +8370,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='b8cd3a6ef1';
+const BUILD='6bc9c9c261';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
