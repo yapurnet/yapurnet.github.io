@@ -1,6 +1,6 @@
 # Recibo: período (del 1 al 1 del mes siguiente, vence el 10 del mes siguiente), sin el plan, media hoja A4 al imprimir
 # y «Enviar por WhatsApp» como imagen igual que el papel (APK, navegador del celular y computadora).
-import asyncio, base64, json, os, re, sys, urllib.request, urllib.error
+import asyncio, base64, json, os, re, sys, urllib.parse, urllib.request, urllib.error
 from playwright.async_api import async_playwright
 
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
@@ -129,22 +129,20 @@ async def main():
         check('en el navegador del celular abre el menú de compartir con el recibo como imagen PNG', len(sh['files']) == 1 and sh['files'][0][0] == 'Recibo-R261102-J2R.png' and sh['files'][0][1] == 'image/png' and sh['files'][0][2] > 5000 and 'R261102-J2R' in sh['text'], sh)
         await c2.close()
 
-        # 4c) computadora: copia la imagen y abre el chat en WhatsApp Web para pegarla
+        # 4c) computadora: abre el chat en WhatsApp Web con el texto del recibo (sin imagen)
         c3 = await br.new_context(viewport={'width': 1000, 'height': 800}, bypass_csp=True)
         await c3.grant_permissions(['clipboard-read', 'clipboard-write'], origin=BASE)
         await c3.route('**/fonts.g*/**', lambda r: r.abort())
         await c3.route('https://web.whatsapp.com/**', lambda r: r.fulfill(status=200, content_type='text/html', body='<h1>WhatsApp Web</h1>'))
         n3 = await login(c3)
         await n3.evaluate("openReceipt('R261102-J2R')"); await n3.wait_for_selector('#rc-wa')
-        check('en la computadora explica cómo usarlo (pegar con Ctrl+V en WhatsApp Web)', 'Ctrl+V' in await n3.inner_text('#rc-pc') and 'WhatsApp Web' in await n3.inner_text('#rc-pc'))
+        check('en la computadora explica que se abre WhatsApp Web con el texto ya escrito', 'texto del recibo' in await n3.inner_text('#rc-pc') and 'WhatsApp Web' in await n3.inner_text('#rc-pc') and 'Ctrl+V' not in await n3.inner_text('#rc-pc'))
         async with c3.expect_page(timeout=8000) as nueva:
             await n3.click('#rc-wa')
         wp = await nueva.value
         await wp.wait_for_url('https://web.whatsapp.com/send**', timeout=8000)
         check('en la computadora abre el chat del cliente directo en WhatsApp Web', wp.url.startswith('https://web.whatsapp.com/send?phone=5493844562605&text='), wp.url)
-        tipos = await n3.evaluate("(async () => { const it = await navigator.clipboard.read(); return it.map(i => i.types); })()")
-        check('y deja copiada la imagen del recibo para pegarla en el chat', tipos and 'image/png' in tipos[0], tipos)
-        check('con aviso de pegar', 'pegalo en el chat' in await n3.inner_text('#toastRoot'))
+        check('con el texto del recibo (número, cliente) ya escrito', 'R261102-J2R' in urllib.parse.unquote(wp.url), wp.url)
         # el segundo envío reutiliza la misma pestaña de WhatsApp Web
         await n3.evaluate("closeModal(); openReceipt('R261102-DOS')"); await n3.wait_for_selector('#rc-wa')
         antes = len(c3.pages)
@@ -152,23 +150,6 @@ async def main():
         await wp.wait_for_function("location.href.includes('R261102-DOS')", timeout=8000)
         check('el segundo recibo se manda en la misma pestaña de WhatsApp Web (no abre otra)', len(c3.pages) == antes and 'R261102-DOS' in wp.url, [antes, len(c3.pages), wp.url[:120]])
         await c3.close()
-
-        # 4d) navegador viejo (por ejemplo el de Windows 8.1): sin copiar imágenes, el recibo se descarga y se abre WhatsApp Web
-        c4 = await br.new_context(viewport={'width': 1000, 'height': 800}, bypass_csp=True, accept_downloads=True)
-        await c4.add_init_script("delete window.ClipboardItem;")
-        await c4.route('**/fonts.g*/**', lambda r: r.abort())
-        await c4.route('https://web.whatsapp.com/**', lambda r: r.fulfill(status=200, content_type='text/html', body='<h1>WhatsApp Web</h1>'))
-        n4 = await login(c4)
-        await n4.evaluate("openReceipt('R261102-J2R')"); await n4.wait_for_selector('#rc-wa')
-        check('sin portapapeles de imágenes, avisa que se descarga el recibo y cómo adjuntarlo (clip)', 'se descarga el recibo' in await n4.inner_text('#rc-pc') and 'clip' in await n4.inner_text('#rc-pc'))
-        async with c4.expect_page(timeout=8000) as nueva4, n4.expect_download(timeout=8000) as desc:
-            await n4.click('#rc-wa')
-        dl = await desc.value
-        w4 = await nueva4.value
-        await w4.wait_for_url('https://web.whatsapp.com/send**', timeout=8000)
-        check('se descarga el recibo como imagen PNG con su número', dl.suggested_filename == 'Recibo-R261102-J2R.png', dl.suggested_filename)
-        check('y se abre el chat del cliente en WhatsApp Web', w4.url.startswith('https://web.whatsapp.com/send?phone=5493844562605&text='), w4.url)
-        await c4.close()
 
         # 5) desde la ficha del cliente: cada pago abre su recibo (para reenviarlo o imprimirlo cuando se quiera)
         await pg.evaluate("openClient('c1')"); await pg.wait_for_selector('.sheet tr[data-receipt]')
