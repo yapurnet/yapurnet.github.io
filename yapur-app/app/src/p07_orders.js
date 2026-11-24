@@ -20,9 +20,8 @@ const saludoHora=()=>{const h=new Date().getHours();return h>=6&&h<13?'¡Buen d�
    tomarla (el que toca el botón) */
 const quienSale=o=>o.tecnico?tecLabel(o):((tecById(S.tecId)||{}).nombre||'');
 /* mensaje para avisarle al cliente que el técnico ya sale para allá, firmado con su nombre. Queda siempre editable en WhatsApp
-   antes de mandarlo (nunca se envía solo), así que «domicilio/comercio» se deja así a propósito: el técnico borra el que no
-   corresponda al tocar enviar, en vez de que la app tenga que adivinarlo */
-const salidaMsg=o=>`${saludoHora()} Soy el técnico ${quienSale(o)}, de YAPUR.NET. Le aviso que ya estoy saliendo hacia su domicilio/comercio. ¡Hasta ahora!`;
+   antes de mandarlo (nunca se envía solo), así que si el cliente es un comercio el técnico lo corrige al tocar enviar */
+const salidaMsg=o=>{const n=String(((S.clientes.get(o.clientId)||{}).nombre)||'').trim();return `${saludoHora()}${n?' '+n+',':''} ${n?'soy':'Soy'} el técnico ${quienSale(o)}, de YAPUR.NET. Le aviso que ya estoy saliendo hacia su domicilio. ¡Hasta ahora!`;};
 async function saveOrder(o,patch){
   const obj=Object.assign(stripInternal(o),patch,{mod:Date.now()});
   await putItem('ordenes',o._doc,o.id,obj);
