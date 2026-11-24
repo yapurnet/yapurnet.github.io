@@ -264,28 +264,23 @@ function cuitOk(s){
   let v=11-t%11;if(v===11)v=0;else if(v===10)v=9;
   return v===Number(d[10]);
 }
-/* Pasar a un cliente de un ciclo de cobro al otro. Cada mes se cobra desde el «día de inicio» del ciclo hasta el mismo día del mes siguiente (sin incluirlo).
-   Al cambiar, el último período ya facturado llega hasta una fecha y el primero del ciclo nuevo empieza en otra: si empieza antes, hay días que ya están pagados (a favor del cliente);
-   si empieza después, quedan días sin cubrir (se le cobran). Los días se valoran al precio del mes siguiente dividido los días de ese mes.
-   Devuelve null si no hay nada que calcular (mismo ciclo, sin cobro, sin períodos). */
+/* Pasar a un cliente de un ciclo de cobro al otro. El ciclo solo fija los días en que se paga: cada mes se cobra completo, sin prorrateo ni descuentos.
+   Lo único que importa es no cambiarlo con deuda: el mes que debe tomaría las fechas de vencimiento y corte del ciclo nuevo.
+   Devuelve null si no hay nada que avisar (mismo ciclo, sin cobro, sin períodos). */
 function cicloCambio(c,nuevo){
   nuevo=Number(nuevo)===2?2:1;const act=cicloOf(c);if(nuevo===act)return null;
   const b=billing(c);if(!b.aplica)return null;
   const cur=todayStr().slice(0,7),ult=b.periods.filter(p=>p.per<=cur).pop();if(!ult)return null;
-  const ini=(per,cy)=>per+'-'+pad(Math.min(cicloCfg(cy).desde,daysIn(per))),sig=addMonths(ult.per,1);
-  const hasta=ini(sig,act),desdeN=ini(sig,nuevo);
-  const dias=Math.round((new Date(desdeN+'T12:00:00')-new Date(hasta+'T12:00:00'))/864e5);
-  const precio=priceAt(c,sig),monto=Math.round(Math.abs(dias)*precio/daysIn(sig));
-  return {act,nuevo,ult:ult.per,debe:ult.rest,hasta,desdeN,dias,precio,monto,sig};
+  const sig=addMonths(ult.per,1),k=cicloCfg(nuevo);
+  return {act,nuevo,ult:ult.per,debe:ult.rest,sig,precio:priceAt(c,sig),desde:k.desde,hasta:k.hasta,corte:k.corte};
 }
 function cicloCambioTxt(r){
   if(!r)return '';
-  const f=d=>dmy(d),m=monthLabel(r.ult),ms=monthLabel(r.sig);
-  let t=`Hoy el último mes facturado es ${m} (ciclo ${r.act}) y cubre hasta el ${f(dateAdd(r.hasta,-1))}. En el ciclo ${r.nuevo}, ${ms} empieza el ${f(r.desdeN)}. `;
-  if(r.debe>0)t+=`Antes de cambiar conviene cobrarle ${m} (debe ${fmtMoney(r.debe)}): si se cambia antes, cambian las fechas de vencimiento y de corte de ese mes. `;
-  if(r.dias<0)t+=`Hay ${-r.dias} día${r.dias===-1?'':'s'} que ya tiene pagados: a ${ms} cobrale ${fmtMoney(r.precio-r.monto)} en vez de ${fmtMoney(r.precio)} (descuento de ${fmtMoney(r.monto)}).`;
-  else if(r.dias>0)t+=`Quedan ${r.dias} día${r.dias===1?'':'s'} sin cubrir (del ${f(r.hasta)} al ${f(dateAdd(r.desdeN,-1))}): cobrale ${fmtMoney(r.monto)} por esos días, además de ${ms} (${fmtMoney(r.precio)}).`;
-  else t+='Los períodos empalman justo: no hay nada que ajustar.';
+  const m=monthLabel(r.ult),ms=monthLabel(r.sig);
+  let t='El ciclo solo cambia los días de pago: cada mes se cobra completo, no hay descuento ni recargo. ';
+  if(r.debe>0)t+=`Debe ${fmtMoney(r.debe)} de ${m}: cobrale eso antes de cambiar el ciclo, si no ${m} pasa a vencer y cortarse con las fechas del ciclo nuevo. `;
+  else t+=`${m} está pagado. `;
+  t+=`Desde ${ms} paga ${fmtMoney(r.precio)} del ${r.desde} al ${r.hasta}, con corte el ${r.corte}.`;
   return t;
 }
 const cicloTxt=n=>{const k=cicloCfg(n);return `paga del ${k.desde} al ${k.hasta}, corte el ${k.corte}`;};
