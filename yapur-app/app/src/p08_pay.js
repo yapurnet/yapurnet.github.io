@@ -201,7 +201,8 @@ function mandarReciboWA(ev,d,tel,href){
           const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);
           toast('Se descargó el recibo ('+nombre+'). En WhatsApp Web tocá el clip, elegí «Fotos y videos» y seleccioná ese archivo.');
           abrirWhatsAppWeb(waWebUrl(tel,cap));
-        }else{await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);toast('Recibo copiado como imagen: pegalo en el chat (Ctrl+V)');abrirWhatsAppWeb(waWebUrl(tel,cap));}
+        }else{await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);try{window.postMessage({yapurWA:{png:cv.toDataURL('image/png'),nombre}},'*');}catch(_){}   /* si la extensión de la oficina está instalada, pega sola la imagen en WhatsApp Web */
+          toast('Recibo copiado como imagen: pegalo en el chat (Ctrl+V)');abrirWhatsAppWeb(waWebUrl(tel,cap));}
       }catch(err){if(err&&err.name==='AbortError')return;afuera();}
     },'image/png');
   }catch(err){afuera();}

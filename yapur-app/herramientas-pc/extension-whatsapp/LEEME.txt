@@ -1,0 +1,6 @@
+Extensión de Chrome para pegar el comprobante solo en WhatsApp Web.
+
+Instalar (una sola vez, en la compu de la oficina):
+1. En Chrome escribí chrome://extensions y activá «Modo de desarrollador» (arriba a la derecha).
+2. Tocá «Cargar descomprimida» y elegí esta carpeta (extension-whatsapp).
+3. Listo. Desde la app, «Enviar por WhatsApp» abre el chat y el comprobante aparece solo: apretás Enviar.
