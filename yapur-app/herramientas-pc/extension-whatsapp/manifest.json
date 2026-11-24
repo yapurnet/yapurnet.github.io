@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "YAPUR.NET · comprobante en WhatsApp Web",
+  "version": "1.0",
+  "description": "Pega solo el comprobante en el chat de WhatsApp Web cuando lo mandás desde la app de YAPUR.NET.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {"matches": ["https://yapur.mauroyapur.workers.dev/*", "https://yapur.yapurnet.workers.dev/*"], "js": ["app.js"], "run_at": "document_start"},
+    {"matches": ["https://web.whatsapp.com/*"], "js": ["wa.js"], "run_at": "document_idle"}
+  ]
+}
