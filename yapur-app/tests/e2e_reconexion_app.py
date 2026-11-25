@@ -74,6 +74,8 @@ async def main():
         check('el script solo reactiva: desactiva entradas y habilita usuarios, nunca corta', 'address-list disable' in sc and 'secret enable' in sc and 'address-list add' not in sc and 'secret disable' not in sc and 'address-list enable' not in sc and 'remove' not in sc.split('source={')[1])
         check('el script está en ASCII puro (el terminal de MikroTik no respeta las tildes)', all(ord(ch) < 128 for ch in sc))
         check('la programación corre cada minuto', 'interval=1m' in tas[1] and 'yapur-reconexion' in tas[1], tas[1])
+        cp = await pg.eval_on_selector_all('[role=dialog] [data-copy]', 'e=>e.map(x=>x.dataset.copy)')
+        check('los botones de copiar llevan el script y la programación completos (no una palabra suelta)', len(cp) == 2 and cp[0] == sc and cp[1] == tas[1] and len(cp[0]) > 500, [c[:40] for c in cp])
         await pg.keyboard.press('Escape')
         await pg.evaluate("document.body.insertAdjacentHTML('beforeend','<div id=\"cx-t\"></div>')")
         await pg.evaluate("drawRecoEstado(document.getElementById('cx-t'))"); await pg.wait_for_selector('#cx-t .card', timeout=6000)
