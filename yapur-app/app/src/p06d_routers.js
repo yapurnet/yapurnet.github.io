@@ -127,7 +127,7 @@ ${flush}
 :local enviar do={
   :local ok false
   :do {
-    /tool fetch url=($url . "?run=" . $run . "&part=" . $part . "&fin=" . $fin) http-method=post http-header-field=("Content-Type: text/plain,Authorization: Bearer " . $token) http-data=$body output=none keep-result=no check-certificate=no
+    /tool fetch url=($url . "\\3Frun=" . $run . "&part=" . $part . "&fin=" . $fin) http-method=post http-header-field=("Content-Type: text/plain,Authorization: Bearer " . $token) http-data=$body output=none keep-result=no check-certificate=no
     :set ok true
   } on-error={ :set ok false }
   :return $ok
@@ -147,7 +147,7 @@ ${parts.join('\n')}
   :put ("YAPUR: listo, " . $total . " registros enviados en " . $part . " tanda(s).")
   :do { :log info ("YAPUR: " . $total . " registros enviados") } on-error={}
 }`;
-  /* el terminal de MikroTik no siempre respeta las tildes: el script va en ASCII puro */
+  /* el terminal de MikroTik no siempre respeta las tildes: el script va en ASCII puro. Tampoco puede llevar un «?» suelto: el terminal lo toma como pedido de ayuda y lo borra al pegar (por eso las direcciones llevan \\3F, que RouterOS lee como «?») */
   const ascii=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x09\x0a\x20-\x7e]/g,'?');
   return ascii(`:do { /system script remove [find name="yapur-clientes"] } on-error={}\n/system script add name=yapur-clientes policy=read,test comment="YAPUR.NET envia clientes (solo lectura)" source={\n${body}\n}`);
 }
@@ -259,7 +259,7 @@ function rtPingScript(token){
         :local rec 0
         :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
         :do {
-          /tool fetch url=($base . "?id=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+          /tool fetch url=($base . "\\3Fid=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
         } on-error={}
         :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
         :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
@@ -355,7 +355,7 @@ function rtRecoScript(token){
   }
   :if ([:len $hechos] > 0) do={
     :do {
-      /tool fetch url=($base . "?ok=" . $hechos) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+      /tool fetch url=($base . "\\3Fok=" . $hechos) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
     } on-error={}
   }
 }`;
