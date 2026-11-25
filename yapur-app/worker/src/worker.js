@@ -666,9 +666,10 @@ export default {
    El plan gratis limita por día los pedidos, las escrituras en la base y el tiempo que el servidor está «despierto». Un servidor que recibe un pedido
    cada pocos segundos no llega a dormirse nunca, y cada escritura de rutina (quién estuvo conectado, qué consultó un router) se suma al tope. */
 const SESION_VISTO_MS = 5 * 60e3;    // «visto por última vez» de una sesión y de su equipo: se anota cada 5 minutos como mucho
+const RECO_GUARDA_MS = 3 * 864e5;     // una reconexión pendiente se ofrece a los routers durante 3 días
 const PING_VIVO_MS = 150e3;          // un router que consultó hace menos de esto está atendiendo las pruebas de conexión
 const PING_ARMADO_MS = 3 * 60e3;     // tiempo que el router consulta seguido después de que alguien pidió o está por pedir una prueba
-const ESQUEMA_V = '5';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
+const ESQUEMA_V = '6';               // versión de las columnas agregadas con ALTER TABLE: al agregar otra, subir el número (se aplican una sola vez, no en cada despertar)
 const MANT_CADA_MS = 6 * 3600e3;     // la limpieza de lo viejo (posiciones, sesiones, horas…) corre como mucho cada 6 horas, no en cada despertar del servidor
 const USO_FLUSH_MS = 60e3;           // el contador de uso se anota en la base como mucho cada minuto (los lectores consultan cada pocos segundos: a 5 s gastaba ~17.000 escrituras por día)
 /* servidor de respaldo (segunda cuenta de Cloudflare): ver «respaldo» más abajo */
@@ -877,7 +878,10 @@ export class YapurDB extends DurableObject {
     if (!esq || esq.v !== ESQUEMA_V) {
       for (const col of ['ingreso2 INTEGER', 'ev TEXT', 'tr TEXT', 'adj TEXT']) { try { this.sql.exec('ALTER TABLE jornada ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
       try { this.sql.exec('ALTER TABLE sessions ADD COLUMN dev TEXT'); } catch (e) { /* la tabla ya la tiene */ }
-      for (const col of ['pth TEXT', 'pvisto INTEGER']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+      for (const col of ['pth TEXT', 'pvisto INTEGER', 'rth TEXT']) { try { this.sql.exec('ALTER TABLE routers ADD COLUMN ' + col); } catch (e) { /* la tabla ya la tiene */ } }
+      /* reconexión automática: reco = clientes que pasaron de suspendido a activo y hay que reactivar en los routers; reco_ack = qué router ya lo hizo */
+      this.sql.exec('CREATE TABLE IF NOT EXISTS reco(id TEXT PRIMARY KEY, cid TEXT NOT NULL, ip TEXT, usuario TEXT, nombre TEXT, ts INTEGER NOT NULL, por TEXT) WITHOUT ROWID');
+      this.sql.exec('CREATE TABLE IF NOT EXISTS reco_ack(rid TEXT NOT NULL, router TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(rid,router)) WITHOUT ROWID');
       this.sql.exec('CREATE TABLE IF NOT EXISTS repcola(k TEXT PRIMARY KEY, ts INTEGER NOT NULL) WITHOUT ROWID');   /* cambios que faltan mandar al servidor de respaldo */
       /* historial de caídas: evt = cada caída (k = serie de la ONU o «N:nombre» de un nodo; dur en ms cuando ya volvió), est = estado actual de cada uno, nodomin = pings por tramos de 10 minutos */
       this.sql.exec('CREATE TABLE IF NOT EXISTS evt(k TEXT NOT NULL, ts INTEGER NOT NULL, dur INTEGER, PRIMARY KEY(k,ts)) WITHOUT ROWID');
@@ -1174,6 +1178,7 @@ export class YapurDB extends DurableObject {
       /* la base de Cloudflare admite hasta 2 MB por fila: se mide en bytes, no en letras */
       if (s.length > 6e5 && bytesOf(s) > 1.9e6) throw httpErr(413, 'El documento es demasiado grande.', 'quota_exceeded');
       this.putDoc(coll, id, s);
+      if (coll === 'clientes') this.recoDetectar(existing, next, data, u);
       if (coll === 'pagos') {   /* la foto del comprobante queda atada a este cobro: no se puede usar en otro */
         for (const k of Object.keys(data.items)) {
           const it = data.items[k];
@@ -2488,9 +2493,10 @@ export class YapurDB extends DurableObject {
   /* ================= routers MikroTik (solo lectura) =================
      El sistema NO se conecta a los routers ni guarda usuario ni clave de ninguno: cada router manda por su cuenta,
      con un script de solo lectura, la lista de sus colas, secretos PPPoE y leases DHCP estáticos. Con este token
-     lo único que se puede hacer es dejar esa lista acá: no hay ningún camino para cortar o cambiar algo en un router. */
+     lo único que se puede hacer es dejar esa lista acá: no hay ningún camino para cortar o cambiar algo en un router.
+     (Aparte, el token de reconexión solo sirve para que el router pregunte a quién reactivar: tampoco permite cortar a nadie.) */
   routerPublic(r) {
-    return { id: r.id, nombre: r.nombre, kinds: String(r.kinds || 'q').split(',').filter(Boolean), creado: r.creado, visto: r.visto || null, total: r.total || 0, ident: r.ident || '', ros: r.ros || '', hayDatos: !!r.run, ping: !!r.pth, pingVisto: r.pvisto || null };
+    return { id: r.id, nombre: r.nombre, kinds: String(r.kinds || 'q').split(',').filter(Boolean), creado: r.creado, visto: r.visto || null, total: r.total || 0, ident: r.ident || '', ros: r.ros || '', hayDatos: !!r.run, ping: !!r.pth, pingVisto: r.pvisto || null, reco: !!r.rth, recoVisto: (this.RVISTO && this.RVISTO[r.id]) || null };
   }
   routerList() { return this.q('SELECT * FROM routers ORDER BY nombre COLLATE NOCASE').map(r => this.routerPublic(r)); }
   routerKinds(v) {
@@ -2561,6 +2567,79 @@ export class YapurDB extends DurableObject {
       this.sql.exec('DELETE FROM rsnap WHERE router=? AND run<>?', r.id, run);
     });
     return { ok: true, part, registros: c.n, total, ignorados: c.bad };
+  }
+
+  /* ----- reconexión automática -----
+     Cuando un cliente pasa de «suspendido» a «activo» (porque se registró su pago, se cargó una promesa o se lo marcó reconectado), el servidor lo anota acá.
+     Cada router consulta con su propio token de reconexión (que solo sirve para esto), desactiva a ese cliente en su lista «Clientes Cortados» (o habilita su usuario PPPoE)
+     y avisa que lo hizo. El sistema no entra a los routers y este acceso no permite cortar a nadie: solo recibir la lista de a quién reconectar. */
+  async routerRecoToken(id) {
+    const secret = b64u(rnd(24));
+    this.sql.exec('UPDATE routers SET rth=? WHERE id=?', await sha(secret), id);
+    if (this.RVISTO) delete this.RVISTO[id];
+    return id + '.' + secret;
+  }
+  async routerRecoAuth(request) {
+    const ip = this.clientIp(request), key = 'rtr|' + ip;
+    if (this.locked(key)) throw httpErr(429, 'Demasiados intentos. Esperá un momento.', 'resource_exhausted');
+    const tk = String((request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).trim(), i = tk.indexOf('.');
+    const r = i > 0 ? this.q1('SELECT * FROM routers WHERE id=?', tk.slice(0, i)) : null;
+    if (!r || !r.rth || !safeEq(await sha(tk.slice(i + 1)), r.rth)) { this.addFail(key, 8); throw httpErr(401, 'Token de router inválido.', 'unauthenticated'); }
+    this.clearFail(key);
+    return r;
+  }
+  /* un usuario PPPoE solo con letras, números y . _ @ - (va dentro de una lista separada por comas que lee el router) */
+  recoUsuario(t) { const u = String(t == null ? '' : t).trim(); return /^[A-Za-z0-9._@-]{1,60}$/.test(u) ? u : ''; }
+  recoEncolar(cid, c, u) {
+    const ip = this.ipUna(c.ip), usuario = this.recoUsuario(c.usuario);
+    if (!ip && !usuario) return;
+    this.sql.exec('DELETE FROM reco WHERE cid=?', cid);
+    const id = hex(rnd(5));
+    this.sql.exec('INSERT INTO reco(id,cid,ip,usuario,nombre,ts,por) VALUES(?,?,?,?,?,?,?)', id, cid, ip, usuario, String(c.nombre || '').slice(0, 60), Date.now(), String((u && (u.nombre || u.usuario)) || '').slice(0, 60));
+    const viejo = Date.now() - RECO_GUARDA_MS;
+    this.sql.exec('DELETE FROM reco WHERE ts<?', viejo);
+    this.sql.exec('DELETE FROM reco_ack WHERE rid NOT IN (SELECT id FROM reco)');
+  }
+  /* se lo volvió a suspender (o dar de baja) antes de que algún router lo reconecte: se cancela, para que no lo reactive de más */
+  recoQuitar(cid) { this.sql.exec('DELETE FROM reco WHERE cid=?', cid); this.sql.exec('DELETE FROM reco_ack WHERE rid NOT IN (SELECT id FROM reco)'); }
+  /* se llama al guardar clientes: mira solo los registros que cambiaron en este pedido */
+  recoDetectar(existing, next, data, u) {
+    const its = isPlain(data) && isPlain(data.items) ? data.items : null;
+    if (!its || !isPlain(next) || !isPlain(next.items)) return;
+    for (const k of Object.keys(its)) {
+      const a = existing && isPlain(existing.items) ? existing.items[k] : null, b = next.items[k];
+      if (!isPlain(a) || !isPlain(b)) continue;
+      if (a.estado === 'suspendido' && b.estado === 'activo') this.recoEncolar(k, b, u);
+      else if (a.estado === 'activo' && b.estado !== 'activo') this.recoQuitar(k);
+    }
+  }
+  /* el router consulta: «id:ip:usuario,id:ip:usuario» de lo que todavía no hizo (vacío si no hay nada). No escribe en la base. */
+  async routerRecoPoll(request) {
+    const r = await this.routerRecoAuth(request);
+    (this.RVISTO = this.RVISTO || {})[r.id] = Date.now();
+    const desde = Date.now() - RECO_GUARDA_MS;
+    return this.q('SELECT id,ip,usuario FROM reco WHERE ts>? AND NOT EXISTS (SELECT 1 FROM reco_ack a WHERE a.rid=reco.id AND a.router=?) ORDER BY ts LIMIT 30', desde, r.id)
+      .map(x => x.id + ':' + (x.ip || '') + ':' + (x.usuario || '')).join(',');
+  }
+  /* el router avisa cuáles ya hizo: ?ok=id1,id2 */
+  async routerRecoOk(request, url) {
+    const r = await this.routerRecoAuth(request);
+    (this.RVISTO = this.RVISTO || {})[r.id] = Date.now();
+    let n = 0;
+    for (const id of String(url.searchParams.get('ok') || '').split(',').map(x => x.trim()).filter(x => /^[0-9a-f]{10}$/.test(x)).slice(0, 30)) {
+      if (!this.q1('SELECT 1 x FROM reco WHERE id=?', id)) continue;
+      this.sql.exec('INSERT OR IGNORE INTO reco_ack(rid,router,ts) VALUES(?,?,?)', id, r.id, Date.now()); n++;
+    }
+    return { ok: true, n };
+  }
+  /* para la pantalla de cortes: lo último que se mandó a reconectar y qué routers ya lo hicieron */
+  recoVer() {
+    const routers = this.q('SELECT id,nombre FROM routers WHERE rth IS NOT NULL ORDER BY nombre COLLATE NOCASE');
+    const items = this.q('SELECT id,cid,nombre,ip,usuario,ts,por FROM reco ORDER BY ts DESC LIMIT 20').map(x => ({
+      id: x.id, cid: x.cid, nombre: x.nombre, ip: x.ip, usuario: x.usuario, ts: x.ts, por: x.por,
+      hechos: this.q('SELECT router FROM reco_ack WHERE rid=?', x.id).map(a => a.router)
+    }));
+    return { routers: routers.map(r => ({ id: r.id, nombre: r.nombre, visto: (this.RVISTO && this.RVISTO[r.id]) || null })), items };
   }
 
   /* ----- pruebas de conexión (ping) -----
@@ -3794,6 +3873,9 @@ export class YapurDB extends DurableObject {
     if (p === '/api/olt/ping' && (m === 'GET' || m === 'POST')) { const t = await this.lectorPing(request, url, m); return m === 'GET' ? send(200, t, { 'Content-Type': 'text/plain; charset=utf-8' }) : send(200, t); }
     if (p === '/api/router/ping' && m === 'GET') return send(200, await this.routerPingPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
     if (p === '/api/router/ping' && m === 'POST') return send(200, await this.routerPingResult(request, url));
+    if (p === '/api/router/reco' && m === 'GET') return send(200, await this.routerRecoPoll(request), { 'Content-Type': 'text/plain; charset=utf-8' });
+    if (p === '/api/router/reco' && m === 'POST') return send(200, await this.routerRecoOk(request, url));
+    if (p === '/api/reco' && m === 'GET') { const { user } = await this.needAuth(request); if (!effPerms(user).editarClientes && user.role !== 'admin') throw httpErr(403, 'No tenés permiso.', 'permission_denied'); return send(200, this.recoVer()); }
     if (p === '/api/ping' && m === 'POST') return send(200, { ping: this.pingPedir((await this.needAuth(request)).user, readBody(raw, 1e3)) });
     if (p === '/api/arca' && m === 'GET') { await this.needAdmin(request); return send(200, this.arcaVer()); }
     if (p === '/api/arca' && m === 'PUT') { await this.needAdmin(request); return send(200, this.arcaConfig(readBody(raw, 2e3))); }
@@ -3838,13 +3920,14 @@ export class YapurDB extends DurableObject {
     }
     if (p === '/api/routers' && m === 'GET') { await this.needAdmin(request); return send(200, { routers: this.routerList() }); }
     if (p === '/api/routers' && m === 'POST') { await this.needAdmin(request); return send(200, await this.routerCreate(readBody(raw, 1e4))); }
-    if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/ping-token|\/items)?$/.exec(p))) {
+    if ((mm = /^\/api\/routers\/(r[0-9a-f]{10})(\/token|\/ping-token|\/reco-token|\/items)?$/.exec(p))) {
       await this.needAdmin(request);
       const id = mm[1], r = this.q1('SELECT * FROM routers WHERE id=?', id);
       if (!r) throw httpErr(404, 'No existe ese router.');
       if (mm[2] === '/items' && m === 'GET') return send(200, this.routerItems(id), { 'Content-Type': 'application/json; charset=utf-8' });
       if (mm[2] === '/token' && m === 'POST') return send(200, { token: await this.routerNewToken(id) });
       if (mm[2] === '/ping-token' && m === 'POST') return send(200, { token: await this.routerPingToken(id) });
+      if (mm[2] === '/reco-token' && m === 'POST') return send(200, { token: await this.routerRecoToken(id) });
       if (!mm[2] && m === 'PATCH') {
         const b = readBody(raw, 1e4), nombre = b.nombre === undefined ? r.nombre : String(b.nombre).trim().replace(/\s+/g, ' ').slice(0, 40);
         if (!nombre) throw httpErr(400, 'Falta el nombre del router.');
