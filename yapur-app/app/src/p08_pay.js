@@ -715,13 +715,15 @@ function waEstadoHTML(w){
   if(w.e==='sin_tel')return `<div class="notice bad" id="rc-wa-st">No se envió por WhatsApp: ${esc(w.err||'el cliente no tiene teléfono')}</div>`;
   return `<div class="notice bad" id="rc-wa-st">No se pudo enviar por WhatsApp${w.err?': '+esc(w.err):'.'}</div>`;
 }
+/* nombre completo para los mensajes a clientes: tal como está cargado, prolijo (sin espacios de más y con mayúscula inicial en cada palabra) */
+const nomMsg=c=>String((c&&c.nombre)||'').trim().replace(/\s+/g,' ').toLowerCase().replace(/(^|[\s.\-'])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase());
 function deudaAntMsg(c,r){
   const d=c.deudaAnt&&c.deudaAnt.det;
-  return `Hola ${c.nombre.split(' ')[0]}, te escribimos de ${S.ajustes.empresa}. Tenés una deuda anterior pendiente de ${fmtMoney(r)}${d?' ('+d+')':''}. Si ya abonaste, avisanos y lo revisamos. ¡Gracias!`;
+  return `Hola ${nomMsg(c)}, te escribimos de ${S.ajustes.empresa}. Tenés una deuda anterior pendiente de ${fmtMoney(r)}${d?' ('+d+')':''}. Si ya abonaste, avisanos y lo revisamos. ¡Muchas gracias por elegirnos!`;
 }
 function morosoMsg(c,b){
   const meses=b.periods.filter(p=>p.rest>0&&p.venc&&p.per<=todayStr().slice(0,7)).map(p=>monthLabel(p.per));
-  return `Hola ${c.nombre.split(' ')[0]}, te escribimos de ${S.ajustes.empresa}. Tenés pendiente el pago del servicio: ${meses.join(', ')} (total ${fmtMoney(b.deuda)}). Si ya abonaste, avisanos y lo revisamos. ¡Gracias!`;
+  return `Hola ${nomMsg(c)}, te escribimos de ${S.ajustes.empresa}. Tenés pendiente el pago del servicio: ${meses.join(', ')} (total ${fmtMoney(b.deuda)}). Si ya abonaste, avisanos y lo revisamos. ¡Muchas gracias por elegirnos!`;
 }
 
 /* ===== promesas de pago ===== */
@@ -767,7 +769,7 @@ function openPromesa(id){
         const go=$('#pm-go',el);go.disabled=true;
         try{
           await saveClient(cc,patch);toast('Promesa registrada');
-          const msg=`Hola ${(c.nombre||'').split(' ')[0]}, te confirmamos tu promesa de pago: tenés tiempo hasta el ${dmy(h)} para abonar. Pasada esa fecha el servicio se suspende automáticamente. ¡Gracias! - ${S.ajustes.empresa}`;
+          const msg=`Hola ${nomMsg(c)}, te confirmamos tu promesa de pago: tenés tiempo hasta el ${dmy(h)} para abonar. Pasada esa fecha el servicio se suspende automáticamente. ¡Muchas gracias por elegirnos! - ${S.ajustes.empresa}`;
           $('#pm-main',el).innerHTML=`<div class="notice ok">Promesa registrada hasta el <b>${esc(dmy(h))}</b>${rc&&rc.checked?'. El cliente quedó activo.':'.'}</div>
             <div class="actions start" style="margin-top:12px">${c.tel&&can('telefono')?`<a class="btn primary" target="_blank" rel="noopener" href="${waUrl(c.tel,msg)}">Avisarle por WhatsApp</a>`:''}<button class="btn ghost" type="button" data-close>Listo</button></div>`;
         }catch(err){dbError(err);go.disabled=false;}
