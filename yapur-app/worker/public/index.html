@@ -5243,8 +5243,8 @@ function openRecoScript(r,token){
   const script=rtRecoScript(token);
   const step=(n,t,body)=>`<div class="card flat"><h3>${n}. ${t}</h3>${body}</div>`;
   const html=`<div class="notice info">Con esto, cuando un cliente suspendido <b>paga o se le carga una promesa</b>, <b>${esc(r.nombre)} lo reconecta solo en menos de un minuto</b>: desactiva al cliente en la lista <span class="mono">Clientes Cortados</span> y habilita su usuario PPPoE, sin que tengas que tocar el router. El script <b>solo reactiva</b>: no puede cortar a nadie ni cambiar otra cosa, y lleva un acceso propio de este router (no lo compartas).</div>
-    ${step(1,'Pegar el script',`<p class="small muted">En WinBox: <b>Nuevo terminal</b> y pegalo entero. Crea un script llamado <span class="mono">yapur-reconexion</span> (si ya existía, lo reemplaza).</p><div class="actions start"><button class="btn primary small" type="button" data-copy="script">Copiar script</button></div><textarea class="mono small" readonly rows="6" style="width:100%">${esc(script)}</textarea>`)}
-    ${step(2,'Dejarlo programado',`<p class="small muted">Pegalo en el mismo terminal. Hace que el router corra el script <b>una vez por minuto</b>.</p><div class="actions start"><button class="btn small" type="button" data-copy="sched">Copiar programación</button></div><textarea class="mono small" readonly rows="3" style="width:100%">${esc(rtRecoSched())}</textarea>`)}
+    ${step(1,'Pegar el script',`<p class="small muted">En WinBox: <b>Nuevo terminal</b> y pegalo entero. Crea un script llamado <span class="mono">yapur-reconexion</span> (si ya existía, lo reemplaza).</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div><textarea class="mono small" readonly rows="6" style="width:100%">${esc(script)}</textarea>`)}
+    ${step(2,'Dejarlo programado',`<p class="small muted">Pegalo en el mismo terminal. Hace que el router corra el script <b>una vez por minuto</b>.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtRecoSched())}" data-copy-label="Programación">Copiar programación</button></div><textarea class="mono small" readonly rows="3" style="width:100%">${esc(rtRecoSched())}</textarea>`)}
     ${step(3,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Reconexión automática: atendiendo»</b> (tocá <b>Actualizar</b>). En <b>Cortes</b> también se ve el estado y cuáles se reconectaron.</p>`)}
     <p class="small muted">Esto hace falta en cada router donde cortás clientes (los que usan la lista <span class="mono">Clientes Cortados</span> o PPPoE): cada uno tiene su propio script y su propio acceso. Si un router no tiene al cliente, simplemente lo ignora.</p>
     <details class="small"><summary>Si algo falla</summary><ul class="small muted">
@@ -5255,9 +5255,7 @@ function openRecoScript(r,token){
       <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-reconexion]</span></li>
       <li><b>Consultas:</b> unas 1.440 por día por router. Si un router ya cortó a un cliente a mano, no lo vuelve a reconectar: solo reactiva a quien el sistema marcó como reconectado.</li></ul></details>
     <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
-  openModal({title:'Reconexión automática · '+r.nombre,html,wide:true,onMount(el){
-    $$('[data-copy]',el).forEach(b=>b.addEventListener('click',()=>copyText(b.dataset.copy==='script'?script:rtRecoSched(),b.dataset.copy==='script'?'Script':'Programación')));
-  }});
+  openModal({title:'Reconexión automática · '+r.nombre,html,wide:true});   /* el copiado lo hace el manejador global de [data-copy] */
 }
 async function regenReco(id){
   const r=RT.list.find(x=>x.id===id);if(!r)return;
@@ -8500,7 +8498,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='80f3fa24b4';
+const BUILD='c8c693d682';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
