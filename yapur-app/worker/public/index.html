@@ -5048,8 +5048,8 @@ function renderRouters(){
   l.innerHTML=RT.list.map(r=>{
     const old=r.visto&&Date.now()-r.visto>36*3600e3;
     const st=r.hayDatos?`<span class="${old?'bad':''}">Última lista ${esc(rtAgo(r.visto))}${old?' (hace mucho: revisá que el router siga enviando)':''}</span> · ${r.total} registros${r.ident?' · '+esc(r.ident):''}${r.ros?' · RouterOS '+esc(r.ros):''}`:'Todavía no mandó ninguna lista';
-    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div><div class="s">${rtPingEstado(r)}</div></div>
-      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
+    return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div><div class="s">${rtPingEstado(r)}</div><div class="s">${rtRecoEstado(r)}</div></div>
+      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="rscript" data-id="${esc(r.id)}">Script de reconexión</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
   }).join('')||'<div class="empty"><b>No hay routers cargados</b><span>Agregá el primero para que mande la lista de sus clientes.</span></div>';
 }
 function kindsBoxHTML(cur){
@@ -5176,6 +5176,93 @@ async function regenPing(id){
   const r=RT.list.find(x=>x.id===id);if(!r)return;
   if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de pruebas para ${r.nombre}: el anterior deja de valer. Si el router ya tiene el script de ping, hay que pegarlo de nuevo. El acceso de la lista de clientes no cambia. ¿Seguir?`,'Generar de nuevo'))return;
   try{const j=await NET.api('POST','/api/routers/'+id+'/ping-token',{});openPingScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
+}
+
+/* ----- reconexión automática: el router pregunta cada minuto a quién reactivar (clientes que pagaron o tienen promesa) y lo reactiva. Solo reactiva: no puede cortar. ----- */
+function rtRecoEstado(r){
+  if(!r.reco)return '<span class="muted">Reconexión automática: sin configurar</span>';
+  const seg=r.recoVisto?Math.round((Date.now()-r.recoVisto)/1000):null;
+  if(seg!=null&&seg<=150)return '<span style="color:var(--ok)">Reconexión automática: atendiendo (hace '+seg+' s)</span>';
+  return '<span style="color:var(--bad)">Reconexión automática: el router no está consultando'+(r.recoVisto?' (última vez '+esc(rtAgo(r.recoVisto))+')':' todavía')+'</span>';
+}
+function rtRecoScript(token){
+  const body=`# YAPUR.NET - reconexion automatica de clientes
+# Cada minuto pregunta a ${location.origin} a quien hay que reconectar (clientes suspendidos que pagaron o tienen promesa de pago).
+# SOLO REACTIVA: desactiva al cliente en la lista "Clientes Cortados" y habilita su usuario PPPoE. Nunca corta a nadie ni cambia otra cosa.
+# Despues le avisa al sistema cuales hizo, para no repetirlos.
+:local base "${location.origin}/api/router/reco"
+:local h "Authorization: Bearer ${token}"
+:local data ""
+:do {
+  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+  :set data ($r->"data")
+} on-error={ :set data "" }
+:if ([:len $data] > 0) do={
+  :local hechos ""
+  :foreach item in=[:toarray $data] do={
+    :local p1 [:find $item ":"]
+    :if ([:typeof $p1] = "num") do={
+      :local id [:pick $item 0 $p1]
+      :local rest [:pick $item ($p1 + 1) [:len $item]]
+      :local p2 [:find $rest ":"]
+      :local ip ""
+      :local us ""
+      :if ([:typeof $p2] = "num") do={
+        :set ip [:pick $rest 0 $p2]
+        :set us [:pick $rest ($p2 + 1) [:len $rest]]
+      }
+      :if ([:len $ip] > 0) do={
+        :do {
+          :foreach e in=[/ip firewall address-list find where list="Clientes Cortados" address=$ip disabled=no] do={
+            /ip firewall address-list disable $e
+            :log info ("YAPUR reconexion: " . $ip . " reactivado")
+          }
+        } on-error={}
+      }
+      :if ([:len $us] > 0) do={
+        :do {
+          :foreach e in=[/ppp secret find where name=$us disabled=yes] do={
+            /ppp secret enable $e
+            :log info ("YAPUR reconexion: usuario " . $us . " habilitado")
+          }
+        } on-error={}
+      }
+      :set hechos ($hechos . $id . ",")
+    }
+  }
+  :if ([:len $hechos] > 0) do={
+    :do {
+      /tool fetch url=($base . "?ok=" . $hechos) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+    } on-error={}
+  }
+}`;
+  return rtAscii(`:do { /system script remove [find name="yapur-reconexion"] } on-error={}\n/system script add name=yapur-reconexion policy=read,write,test comment="YAPUR.NET reconexion automatica de clientes" source={\n${body}\n}`);
+}
+const rtRecoSched=()=>`:do { /system scheduler remove [find name="yapur-reconexion"] } on-error={}\n/system scheduler add name=yapur-reconexion interval=1m policy=read,write,test comment="YAPUR.NET reconexion automatica" on-event="/system script run yapur-reconexion"`;
+function openRecoScript(r,token){
+  const script=rtRecoScript(token);
+  const step=(n,t,body)=>`<div class="card flat"><h3>${n}. ${t}</h3>${body}</div>`;
+  const html=`<div class="notice info">Con esto, cuando un cliente suspendido <b>paga o se le carga una promesa</b>, <b>${esc(r.nombre)} lo reconecta solo en menos de un minuto</b>: desactiva al cliente en la lista <span class="mono">Clientes Cortados</span> y habilita su usuario PPPoE, sin que tengas que tocar el router. El script <b>solo reactiva</b>: no puede cortar a nadie ni cambiar otra cosa, y lleva un acceso propio de este router (no lo compartas).</div>
+    ${step(1,'Pegar el script',`<p class="small muted">En WinBox: <b>Nuevo terminal</b> y pegalo entero. Crea un script llamado <span class="mono">yapur-reconexion</span> (si ya existía, lo reemplaza).</p><div class="actions start"><button class="btn primary small" type="button" data-copy="script">Copiar script</button></div><textarea class="mono small" readonly rows="6" style="width:100%">${esc(script)}</textarea>`)}
+    ${step(2,'Dejarlo programado',`<p class="small muted">Pegalo en el mismo terminal. Hace que el router corra el script <b>una vez por minuto</b>.</p><div class="actions start"><button class="btn small" type="button" data-copy="sched">Copiar programación</button></div><textarea class="mono small" readonly rows="3" style="width:100%">${esc(rtRecoSched())}</textarea>`)}
+    ${step(3,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Reconexión automática: atendiendo»</b> (tocá <b>Actualizar</b>). En <b>Cortes</b> también se ve el estado y cuáles se reconectaron.</p>`)}
+    <p class="small muted">Esto hace falta en cada router donde cortás clientes (los que usan la lista <span class="mono">Clientes Cortados</span> o PPPoE): cada uno tiene su propio script y su propio acceso. Si un router no tiene al cliente, simplemente lo ignora.</p>
+    <details class="small"><summary>Si algo falla</summary><ul class="small muted">
+      <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también otros permisos. Probá cambiar <span class="mono">policy=read,write,test</span> por <span class="mono">policy=read,write,test,policy,sensitive</span> en el script y en la programación.</li>
+      <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
+      <li>Para ver lo que reactivó: <span class="mono">/log print where message~"YAPUR"</span></li>
+      <li>Para correrlo a mano: <span class="mono">/system script run yapur-reconexion</span></li>
+      <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-reconexion]</span></li>
+      <li><b>Consultas:</b> unas 1.440 por día por router. Si un router ya cortó a un cliente a mano, no lo vuelve a reconectar: solo reactiva a quien el sistema marcó como reconectado.</li></ul></details>
+    <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
+  openModal({title:'Reconexión automática · '+r.nombre,html,wide:true,onMount(el){
+    $$('[data-copy]',el).forEach(b=>b.addEventListener('click',()=>copyText(b.dataset.copy==='script'?script:rtRecoSched(),b.dataset.copy==='script'?'Script':'Programación')));
+  }});
+}
+async function regenReco(id){
+  const r=RT.list.find(x=>x.id===id);if(!r)return;
+  if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de reconexión para ${r.nombre}: si el router ya tenía este script, hay que pegarlo de nuevo. Los otros accesos (lista de clientes y pruebas de ping) no cambian. ¿Seguir?`,'Generar de nuevo'))return;
+  try{const j=await NET.api('POST','/api/routers/'+id+'/reco-token',{});openRecoScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
 /* ----- clientes detectados e importación ----- */
@@ -5402,7 +5489,7 @@ function bindRouters(el){
   $('#aj-routers',el).addEventListener('click',e=>{
     const b=e.target.closest('[data-rt]');if(!b)return;
     const id=b.dataset.id,a=b.dataset.rt;
-    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='pscript')regenPing(id);else if(a==='det')openDetected(id);
+    if(a==='edit')openRouterForm(id);else if(a==='script')regenScript(id);else if(a==='pscript')regenPing(id);else if(a==='rscript')regenReco(id);else if(a==='det')openDetected(id);
   });
   loadRouters();
 }
@@ -7082,7 +7169,7 @@ function openCobro(clientId,con1,pre){
         // El recibo se muestra con los datos recién escritos aunque la suscripción tarde en llegar.
         ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
-        const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+        const c2=S.clientes.get(c.id);if(!campo&&c2)await reconectarAlPagar(c2);
       }catch(err){dbError(err);go.disabled=false;}
     });
   }});
@@ -7206,7 +7293,7 @@ function openPagarDeuda(clientId){
       try{await putMany('pagos',doc,items);toast('Pago registrado');
         Object.keys(items).forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
-        const c2=S.clientes.get(c.id);if(c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+        const c2=S.clientes.get(c.id);if(c2)await reconectarAlPagar(c2);
       }catch(err){dbError(err);go.disabled=false;}
     });
     dibujar();
@@ -7466,15 +7553,23 @@ function cortesData(){
   promesas.sort((a,b)=>a.s.hasta.localeCompare(b.s.hasta)||byName(a,b));
   return {cortar,reconectar,promesas};
 }
-async function setSuspension(clients,on){
+async function setSuspension(clients,on,quiet){
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
   const by={},now=Date.now(),today=todayStr();
   clients.forEach(c=>{
     const o=Object.assign(stripInternal(c),on?{estado:'suspendido',corteMora:today}:{estado:'activo',corteMora:null,reconectado:today},{mod:now});
     (by[clientShard(c.id)]=by[clientShard(c.id)]||{})[c.id]=o;
   });
-  try{for(const sh of Object.keys(by))await putMany('clientes',sh,by[sh]);toast(on?`${clients.length} marcados como suspendidos`:`${clients.length} reconectados`);}
-  catch(err){dbError(err);}
+  try{for(const sh of Object.keys(by))await putMany('clientes',sh,by[sh]);if(!quiet)toast(on?`${clients.length} marcados como suspendidos`:`${clients.length} reconectados`);return true;}
+  catch(err){dbError(err);return false;}
+}
+/* Al registrar un pago: si el cliente (o su cuenta unificada) estaba suspendido y ya no debe, se lo reconecta solo: pasa a activo y el servidor lo manda a los routers
+   (ver «reconexión automática»). Si quien cobra no puede cambiar clientes, queda en «Para reconectar» como antes. */
+async function reconectarAlPagar(c){
+  const l=(enCuenta(c)?cuentaMiembros(c):[c]).map(x=>S.clientes.get(x.id)||x).filter(aReconectar);
+  if(!l.length)return;
+  if(!can('editarClientes'))return toast('Pagó: figura en «A cortar», sección Para reconectar');
+  if(await setSuspension(l,false,true))toast(l.length>1?`Pagó: se reconectan ${l.length} servicios solos`:'Pagó: se reconecta solo (el router lo reactiva en menos de un minuto)');
 }
 /* script de MikroTik para clientes con usuario PPPoE cargado */
 function mikrotikScript(list,enable){
@@ -7538,7 +7633,20 @@ function drawCortes(body){
     ${sect('Para cortar',cd.cortar,'cortar',toolsCut,'Nadie para cortar por ahora.')}
     ${sect('Para reconectar',cd.reconectar,'reconectar',toolsRec,'Nadie para reconectar.')}
     ${sect('Promesas vigentes',cd.promesas,'promesa','','No hay promesas de pago vigentes.')}
-    <div class="notice info">La app te dice a quién cortar y a quién reconectar, pero no toca el router. El script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo en MikroTik.</div>`;
+    <div id="cx-reco"></div>
+    <div class="notice info">La app te dice a quién cortar y a quién reconectar. <b>Cortar</b> lo seguís haciendo vos en el router (el script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo). <b>Reconectar</b> se hace solo: cuando un cliente paga o se le carga una promesa, pasa a activo y los routers con el script de reconexión lo reactivan en menos de un minuto.</div>`;
+  drawRecoEstado($('#cx-reco',body));
+}
+/* estado de la reconexión automática: si los routers están consultando y cuáles de los últimos reconectados ya se reactivaron */
+async function drawRecoEstado(box){
+  if(!box||!can('editarClientes'))return;
+  let j;try{j=await NET.api('GET','/api/reco');}catch(_){return;}
+  if(!box.isConnected)return;
+  if(!j.routers.length){box.innerHTML='<div class="notice warn"><b>La reconexión automática todavía no está activada.</b> Para que los routers reconecten solos, en <b>Ajustes → Routers</b> tocá <b>Script de reconexión</b> en cada router y pegalo en WinBox.</div>';return;}
+  const vivo=r=>r.visto&&Date.now()-r.visto<150e3,caidos=j.routers.filter(r=>!vivo(r));
+  const filas=j.items.slice(0,8).map(it=>{const falta=j.routers.filter(r=>!it.hechos.includes(r.id));
+    return `<div class="small"><b>${esc(it.nombre||'Cliente')}</b> <span class="muted">${esc(it.ip||it.usuario||'')} · ${esc(rtAgo(it.ts))}</span> · ${falta.length?'<span style="color:var(--bad)">falta en '+esc(falta.map(r=>r.nombre).join(', '))+'</span>':'<span style="color:var(--ok)">reconectado en todos los routers</span>'}</div>`;}).join('');
+  box.innerHTML=`<div class="card"><h3>Reconexión automática</h3><div class="small">${j.routers.map(r=>vivo(r)?`<span class="chip ok">${esc(r.nombre)}: atendiendo</span>`:`<span class="chip bad">${esc(r.nombre)}: no consulta</span>`).join(' ')}</div>${caidos.length?'<div class="hint bad">Un router que no consulta no reactiva a nadie: revisá que tenga el script y la programación.</div>':''}${filas?'<div style="margin-top:8px">'+filas+'</div>':'<div class="hint">Todavía no se reconectó a nadie desde que está activada.</div>'}</div>`;
 }
 
 /* cierre de caja: lo que cobró cada persona (para contar el efectivo que tiene que entregar cada una) */
@@ -8392,7 +8500,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='4b3861b969';
+const BUILD='80f3fa24b4';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

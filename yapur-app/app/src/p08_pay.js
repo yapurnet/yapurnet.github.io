@@ -418,7 +418,7 @@ function openCobro(clientId,con1,pre){
         // El recibo se muestra con los datos recién escritos aunque la suscripción tarde en llegar.
         ids.forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
-        const c2=S.clientes.get(c.id);if(!campo&&c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+        const c2=S.clientes.get(c.id);if(!campo&&c2)await reconectarAlPagar(c2);
       }catch(err){dbError(err);go.disabled=false;}
     });
   }});
@@ -542,7 +542,7 @@ function openPagarDeuda(clientId){
       try{await putMany('pagos',doc,items);toast('Pago registrado');
         Object.keys(items).forEach(k=>{S.pagos.set(k,Object.assign({},items[k],{id:k,_doc:doc}));});rebuildDerived();dataChanged('pagos');
         openReceipt(recibo);
-        const c2=S.clientes.get(c.id);if(c2&&aReconectar(c2))toast('Pagó: figura en «A cortar», sección Para reconectar');
+        const c2=S.clientes.get(c.id);if(c2)await reconectarAlPagar(c2);
       }catch(err){dbError(err);go.disabled=false;}
     });
     dibujar();
@@ -802,15 +802,23 @@ function cortesData(){
   promesas.sort((a,b)=>a.s.hasta.localeCompare(b.s.hasta)||byName(a,b));
   return {cortar,reconectar,promesas};
 }
-async function setSuspension(clients,on){
+async function setSuspension(clients,on,quiet){
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
   const by={},now=Date.now(),today=todayStr();
   clients.forEach(c=>{
     const o=Object.assign(stripInternal(c),on?{estado:'suspendido',corteMora:today}:{estado:'activo',corteMora:null,reconectado:today},{mod:now});
     (by[clientShard(c.id)]=by[clientShard(c.id)]||{})[c.id]=o;
   });
-  try{for(const sh of Object.keys(by))await putMany('clientes',sh,by[sh]);toast(on?`${clients.length} marcados como suspendidos`:`${clients.length} reconectados`);}
-  catch(err){dbError(err);}
+  try{for(const sh of Object.keys(by))await putMany('clientes',sh,by[sh]);if(!quiet)toast(on?`${clients.length} marcados como suspendidos`:`${clients.length} reconectados`);return true;}
+  catch(err){dbError(err);return false;}
+}
+/* Al registrar un pago: si el cliente (o su cuenta unificada) estaba suspendido y ya no debe, se lo reconecta solo: pasa a activo y el servidor lo manda a los routers
+   (ver «reconexión automática»). Si quien cobra no puede cambiar clientes, queda en «Para reconectar» como antes. */
+async function reconectarAlPagar(c){
+  const l=(enCuenta(c)?cuentaMiembros(c):[c]).map(x=>S.clientes.get(x.id)||x).filter(aReconectar);
+  if(!l.length)return;
+  if(!can('editarClientes'))return toast('Pagó: figura en «A cortar», sección Para reconectar');
+  if(await setSuspension(l,false,true))toast(l.length>1?`Pagó: se reconectan ${l.length} servicios solos`:'Pagó: se reconecta solo (el router lo reactiva en menos de un minuto)');
 }
 /* script de MikroTik para clientes con usuario PPPoE cargado */
 function mikrotikScript(list,enable){
@@ -874,7 +882,20 @@ function drawCortes(body){
     ${sect('Para cortar',cd.cortar,'cortar',toolsCut,'Nadie para cortar por ahora.')}
     ${sect('Para reconectar',cd.reconectar,'reconectar',toolsRec,'Nadie para reconectar.')}
     ${sect('Promesas vigentes',cd.promesas,'promesa','','No hay promesas de pago vigentes.')}
-    <div class="notice info">La app te dice a quién cortar y a quién reconectar, pero no toca el router. El script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo en MikroTik.</div>`;
+    <div id="cx-reco"></div>
+    <div class="notice info">La app te dice a quién cortar y a quién reconectar. <b>Cortar</b> lo seguís haciendo vos en el router (el script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo). <b>Reconectar</b> se hace solo: cuando un cliente paga o se le carga una promesa, pasa a activo y los routers con el script de reconexión lo reactivan en menos de un minuto.</div>`;
+  drawRecoEstado($('#cx-reco',body));
+}
+/* estado de la reconexión automática: si los routers están consultando y cuáles de los últimos reconectados ya se reactivaron */
+async function drawRecoEstado(box){
+  if(!box||!can('editarClientes'))return;
+  let j;try{j=await NET.api('GET','/api/reco');}catch(_){return;}
+  if(!box.isConnected)return;
+  if(!j.routers.length){box.innerHTML='<div class="notice warn"><b>La reconexión automática todavía no está activada.</b> Para que los routers reconecten solos, en <b>Ajustes → Routers</b> tocá <b>Script de reconexión</b> en cada router y pegalo en WinBox.</div>';return;}
+  const vivo=r=>r.visto&&Date.now()-r.visto<150e3,caidos=j.routers.filter(r=>!vivo(r));
+  const filas=j.items.slice(0,8).map(it=>{const falta=j.routers.filter(r=>!it.hechos.includes(r.id));
+    return `<div class="small"><b>${esc(it.nombre||'Cliente')}</b> <span class="muted">${esc(it.ip||it.usuario||'')} · ${esc(rtAgo(it.ts))}</span> · ${falta.length?'<span style="color:var(--bad)">falta en '+esc(falta.map(r=>r.nombre).join(', '))+'</span>':'<span style="color:var(--ok)">reconectado en todos los routers</span>'}</div>`;}).join('');
+  box.innerHTML=`<div class="card"><h3>Reconexión automática</h3><div class="small">${j.routers.map(r=>vivo(r)?`<span class="chip ok">${esc(r.nombre)}: atendiendo</span>`:`<span class="chip bad">${esc(r.nombre)}: no consulta</span>`).join(' ')}</div>${caidos.length?'<div class="hint bad">Un router que no consulta no reactiva a nadie: revisá que tenga el script y la programación.</div>':''}${filas?'<div style="margin-top:8px">'+filas+'</div>':'<div class="hint">Todavía no se reconectó a nadie desde que está activada.</div>'}</div>`;
 }
 
 /* cierre de caja: lo que cobró cada persona (para contar el efectivo que tiene que entregar cada una) */
