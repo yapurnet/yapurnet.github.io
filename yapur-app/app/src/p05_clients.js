@@ -331,6 +331,41 @@ function ipUnica(t){
   const ip=m.slice(1).map(Number).join('.');
   return ip==='0.0.0.0'||ip.startsWith('127.')?'':ip;
 }
+/* ===== una IP no puede estar en dos clientes =====
+   Los cortes automáticos y la cola del router trabajan por IP: si dos clientes comparten una, cortar a uno corta también al otro.
+   La ficha de un cliente puede traer varias IP separadas por coma, espacio o punto y coma. Un cliente dado de baja ya no ocupa su IP (queda libre para el que lo reemplaza). */
+const ipsDe=c=>String(c&&c.ip||'').split(/[\s,;]+/).map(ipUnica).filter(Boolean);
+/* ¿qué otro cliente (que no esté de baja) ya tiene alguna de las IP del texto? → {c, ip} o null */
+function ipOcupada(texto,idPropio){
+  const mias=new Set(String(texto||'').split(/[\s,;]+/).map(ipUnica).filter(Boolean));
+  if(!mias.size)return null;
+  for(const x of S.clientes.values()){
+    if(x.id===idPropio||x.estado==='baja')continue;
+    for(const ip of ipsDe(x))if(mias.has(ip))return {c:x,ip};
+  }
+  return null;
+}
+/* los otros clientes (no de baja) que comparten alguna IP con este */
+function ipCompartida(c){
+  const mias=new Set(ipsDe(c)),out=[];
+  if(!mias.size)return out;
+  for(const x of S.clientes.values()){
+    if(x.id===c.id||x.estado==='baja')continue;
+    const ip=ipsDe(x).find(t=>mias.has(t));if(ip)out.push({c:x,ip});
+  }
+  return out;
+}
+/* IP que tienen dos o más clientes que no están de baja: [{ip, clientes:[…]}] ordenadas por IP */
+function ipsRepetidas(){
+  const m=new Map();
+  for(const x of S.clientes.values()){
+    if(x.estado==='baja')continue;
+    for(const ip of new Set(ipsDe(x)))(m.get(ip)||m.set(ip,[]).get(ip)).push(x);
+  }
+  const ord=ip=>ip.split('.').map(n=>('00'+n).slice(-3)).join('.');
+  return [...m.entries()].filter(([,l])=>l.length>1).map(([ip,clientes])=>({ip,clientes})).sort((a,b)=>ord(a.ip).localeCompare(ord(b.ip)));
+}
+const ipDeQuien=(o)=>(clientVisible(o.c)?o.c.nombre+(o.c.codigo?' (N° '+o.c.codigo+')':''):'otro cliente');
 /* al abrir la ficha de un cliente con IP se avisa al servidor: el router pasa a consultar cada 10 s (en reposo lo hace una vez por minuto, para no gastar el cupo del plan gratis) y contesta enseguida cuando se toca «Probar conexión» */
 let _pingArm=0;
 function pingArmar(){const t=Date.now();if(t-_pingArm<90e3||!NET.online)return;_pingArm=t;NET.api('POST','/api/ping/armar',{},{noKick:true,timeout:8000}).catch(()=>{});}
@@ -579,7 +614,7 @@ function openClientForm(id){
         <label class="per"><input id="cf-vig-fix" type="checkbox"><span class="grow">Es un error de carga: corregir todos los meses (descarta los precios anteriores de este cliente)</span></label></div>`:''}
       ${puedePlan(old)?planPedidoHTML(c,'cf'):''}
       <div class="grid2">${F('Tecnología','cf-tec',`<select id="cf-tec"><option value="">Sin definir</option>${Object.entries(TECNOS).map(([k,v])=>opt(k,v,k===c.tec)).join('')}</select>`)}${F('Usuario (PPPoE o similar)','cf-usuario',`<input id="cf-usuario" class="mono" autocomplete="off" value="${esc(c.usuario||'')}">`)}</div>
-      <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik.')}${nodoFieldHTML(c,'cf')}</div>
+      <div class="grid2">${F('IP del cliente','cf-ip',`<input id="cf-ip" class="mono" inputmode="decimal" autocomplete="off" placeholder="192.168.100.4" value="${esc(c.ip||'')}">`,'Es el target de su cola en MikroTik. <span id="cf-ip-h"></span>')}${nodoFieldHTML(c,'cf')}</div>
       ${F('Equipo (serie de ONU o MAC)','cf-equipo',`<input id="cf-equipo" class="mono" value="${esc(c.equipo||'')}">`)}
       ${can('red')?napFieldHTML(c):''}</fieldset>
     ${full?`<fieldset class="fgroup" style="border:0;padding:0;margin:0"><legend>Facturación</legend>
@@ -621,6 +656,9 @@ function openClientForm(id){
     bindMoney($('#cf-precio',el),$('#cf-precio-h',el));
     const cicSel=$('#cf-ciclo',el);if(old&&cicSel&&!cicSel.disabled){const calc=()=>{const n=$('#cf-ciclo-calc',el),r=cicloCambio(old,cicSel.value);n.hidden=!r;n.textContent=r?cicloCambioTxt(r):'';};cicSel.addEventListener('change',calc);}   /* al pasar de un ciclo al otro, calcula solo lo que corresponde ajustar */
     const scChk=$('#cf-sc',el);if(scChk){const sync=()=>{$('#cf-sc-box',el).hidden=!scChk.checked;const w=$('#cf-sc-warn',el);if(w)w.hidden=!scChk.checked;};scChk.addEventListener('change',sync);sync();}
+    /* avisa mientras escribe si la IP ya la tiene otro cliente (una IP no puede estar en dos clientes) */
+    const ipIn=$('#cf-ip',el),ipH=$('#cf-ip-h',el);
+    if(ipIn&&ipH){const chk=()=>{const o=ipOcupada(ipIn.value,old&&old.id);ipH.className=o?'bad':'';ipH.textContent=o?'Ojo: la IP '+o.ip+' ya la tiene '+ipDeQuien(o)+'. No se puede guardar repetida.':'';};ipIn.addEventListener('input',chk);chk();}
     const docIn=$('#cf-dni',el),docH=$('#cf-dni-h',el);
     if(docIn&&docH){const dm0=docH.textContent,chk=()=>{const d=docDigits(docIn.value);docH.className='';docH.textContent=dm0;
       if(d.length===11){docH.className=cuitOk(docIn.value)?'ok':'bad';docH.textContent=cuitOk(docIn.value)?'CUIT o CUIL válido. Se guarda como '+fmtDoc(docIn.value)+'.':'El dígito verificador no coincide: revisá que no falte o sobre algún número.';}
@@ -657,6 +695,12 @@ function openClientForm(id){
       e.preventDefault();
       const g=read();if(g.invalid)return toast('Revisá las coordenadas','bad');
       const patch={ref:v('cf-ref'),lat:g.empty?null:g.lat,lng:g.empty?null:g.lng,tec:v('cf-tec')||null,usuario:v('cf-usuario'),ip:v('cf-ip'),nodo:v('cf-nodo'),equipo:v('cf-equipo')};
+      /* una IP no puede estar en dos clientes: se frena al cambiarla o cargarla (si ya venía repetida de antes se informa en Clientes → IP repetida, y no impide guardar otros datos) */
+      if(patch.ip&&(v('cf-estado')||(old&&old.estado)||'')!=='baja'){
+        const nuevas=ipsDe({ip:patch.ip}).filter(t=>!old||!ipsDe(old).includes(t));
+        const oc=nuevas.length?ipOcupada(nuevas.join(' '),old&&old.id):null;
+        if(oc)return toast('La IP '+oc.ip+' ya la tiene '+ipDeQuien(oc)+'. Una IP no puede estar en dos clientes: revisala.','bad');
+      }
       const nf=readNap();if(nf){if(nf.bad)return toast(nf.bad,'bad');patch.nap=nf.nap;patch.napPuerto=nf.puerto;}
       if(comp){
         if(!v('cf-nombre'))return toast('Falta el nombre','bad');
@@ -742,6 +786,9 @@ VIEWS.clientes={
   },
   update(){
     const seg=$('#cl-seg');if(!seg)return;
+    /* IP en más de un cliente (no de baja): se informa acá, porque cortar a uno corta también al otro */
+    const ipRep=can('editarClientes')||can('red')?ipsRepetidas():[],ipSet=new Set(ipRep.flatMap(r=>r.clientes.map(x=>x.id)));
+    if(CL.estado==='iprep'&&!ipSet.size)CL.estado='todos';
     const fs=[['todos','Todos'],...(veEstado()?[['activo','Activos'],['suspendido','Suspendidos']]:[]),['pendiente','Por instalar'],['retirar','Equipos por retirar'],['nogeo','Sin ubicación']];
     if(veEstado())fs.push(['baja','Bajas']);
     if(can('red'))fs.push(['nonap','Sin caja NAP']);
@@ -750,10 +797,12 @@ VIEWS.clientes={
     if((can('cobrar')||can('caja')||can('precios'))&&[...S.clientes.values()].some(x=>x.sinCargo&&x.estado!=='baja'))fs.push(['sincargo','Sin cargo']);
     if(can('caja')||can('cobrar'))fs.splice(4,0,['deuda','Con deuda'],['instsaldo','Saldo de instalación'],['dant','Deuda anterior'],['c1','Ciclo 1'],['c2','Ciclo 2']);
     if(veServicios())serviciosList().filter(s=>s.activo!==false).forEach(s=>fs.push(['sv:'+s.id,s.nombre]));
+    if(ipSet.size)fs.push(['iprep','IP repetida ('+ipSet.size+')']);
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${CL.estado===k}">${l}</button>`).join('');
     const filt=c=>{
       if(CL.estado==='todos')return c.estado!=='baja'||bajaPend(c);   /* una baja con equipos sin retirar sigue en la lista hasta que se confirme */
       if(CL.estado==='retirar')return bajaPend(c);
+      if(CL.estado==='iprep')return ipSet.has(c.id);
       if(CL.estado==='nogeo')return c.estado!=='baja'&&!hasGeo(c);
       if(CL.estado==='sincontrato')return c.estado!=='baja'&&!ctVig(c.id)&&!ctRev(c.id);
       if(CL.estado==='conrevision')return !!ctRev(c.id);
@@ -767,7 +816,8 @@ VIEWS.clientes={
       return c.estado===CL.estado;
     };
     const rows=searchClients(CL.q,filt);
-    const cta=$('#cl-ct');if(cta){const n=can('contratosGestion')?ctPend():0;cta.innerHTML=n?`<div class="notice info" style="margin-bottom:8px"><b>${n===1?'Hay 1 contrato esperando tu revisión':'Hay '+n+' contratos esperando tu revisión'}.</b> <button class="btn small" type="button" id="cl-ct-go">Revisar</button></div>`:(can('contratosGestion')?'<div class="actions start" style="margin-bottom:8px"><button class="btn small ghost" type="button" id="cl-ct-go">Contratos de comodato</button></div>':'');const g=$('#cl-ct-go');if(g)g.onclick=()=>openContratos();}
+    const cta=$('#cl-ct');if(cta){const n=can('contratosGestion')?ctPend():0;const ipN=ipSet.size?`<div class="notice bad" style="margin-bottom:8px"><b>Hay ${ipRep.length===1?'1 IP repetida':ipRep.length+' IP repetidas'} entre clientes.</b> El router no distingue a los dos: al cortar a uno se corta también al otro. Corregí la IP de uno de cada par.${CL.estado==='iprep'?ipRep.map(r=>`<div class="small" style="margin-top:4px"><span class="mono">${esc(r.ip)}</span>: ${r.clientes.map(x=>esc(x.nombre)+(x.codigo?' (N° '+esc(x.codigo)+')':'')+(x.estado==='suspendido'?', suspendido':'')).join(' y ')}</div>`).join(''):' <button class="btn small" type="button" id="cl-ip-go">Ver cuáles</button>'}</div>`:'';
+      cta.innerHTML=ipN+(n?`<div class="notice info" style="margin-bottom:8px"><b>${n===1?'Hay 1 contrato esperando tu revisión':'Hay '+n+' contratos esperando tu revisión'}.</b> <button class="btn small" type="button" id="cl-ct-go">Revisar</button></div>`:(can('contratosGestion')?'<div class="actions start" style="margin-bottom:8px"><button class="btn small ghost" type="button" id="cl-ct-go">Contratos de comodato</button></div>':''));const g=$('#cl-ct-go');if(g)g.onclick=()=>openContratos();const ig=$('#cl-ip-go');if(ig)ig.onclick=()=>{CL.estado='iprep';CL.limit=50;this.update();};}
     $('#cl-count').textContent=!S.loaded.clientes?'Cargando…':(veTotales()||rows.length<=TOPE_CONTEO)?`${rows.length} ${rows.length===1?'cliente':'clientes'}`:'';   /* sin permiso, solo se cuenta una búsqueda corta */
     const list=$('#cl-list');
     if(!rows.length){
