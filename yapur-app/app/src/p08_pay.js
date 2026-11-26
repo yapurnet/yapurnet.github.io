@@ -784,6 +784,22 @@ async function anularPromesa(id){
   try{await saveClient(c,{promesas:c.promesas.map(x=>x===pr?Object.assign({},x,{x:1,xf:todayStr()}):x)});toast('Promesa anulada');closeModal();}catch(err){dbError(err);}
 }
 
+/* Suspender o reconectar a un cliente desde su ficha (antes solo se podía por Editar → Estado o con «Marcar suspendido» en la lista de Cortes).
+   Suspender solo cambia el estado en la app (el corte en el router sigue siendo manual). Reconectar pasa a activo y el servidor lo manda a los routers que tengan la reconexión automática. */
+async function suspenderCliente(id){
+  const c=S.clientes.get(id);if(!c||c.estado!=='activo')return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
+  if(!await askConfirm(`¿Marcar a ${c.nombre} como suspendido? Solo cambia el estado en la app: el corte en el router lo hacés vos (Cortes → Copiar script MikroTik).`,'Suspender',true))return;
+  if(await setSuspension([c],true,true)){toast('Suspendido. Falta cortarlo en el router.');closeModal();}
+}
+async function reconectarCliente(id){
+  const c=S.clientes.get(id);if(!c||c.estado!=='suspendido')return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
+  const debe=tieneDeuda(c);
+  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con reconexión automática lo reactivan en menos de un minuto; en los demás, reactivalo a mano.${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
+  if(await setSuspension([c],false,true)){toast('Reconectado');closeModal();}
+}
+
 /* ===== cortes y reconexiones ===== */
 function cortesData(){
   const cortar=[],reconectar=[],promesas=[];

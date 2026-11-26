@@ -1586,7 +1586,7 @@ function openClient(id){
     ${pingBlock(c)}
     ${migBlock(c)}
     ${comodatoBlock(c)}
-    <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&!porInstalar(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl&&can('verPlan')?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${(can('ubicacion')||can('red'))&&c.estado!=='baja'&&(/^PON/i.test(c.nodo||'')||c.equipo)?'<button class="btn" type="button" data-act="senal">Potencia de la ONU</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
+    <div class="actions start">${can('cobrar')&&!soloCampo()&&tieneDeuda(c)?'<button class="btn primary" type="button" data-act="pagar-deuda">Pagar deuda</button>':''}${can('cobrar')&&b.aplica?`<button class="btn${tieneDeuda(c)?'':' primary'}" type="button" data-act="cobrar">${enCuenta(c)?'Cobrar la cuenta ('+cuentaMiembros(c).length+' servicios)':'Cobrar'}</button>`:''}${(can('cobrar')&&!b.aplica)||soloCampo()?`<button class="btn primary" type="button" data-act="cobrar">${soloCampo()&&!porInstalar(c)?'Cobrar reclamo o reinstalación':'Cobrar instalación o reclamo'}</button>`:''}${can('crearOrdenes')?'<button class="btn" type="button" data-act="orden">Nueva orden de trabajo</button>':''}${can('editarClientes')&&!enCuenta(c)?'<button class="btn" type="button" data-act="cuenta-menu">Cuenta unificada</button>':''}${can('ubicacion')&&pl&&can('verPlan')?'<button class="btn" type="button" data-act="queue">Copiar cola de MikroTik</button>':''}${(can('ubicacion')||can('red'))&&c.estado!=='baja'&&(/^PON/i.test(c.nodo||'')||c.equipo)?'<button class="btn" type="button" data-act="senal">Potencia de la ONU</button>':''}${can('editarClientes')&&c.estado==='activo'?'<button class="btn" type="button" data-act="suspender">Suspender</button>':''}${can('editarClientes')&&c.estado==='suspendido'?'<button class="btn primary" type="button" data-act="reconectar">Reconectar</button>':''}${can('editarClientes')&&c.estado!=='baja'?'<button class="btn" type="button" data-act="baja">Dar de baja</button>':''}${can('editarClientes')&&bajaPend(c)?'<button class="btn primary" type="button" data-act="retiro-ok">Confirmar equipos retirados</button>':''}</div>
     ${can('promesas')&&b.aplica?promesaBlock(c,owes):''}
     ${clienteLineaHTML(c)}
     ${(can('cobrar')||can('caja'))&&pays.length?`<div><h3>Últimos pagos</h3><div class="hint">Tocá un pago para abrir su recibo: desde ahí se reenvía por WhatsApp, se copia o se imprime.</div><div class="tbl-wrap" style="margin-top:8px"><table><tbody>${pays.map(p=>`<tr${p.recibo?` data-receipt="${esc(p.recibo)}" class="tap" tabindex="0"`:''}><td class="nowrap">${dmy(p.fecha)}</td><td>${esc(p.concepto==='mensualidad'&&p.per?monthLabel(p.per):CONCEPTOS[p.concepto]||'')}${p.anulado?' <span class="chip bad">Anulado</span>':''}</td><td class="right tnum">${fmtMoney(p.monto)}</td>${p.recibo?'<td class="right"><span class="btn small">Recibo</span></td>':'<td></td>'}</tr>`).join('')}</tbody></table></div></div>`:''}
@@ -1619,6 +1619,8 @@ function openClient(id){
       else if(a.dataset.act==='queue'){const cmd=clientQueueCmd(c);if(cmd)copyText(cmd,'Comando');else toast('Cargá la IP del cliente para armar la cola','bad');}
       else if(a.dataset.act==='ping')pingProbar(c,el);
       else if(a.dataset.act==='senal')openSenalCliente(c.id);
+      else if(a.dataset.act==='suspender')suspenderCliente(c.id);
+      else if(a.dataset.act==='reconectar')reconectarCliente(c.id);
       else if(a.dataset.act==='baja')openBaja(c.id);
       else if(a.dataset.act==='retiro-ok')confirmarRetiro(c.id);
       else if(a.dataset.act==='promesa')openPromesa(c.id);
@@ -7533,6 +7535,22 @@ async function anularPromesa(id){
   try{await saveClient(c,{promesas:c.promesas.map(x=>x===pr?Object.assign({},x,{x:1,xf:todayStr()}):x)});toast('Promesa anulada');closeModal();}catch(err){dbError(err);}
 }
 
+/* Suspender o reconectar a un cliente desde su ficha (antes solo se podía por Editar → Estado o con «Marcar suspendido» en la lista de Cortes).
+   Suspender solo cambia el estado en la app (el corte en el router sigue siendo manual). Reconectar pasa a activo y el servidor lo manda a los routers que tengan la reconexión automática. */
+async function suspenderCliente(id){
+  const c=S.clientes.get(id);if(!c||c.estado!=='activo')return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
+  if(!await askConfirm(`¿Marcar a ${c.nombre} como suspendido? Solo cambia el estado en la app: el corte en el router lo hacés vos (Cortes → Copiar script MikroTik).`,'Suspender',true))return;
+  if(await setSuspension([c],true,true)){toast('Suspendido. Falta cortarlo en el router.');closeModal();}
+}
+async function reconectarCliente(id){
+  const c=S.clientes.get(id);if(!c||c.estado!=='suspendido')return;
+  if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
+  const debe=tieneDeuda(c);
+  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con reconexión automática lo reactivan en menos de un minuto; en los demás, reactivalo a mano.${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
+  if(await setSuspension([c],false,true)){toast('Reconectado');closeModal();}
+}
+
 /* ===== cortes y reconexiones ===== */
 function cortesData(){
   const cortar=[],reconectar=[],promesas=[];
@@ -8498,7 +8516,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='2c6c11aa6d';
+const BUILD='257ee0d3a8';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};
