@@ -1,6 +1,7 @@
-# Suspender y reconectar desde la ficha del cliente: antes solo se podía por Editar → Estado o con «Marcar suspendido» en la lista de Cortes.
-# El botón «Suspender» (cliente activo) pide confirmación y solo cambia el estado en la app; «Reconectar» (cliente suspendido) pide confirmación,
-# lo pasa a activo y el servidor lo manda a los routers (reconexión automática); si todavía debe, la confirmación lo advierte. Un técnico no ve ninguno de los dos.
+# Suspender y reconectar desde la ficha del cliente: antes solo se podía por Editar → Estado o con el botón de la lista de Cortes.
+# El botón «Suspender» (cliente activo) pide confirmación, lo pasa a suspendido y el servidor le manda la orden de corte a los routers (agregar su IP a «Clientes Cortados» con su nombre);
+# «Reconectar» (cliente suspendido) pide confirmación, lo pasa a activo y manda la orden de reconexión (borrar la entrada); si todavía debe, la confirmación lo advierte.
+# Un técnico no ve ninguno de los dos.
 # Chromium real contra workerd.
 import asyncio, datetime, json, os, sys, urllib.request, urllib.error
 from playwright.async_api import async_playwright
@@ -56,8 +57,8 @@ async def main():
     api('PATCH', '/api/doc/clientes/' + shard('cd'), {'data': {'items': {'cd': dict(base, nombre='Cliente Suspendido Debe', ip='10.20.41.62', estado='suspendido', corteMora=cur + '-01', desde=cur)}}}, TA)
     st, j = api('POST', '/api/routers', {'nombre': 'ADMIN02', 'kinds': ['q']}, TA); rid = j['router']['id']
     st, j = api('POST', f'/api/routers/{rid}/reco-token', {}, TA); TK = j['token']
-    def cola():
-        rq = urllib.request.Request(BASE + '/api/router/reco', headers={'Authorization': 'Bearer ' + TK})
+    def cola(v2=False):
+        rq = urllib.request.Request(BASE + '/api/router/reco' + ('?v=2' if v2 else ''), headers={'Authorization': 'Bearer ' + TK})
         return urllib.request.urlopen(rq).read().decode()
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
@@ -69,21 +70,23 @@ async def main():
         check('un cliente activo muestra «Suspender» y no «Reconectar»', await pg.locator('.sheet [data-act=suspender]').count() == 1 and await pg.locator('.sheet [data-act=reconectar]').count() == 0)
         await pg.click('.sheet [data-act=suspender]')
         t = await confirmar(pg, False)
-        check('pide confirmación y aclara que el corte en el router lo hace uno', 'suspendido' in t and 'router' in t, t)
+        check('pide confirmación y avisa que se le corta el internet (los routers agregan la IP a «Clientes Cortados»)', 'cortes automáticos' in t and 'Clientes Cortados' in t, t)
         await pg.wait_for_timeout(500)
         check('si se cancela, el cliente sigue activo', await pg.evaluate("S.clientes.get('ca').estado") == 'activo')
         await abrir(pg, 'ca')
         await pg.click('.sheet [data-act=suspender]'); await confirmar(pg, True)
         await pg.wait_for_function("S.clientes.get('ca').estado==='suspendido'", timeout=6000)
         check('al confirmar queda suspendido con la fecha de corte', await pg.evaluate("S.clientes.get('ca').estado==='suspendido'&&!!S.clientes.get('ca').corteMora"))
-        check('suspender no manda nada a los routers (no corta solo)', cola() == '', cola())
+        check('el servidor le manda a los routers la orden de CORTE con la IP y el nombre completo', cola(True).split(',')[0].split(':')[1:] == ['c', '10.20.41.60', '', 'Cliente Activo'], cola(True))
+        check('los scripts viejos (que solo reactivan) no la reciben', cola() == '', cola())
 
         await abrir(pg, 'ca')
         check('ahora muestra «Reconectar» y no «Suspender»', await pg.locator('.sheet [data-act=reconectar]').count() == 1 and await pg.locator('.sheet [data-act=suspender]').count() == 0)
         await pg.click('.sheet [data-act=reconectar]'); await confirmar(pg, True)
         await pg.wait_for_function("S.clientes.get('ca').estado==='activo'", timeout=6000)
         check('reconectar lo pasa a activo y anota la fecha de reconexión', await pg.evaluate("!S.clientes.get('ca').corteMora&&!!S.clientes.get('ca').reconectado"))
-        check('y el servidor se lo manda al router (reconexión automática)', cola().endswith(':10.20.41.60:') and cola().count(',') == 0, cola())
+        check('y la orden de corte se reemplaza por la de reconexión (borrar la entrada)', cola(True).count(',') == 0 and cola(True).split(':')[1:3] == ['r', '10.20.41.60'], cola(True))
+        check('el script viejo también la recibe', cola().endswith(':10.20.41.60:') and cola().count(',') == 0, cola())
 
         await abrir(pg, 'cd')
         await pg.click('.sheet [data-act=reconectar]')

@@ -172,27 +172,35 @@ function renderRouters(){
     const old=r.visto&&Date.now()-r.visto>36*3600e3;
     const st=r.hayDatos?`<span class="${old?'bad':''}">Última lista ${esc(rtAgo(r.visto))}${old?' (hace mucho: revisá que el router siga enviando)':''}</span> · ${r.total} registros${r.ident?' · '+esc(r.ident):''}${r.ros?' · RouterOS '+esc(r.ros):''}`:'Todavía no mandó ninguna lista';
     return `<div class="item" style="cursor:default"><div><div class="t">${esc(r.nombre)}</div><div class="s">${r.kinds.map(k=>esc(RT_KINDS[k][0])).join(' · ')}</div><div class="s">${st}</div><div class="s">${rtPingEstado(r)}</div><div class="s">${rtRecoEstado(r)}</div></div>
-      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="rscript" data-id="${esc(r.id)}">Script de reconexión</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
+      <div class="tags">${r.hayDatos?`<button class="btn small primary" type="button" data-rt="det" data-id="${esc(r.id)}">Clientes detectados</button>`:''}<button class="btn small" type="button" data-rt="script" data-id="${esc(r.id)}">Script</button><button class="btn small" type="button" data-rt="pscript" data-id="${esc(r.id)}">Script de ping</button><button class="btn small" type="button" data-rt="rscript" data-id="${esc(r.id)}">Script de cortes</button><button class="btn small" type="button" data-rt="edit" data-id="${esc(r.id)}">Editar</button></div></div>`;
   }).join('')||'<div class="empty"><b>No hay routers cargados</b><span>Agregá el primero para que mande la lista de sus clientes.</span></div>';
 }
 function kindsBoxHTML(cur){
   return Object.entries(RT_KINDS).map(([k,[a,b]])=>`<label class="per"><input type="checkbox" data-kind="${k}"${cur.includes(k)?' checked':''}><span class="grow">${esc(a)}<br><span class="small muted">Lee ${esc(b)}</span></span></label>`).join('');
 }
 const readKinds=el=>$$('[data-kind]',el).filter(i=>i.checked).map(i=>i.dataset.kind);
+/* los nodos o torres de los clientes, para marcar cuáles atiende un router (a cada router le llegan solo los cortes de los clientes de sus nodos) */
+function rtNodosBox(cur){
+  const sel=String(cur||'').split(',').map(x=>x.trim()).filter(Boolean),lista=nodosConocidos();
+  sel.forEach(n=>{if(!lista.some(x=>norm(x)===norm(n)))lista.push(n);});
+  return lista.map(n=>`<label class="per"><input type="checkbox" data-nodo="${esc(n)}"${sel.some(x=>norm(x)===norm(n))?' checked':''}><span class="grow">${esc(n)}</span></label>`).join('')||'<div class="hint">Todavía no hay nodos cargados en los clientes.</div>';
+}
+const readNodos=el=>$$('[data-nodo]',el).filter(i=>i.checked).map(i=>i.dataset.nodo);
 function openRouterForm(id){
   const r=id?RT.list.find(x=>x.id===id):null;
   const html=`<form class="form" id="rtform" novalidate>${F('Nombre del router','rt-nombre',`<input id="rt-nombre" autocomplete="off" maxlength="40" placeholder="ADMIN02" value="${esc(r?r.nombre:'')}">`)}
     <div class="fgroup"><div class="legend">Qué clientes tiene este router</div>${kindsBoxHTML(r?r.kinds:['q'])}<div class="hint">Marcá solo lo que usa: cada opción hace que el script lea esa parte del router.</div></div>
+    <div class="fgroup"><div class="legend">Nodos que corta este router</div>${rtNodosBox(r?r.nodos:'')}<div class="hint">Marcá los nodos de los clientes que pasan por este router: al suspender a un cliente de esos nodos, este router le agrega la IP a «Clientes Cortados». Si no marcás ninguno, recibe los cortes de todos los clientes. (Las reconexiones las reciben todos los routers.)</div></div>
     <div class="actions">${r?'<button class="btn danger" type="button" id="rt-del">Borrar</button>':''}<button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">${r?'Guardar':'Crear y ver el script'}</button></div></form>`;
   openModal({title:r?'Editar router':'Agregar router',html,onMount(el){
     $('#rtform',el).addEventListener('submit',async e=>{
       e.preventDefault();
-      const nombre=$('#rt-nombre',el).value.trim(),kinds=readKinds(el);
+      const nombre=$('#rt-nombre',el).value.trim(),kinds=readKinds(el),nodos=readNodos(el);
       if(!nombre)return toast('Falta el nombre del router','bad');
       if(!kinds.length)return toast('Marcá al menos una opción','bad');
       try{
-        if(r){await NET.api('PATCH','/api/routers/'+r.id,{nombre,kinds});toast('Router guardado');closeModal();await loadRouters();}
-        else{const j=await NET.api('POST','/api/routers',{nombre,kinds});await loadRouters();openRouterScript(j.router,j.token);}
+        if(r){await NET.api('PATCH','/api/routers/'+r.id,{nombre,kinds,nodos});toast('Router guardado');closeModal();await loadRouters();}
+        else{const j=await NET.api('POST','/api/routers',{nombre,kinds,nodos});await loadRouters();openRouterScript(j.router,j.token);}
       }catch(err){toast(err.message||'No se pudo guardar','bad');}
     });
     const del=$('#rt-del',el);
@@ -301,57 +309,85 @@ async function regenPing(id){
   try{const j=await NET.api('POST','/api/routers/'+id+'/ping-token',{});openPingScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 
-/* ----- reconexión automática: el router pregunta cada minuto a quién reactivar (clientes que pagaron o tienen promesa) y lo reactiva. Solo reactiva: no puede cortar. ----- */
+/* ----- cortes y reconexión automáticos: el router pregunta cada minuto a quién cortar o reactivar (lo pide la oficina al suspender o reconectar a un cliente). Solo hace lo que se pide desde la app. ----- */
 function rtRecoEstado(r){
-  if(!r.reco)return '<span class="muted">Reconexión automática: sin configurar</span>';
-  const seg=r.recoVisto?Math.round((Date.now()-r.recoVisto)/1000):null;
-  if(seg!=null&&seg<=150)return '<span style="color:var(--ok)">Reconexión automática: atendiendo (hace '+seg+' s)</span>';
-  return '<span style="color:var(--bad)">Reconexión automática: el router no está consultando'+(r.recoVisto?' (última vez '+esc(rtAgo(r.recoVisto))+')':' todavía')+'</span>';
+  if(!r.reco)return '<span class="muted">Cortes y reconexión automáticos: sin configurar</span>';
+  const seg=r.recoVisto?Math.round((Date.now()-r.recoVisto)/1000):null,nod=' · corta los nodos: '+(r.nodos?esc(String(r.nodos).split(',').join(', ')):'todos');
+  if(seg!=null&&seg<=150)return '<span style="color:var(--ok)">Cortes y reconexión automáticos: atendiendo (hace '+seg+' s)</span>'+nod;
+  return '<span style="color:var(--bad)">Cortes y reconexión automáticos: el router no está consultando'+(r.recoVisto?' (última vez '+esc(rtAgo(r.recoVisto))+')':' todavía')+'</span>'+nod;
 }
 function rtRecoScript(token){
-  const body=`# YAPUR.NET - reconexion automatica de clientes
-# Cada minuto pregunta a ${location.origin} a quien hay que reconectar (clientes suspendidos que pagaron o tienen promesa de pago).
-# SOLO REACTIVA: desactiva al cliente en la lista "Clientes Cortados" y habilita su usuario PPPoE. Nunca corta a nadie ni cambia otra cosa.
-# Despues le avisa al sistema cuales hizo, para no repetirlos.
+  const body=`# YAPUR.NET - cortes y reconexiones automaticas de clientes
+# Cada minuto pregunta a ${location.origin} a quien hay que cortar o reconectar (lo pide la oficina desde la app al suspender o reconectar a un cliente).
+# CORTAR: agrega la IP del cliente a la lista "Clientes Cortados" con su nombre completo de comentario (o deshabilita su usuario PPPoE).
+# RECONECTAR: borra esa entrada de la lista (o habilita su usuario PPPoE).
+# Nunca corta la IP del propio router. Despues le avisa al sistema cuales hizo, para no repetirlos.
 :local base "${location.origin}/api/router/reco"
 :local h "Authorization: Bearer ${token}"
 :local data ""
 :do {
-  :local r [/tool fetch url=$base http-method=get http-header-field=$h output=user as-value check-certificate=no]
+  :local r [/tool fetch url=($base . "\\3Fv=2") http-method=get http-header-field=$h output=user as-value check-certificate=no]
   :set data ($r->"data")
 } on-error={ :set data "" }
 :if ([:len $data] > 0) do={
   :local hechos ""
   :foreach item in=[:toarray $data] do={
-    :local p1 [:find $item ":"]
-    :if ([:typeof $p1] = "num") do={
+    :do {
+      :local p1 [:find $item ":"]
       :local id [:pick $item 0 $p1]
-      :local rest [:pick $item ($p1 + 1) [:len $item]]
-      :local p2 [:find $rest ":"]
-      :local ip ""
-      :local us ""
-      :if ([:typeof $p2] = "num") do={
-        :set ip [:pick $rest 0 $p2]
-        :set us [:pick $rest ($p2 + 1) [:len $rest]]
-      }
-      :if ([:len $ip] > 0) do={
-        :do {
-          :foreach e in=[/ip firewall address-list find where list="Clientes Cortados" address=$ip disabled=no] do={
-            /ip firewall address-list disable $e
-            :log info ("YAPUR reconexion: " . $ip . " reactivado")
+      :local r1 [:pick $item ($p1 + 1) [:len $item]]
+      :local p2 [:find $r1 ":"]
+      :local acc [:pick $r1 0 $p2]
+      :local r2 [:pick $r1 ($p2 + 1) [:len $r1]]
+      :local p3 [:find $r2 ":"]
+      :local ip [:pick $r2 0 $p3]
+      :local r3 [:pick $r2 ($p3 + 1) [:len $r2]]
+      :local p4 [:find $r3 ":"]
+      :local us [:pick $r3 0 $p4]
+      :local nom [:pick $r3 ($p4 + 1) [:len $r3]]
+      :if ($acc = "c") do={
+        :if ([:len $ip] > 0) do={
+          :local propia false
+          :foreach a in=[/ip address find] do={
+            :local ad [/ip address get $a address]
+            :if ([:pick $ad 0 [:find $ad "/"]] = $ip) do={ :set propia true }
           }
-        } on-error={}
+          :if ($propia = false) do={
+            :if ([:len [/ip firewall address-list find where list="Clientes Cortados" address=$ip]] = 0) do={
+              /ip firewall address-list add list="Clientes Cortados" address=$ip comment=$nom
+              :log info ("YAPUR corte: " . $ip . " " . $nom)
+            } else={
+              :foreach e in=[/ip firewall address-list find where list="Clientes Cortados" address=$ip disabled=yes] do={
+                /ip firewall address-list enable $e
+                :log info ("YAPUR corte: " . $ip . " " . $nom . " (ya estaba, se habilito)")
+              }
+            }
+          }
+        }
+        :if ([:len $us] > 0) do={
+          :foreach e in=[/ppp secret find where name=$us disabled=no] do={
+            /ppp secret disable $e
+            :log info ("YAPUR corte: usuario " . $us)
+          }
+          :foreach e in=[/ppp active find where name=$us] do={ /ppp active remove $e }
+        }
       }
-      :if ([:len $us] > 0) do={
-        :do {
+      :if ($acc = "r") do={
+        :if ([:len $ip] > 0) do={
+          :foreach e in=[/ip firewall address-list find where list="Clientes Cortados" address=$ip] do={
+            /ip firewall address-list remove $e
+            :log info ("YAPUR reconexion: " . $ip . " " . $nom)
+          }
+        }
+        :if ([:len $us] > 0) do={
           :foreach e in=[/ppp secret find where name=$us disabled=yes] do={
             /ppp secret enable $e
-            :log info ("YAPUR reconexion: usuario " . $us . " habilitado")
+            :log info ("YAPUR reconexion: usuario " . $us)
           }
-        } on-error={}
+        }
       }
       :set hechos ($hechos . $id . ",")
-    }
+    } on-error={}
   }
   :if ([:len $hechos] > 0) do={
     :do {
@@ -359,30 +395,30 @@ function rtRecoScript(token){
     } on-error={}
   }
 }`;
-  return rtAscii(`:do { /system script remove [find name="yapur-reconexion"] } on-error={}\n/system script add name=yapur-reconexion policy=read,write,test comment="YAPUR.NET reconexion automatica de clientes" source={\n${body}\n}`);
+  return rtAscii(`:do { /system script remove [find name="yapur-reconexion"] } on-error={}\n/system script add name=yapur-reconexion policy=read,write,test comment="YAPUR.NET cortes y reconexiones automaticas de clientes" source={\n${body}\n}`);
 }
-const rtRecoSched=()=>`:do { /system scheduler remove [find name="yapur-reconexion"] } on-error={}\n/system scheduler add name=yapur-reconexion interval=1m policy=read,write,test comment="YAPUR.NET reconexion automatica" on-event="/system script run yapur-reconexion"`;
+const rtRecoSched=()=>`:do { /system scheduler remove [find name="yapur-reconexion"] } on-error={}\n/system scheduler add name=yapur-reconexion interval=1m policy=read,write,test comment="YAPUR.NET cortes y reconexiones automaticas" on-event="/system script run yapur-reconexion"`;
 function openRecoScript(r,token){
   const script=rtRecoScript(token);
   const step=(n,t,body)=>`<div class="card flat"><h3>${n}. ${t}</h3>${body}</div>`;
-  const html=`<div class="notice info">Con esto, cuando un cliente suspendido <b>paga o se le carga una promesa</b>, <b>${esc(r.nombre)} lo reconecta solo en menos de un minuto</b>: desactiva al cliente en la lista <span class="mono">Clientes Cortados</span> y habilita su usuario PPPoE, sin que tengas que tocar el router. El script <b>solo reactiva</b>: no puede cortar a nadie ni cambiar otra cosa, y lleva un acceso propio de este router (no lo compartas).</div>
+  const html=`<div class="notice info">Con esto, <b>${esc(r.nombre)}</b> corta y reconecta solo, en menos de un minuto, lo que la oficina pida desde la app: al <b>suspender</b> a un cliente le agrega la IP a la lista <span class="mono">Clientes Cortados</span> con su nombre completo de comentario (o deshabilita su usuario PPPoE), y al <b>reconectarlo</b> (pago, promesa de pago o el botón Reconectar) borra esa entrada (o lo habilita). Sin que tengas que tocar el router. Solo hace lo que se pide desde la app a una persona con permiso, nunca corta la IP del propio router, y lleva un acceso propio de este router (no lo compartas).${r.nodos?'':' <b>Este router no tiene nodos marcados: recibe los cortes de todos los clientes.</b> Marcá los que atiende en <b>Editar</b>.'}</div>
     ${step(1,'Pegar el script',`<p class="small muted">En WinBox: <b>Nuevo terminal</b> y pegalo entero. Crea un script llamado <span class="mono">yapur-reconexion</span> (si ya existía, lo reemplaza).</p><div class="actions start"><button class="btn primary small" type="button" data-copy="${esc(script)}" data-copy-label="Script">Copiar script</button></div><textarea class="mono small" readonly rows="6" style="width:100%">${esc(script)}</textarea>`)}
     ${step(2,'Dejarlo programado',`<p class="small muted">Pegalo en el mismo terminal. Hace que el router corra el script <b>una vez por minuto</b>.</p><div class="actions start"><button class="btn small" type="button" data-copy="${esc(rtRecoSched())}" data-copy-label="Programación">Copiar programación</button></div><textarea class="mono small" readonly rows="3" style="width:100%">${esc(rtRecoSched())}</textarea>`)}
-    ${step(3,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Reconexión automática: atendiendo»</b> (tocá <b>Actualizar</b>). En <b>Cortes</b> también se ve el estado y cuáles se reconectaron.</p>`)}
+    ${step(3,'Revisar que quedó andando',`<p class="small muted">En un minuto, en <b>Ajustes → Routers</b>, este router tiene que decir <b>«Cortes y reconexión automáticos: atendiendo»</b> (tocá <b>Actualizar</b>). En <b>Cortes</b> también se ve el estado y cuáles se reconectaron.</p>`)}
     <p class="small muted">Esto hace falta en cada router donde cortás clientes (los que usan la lista <span class="mono">Clientes Cortados</span> o PPPoE): cada uno tiene su propio script y su propio acceso. Si un router no tiene al cliente, simplemente lo ignora.</p>
     <details class="small"><summary>Si algo falla</summary><ul class="small muted">
       <li><b>«not enough permissions»</b>: en algunas versiones <span class="mono">/tool fetch</span> pide también otros permisos. Probá cambiar <span class="mono">policy=read,write,test</span> por <span class="mono">policy=read,write,test,policy,sensitive</span> en el script y en la programación.</li>
       <li><b>«expected end of command … check-certificate»</b>: tu RouterOS es viejo; borrá <span class="mono">check-certificate=no</span> del script (las tres veces).</li>
-      <li>Para ver lo que reactivó: <span class="mono">/log print where message~"YAPUR"</span></li>
+      <li>Para ver lo que cortó y reconectó: <span class="mono">/log print where message~"YAPUR"</span></li>
       <li>Para correrlo a mano: <span class="mono">/system script run yapur-reconexion</span></li>
       <li>Para apagarlo: <span class="mono">/system scheduler remove [find name=yapur-reconexion]</span></li>
-      <li><b>Consultas:</b> unas 1.440 por día por router. Si un router ya cortó a un cliente a mano, no lo vuelve a reconectar: solo reactiva a quien el sistema marcó como reconectado.</li></ul></details>
+      <li><b>Consultas:</b> unas 1.440 por día por router. Un cliente que ya estaba en la lista porque lo cortaste a mano no se toca hasta que se lo reconecte o suspenda desde la app.</li></ul></details>
     <div class="actions"><button class="btn primary" type="button" data-close>Listo</button></div>`;
-  openModal({title:'Reconexión automática · '+r.nombre,html,wide:true});   /* el copiado lo hace el manejador global de [data-copy] */
+  openModal({title:'Cortes y reconexión automáticos · '+r.nombre,html,wide:true});   /* el copiado lo hace el manejador global de [data-copy] */
 }
 async function regenReco(id){
   const r=RT.list.find(x=>x.id===id);if(!r)return;
-  if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de reconexión para ${r.nombre}: si el router ya tenía este script, hay que pegarlo de nuevo. Los otros accesos (lista de clientes y pruebas de ping) no cambian. ¿Seguir?`,'Generar de nuevo'))return;
+  if(!await askConfirm(`Para mostrar el script se genera un acceso nuevo de cortes y reconexión para ${r.nombre}: si el router ya tenía este script, hay que pegarlo de nuevo. Los otros accesos (lista de clientes y pruebas de ping) no cambian. ¿Seguir?`,'Generar de nuevo'))return;
   try{const j=await NET.api('POST','/api/routers/'+id+'/reco-token',{});openRecoScript(r,j.token);loadRouters();}catch(err){toast(err.message||'No se pudo generar','bad');}
 }
 

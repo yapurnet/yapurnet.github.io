@@ -1,5 +1,6 @@
-# Reconexión automática: cuando un cliente pasa de suspendido a activo, el servidor lo anota y cada router (con su token de reconexión, que solo sirve para eso)
-# lo recibe como «id:ip:usuario», lo reactiva y avisa que lo hizo. Si se lo vuelve a suspender antes, se cancela. Contra workerd.
+# Reconexión automática (formato viejo, versión 1 de la consulta: los scripts que ya están instalados en los routers siguen funcionando): cuando un cliente pasa de suspendido a activo,
+# el servidor lo anota y cada router (con su token, que solo sirve para recibir las órdenes y avisar) lo recibe como «id:ip:usuario», lo reactiva y avisa que lo hizo.
+# Si se lo vuelve a suspender antes, la orden de reconexión se reemplaza por una de corte, que la versión 1 no recibe (solo sabe reactivar). Contra workerd.
 import json, os, sys, urllib.request, urllib.error
 BASE = os.environ['YAPUR_BASE']; CODE = os.environ['YAPUR_CODE']
 res = []
@@ -64,7 +65,7 @@ check('un id inventado en el aviso no rompe nada', req('POST', '/api/router/reco
 # se vuelve a suspender C antes de que el router 2 lo haga: se cancela
 cli(TA, 'cc', estado='suspendido', corteMora='2026-11-25')
 st, t2 = req('GET', '/api/router/reco', token=T2, raw=True)
-check('si se lo vuelve a suspender antes, ya no se lo manda a reconectar', 'pepe.gomez' not in t2 and len([x for x in t2.split(',') if x]) == 2, t2)
+check('si se lo vuelve a suspender antes, ya no se lo manda a reconectar (y el script viejo no recibe el corte)', 'pepe.gomez' not in t2 and len([x for x in t2.split(',') if x]) == 2, t2)
 
 # un cambio que no es suspendido→activo no anota nada
 cli(TA, 'ca', nombre='Cliente A renombrado')
@@ -73,7 +74,7 @@ check('editar otro dato de un cliente activo no lo anota de nuevo', len([x for x
 
 # pantalla de la oficina
 st, j = req('GET', '/api/reco', token=TA)
-check('la oficina ve la cola (sin el que se canceló) y qué router ya la hizo', st == 200 and len(j['items']) == 2 and len(j['routers']) == 2 and any(r1 in it['hechos'] for it in j['items']), j)
+check('la oficina ve la cola (la reconexión de C quedó reemplazada por un corte) y qué router ya la hizo', st == 200 and len(j['items']) == 3 and sorted(it['acc'] for it in j['items']) == ['c', 'r', 'r'] and len(j['routers']) == 2 and any(r1 in it['hechos'] for it in j['items']), j)
 check('sin sesión no se ve la cola', req('GET', '/api/reco')[0] == 401)
 st, j = req('GET', '/api/routers', token=TA)
 check('Ajustes → Routers sabe que el router tiene reconexión', all(r['reco'] for r in j['routers']), j)
