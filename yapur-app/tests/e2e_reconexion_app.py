@@ -71,7 +71,12 @@ async def main():
         tas = await pg.eval_on_selector_all('[role=dialog] textarea', 'e=>e.map(x=>x.value)')
         sc = tas[0]
         check('el script lleva el token y la lista «Clientes Cortados»', TK in sc and 'Clientes Cortados' in sc and '/api/router/reco' in sc, sc[:200])
-        check('el script solo reactiva: desactiva entradas y habilita usuarios, nunca corta', 'address-list disable' in sc and 'secret enable' in sc and 'address-list add' not in sc and 'secret disable' not in sc and 'address-list enable' not in sc and 'remove' not in sc.split('source={')[1])
+        cuerpo = sc.split('source={')[1]
+        check('el script corta (agrega la IP a «Clientes Cortados» con el nombre completo de comentario) solo si la orden es de corte', ':if ($acc = "c")' in cuerpo and 'address-list add list="Clientes Cortados" address=$ip comment=$nom' in cuerpo and cuerpo.count('address-list add') == 1)
+        check('y reconecta borrando esa entrada (solo la de esa IP en esa lista) o habilitando el usuario PPPoE', ':if ($acc = "r")' in cuerpo and cuerpo.count('address-list remove') == 1 and 'address-list find where list="Clientes Cortados" address=$ip] do={\n            /ip firewall address-list remove $e' in cuerpo and 'secret enable' in cuerpo, cuerpo[-1500:])
+        check('con PPPoE, cortar deshabilita el usuario y cierra su sesión', 'secret disable' in cuerpo and 'ppp active remove' in cuerpo)
+        check('nunca corta una IP del propio router ni toca otra lista que no sea «Clientes Cortados»', '/ip address find' in cuerpo and ':set propia true' in cuerpo and cuerpo.count('list="Clientes Cortados"') == cuerpo.count('address-list find') + cuerpo.count('address-list add'), cuerpo.count('list="'))
+        check('pide la versión 2 (con acción y nombre) usando \\3F en lugar de «?»', '\\3Fv=2' in cuerpo)
         check('el script está en ASCII puro (el terminal de MikroTik no respeta las tildes)', all(ord(ch) < 128 for ch in sc))
         check('la programación corre cada minuto', 'interval=1m' in tas[1] and 'yapur-reconexion' in tas[1], tas[1])
         cp = await pg.eval_on_selector_all('[role=dialog] [data-copy]', 'e=>e.map(x=>x.dataset.copy)')

@@ -785,18 +785,18 @@ async function anularPromesa(id){
 }
 
 /* Suspender o reconectar a un cliente desde su ficha (antes solo se podía por Editar → Estado o con «Marcar suspendido» en la lista de Cortes).
-   Suspender solo cambia el estado en la app (el corte en el router sigue siendo manual). Reconectar pasa a activo y el servidor lo manda a los routers que tengan la reconexión automática. */
+   Suspender lo pasa a suspendido y el servidor le manda la orden de corte a los routers que tengan el script de cortes (agregan su IP a «Clientes Cortados» con su nombre); Reconectar lo pasa a activo y esos routers borran la entrada. */
 async function suspenderCliente(id){
   const c=S.clientes.get(id);if(!c||c.estado!=='activo')return;
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
-  if(!await askConfirm(`¿Marcar a ${c.nombre} como suspendido? Solo cambia el estado en la app: el corte en el router lo hacés vos (Cortes → Copiar script MikroTik).`,'Suspender',true))return;
-  if(await setSuspension([c],true,true)){toast('Suspendido. Falta cortarlo en el router.');closeModal();}
+  if(!await askConfirm(`¿Suspender a ${c.nombre}? Se le corta el internet: los routers con cortes automáticos le agregan la IP a «Clientes Cortados» en menos de un minuto; en los demás cortalo a mano (Cortes → Copiar script MikroTik).`,'Suspender y cortar',true))return;
+  if(await setSuspension([c],true,true)){toast('Suspendido: se corta en menos de un minuto');closeModal();}
 }
 async function reconectarCliente(id){
   const c=S.clientes.get(id);if(!c||c.estado!=='suspendido')return;
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
   const debe=tieneDeuda(c);
-  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con reconexión automática lo reactivan en menos de un minuto; en los demás, reactivalo a mano.${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
+  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con cortes automáticos le borran la entrada de «Clientes Cortados» en menos de un minuto; en los demás, reactivalo a mano.${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
   if(await setSuspension([c],false,true)){toast('Reconectado');closeModal();}
 }
 
@@ -864,7 +864,7 @@ async function bulkCortes(kind){
   if(kind==='script-on')return copyScript(cs,true);
   if(kind==='users-off'||kind==='users-on')return copyUsers(cs);
   const on=kind==='susp';
-  if(!await askConfirm(on?`¿Marcar ${cs.length} clientes como suspendidos? Solo cambia el estado en la app: el corte en el router lo hacés vos.`:`¿Marcar ${cs.length} clientes como reconectados? Solo cambia el estado en la app.`,on?'Marcar suspendidos':'Marcar reconectados',on))return;
+  if(!await askConfirm(on?`¿Suspender y cortar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Suspendidos y los routers con cortes automáticos les cortan el internet en menos de un minuto; en los demás hacelo a mano (Copiar script MikroTik).${cs.length>=30?' Son muchos: revisá bien la lista antes de confirmar.':''}`:`¿Reconectar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Activos y los routers con cortes automáticos les borran la entrada de «Clientes Cortados» en menos de un minuto.`,on?'Suspender y cortar':'Reconectar',on))return;
   await setSuspension(cs,on);
 }
 function cutRow(c,s,kind){
@@ -873,7 +873,7 @@ function cutRow(c,s,kind){
   let side='',btns='';
   if(kind==='cortar'){
     side=`<b class="tnum">${fmtMoney(s.b.deuda)}</b><span class="chip bad">${esc(s.motivo)}</span>`;
-    btns=(can('editarClientes')?`<button class="btn small primary" type="button" data-susp="${esc(c.id)}">Marcar suspendido</button>`:'')+(can('cobrar')?`<button class="btn small" type="button" data-cobrar="${esc(c.id)}">Cobrar</button>`:'')+(can('promesas')?`<button class="btn small" type="button" data-prom="${esc(c.id)}">Promesa</button>`:'');
+    btns=(can('editarClientes')?`<button class="btn small primary" type="button" data-susp="${esc(c.id)}">Suspender y cortar</button>`:'')+(can('cobrar')?`<button class="btn small" type="button" data-cobrar="${esc(c.id)}">Cobrar</button>`:'')+(can('promesas')?`<button class="btn small" type="button" data-prom="${esc(c.id)}">Promesa</button>`:'');
   }else if(kind==='reconectar'){
     side=s.k==='promesa'?`<span class="chip warn">Promesa hasta ${dm(s.hasta)}</span>`:'<span class="chip ok">Ya no debe</span>';
     btns=(can('editarClientes')?`<button class="btn small primary" type="button" data-recon="${esc(c.id)}">Marcar reconectado</button>`:'');
@@ -892,26 +892,30 @@ function calendarHTML(){
 function drawCortes(body){
   const cd=cortesData(),cap=100;
   const sect=(title,rows,kind,tools,empty)=>`<div class="card"><div class="head-row"><h3>${title} (${rows.length})</h3></div>${rows.length?`${tools?`<div class="actions start">${tools}</div>`:''}<div class="list">${rows.slice(0,cap).map(x=>cutRow(x.c,x.s,kind)).join('')}</div>${rows.length>cap?`<div class="hint">Se muestran los primeros ${cap} de ${rows.length}.</div>`:''}`:`<div class="hint">${empty}</div>`}</div>`;
-  const toolsCut=(can('editarClientes')?`<button class="btn small primary" type="button" data-bulk="susp">Marcar suspendidos (${cd.cortar.length})</button>`:'')+`<button class="btn small" type="button" data-bulk="script-off">Copiar script MikroTik</button><button class="btn small" type="button" data-bulk="users-off">Copiar usuarios</button>`;
-  const toolsRec=(can('editarClientes')?`<button class="btn small primary" type="button" data-bulk="recon">Marcar reconectados (${cd.reconectar.length})</button>`:'')+`<button class="btn small" type="button" data-bulk="script-on">Copiar script MikroTik</button>`;
+  const toolsCut=(can('editarClientes')?`<button class="btn small primary" type="button" data-bulk="susp">Suspender y cortar a los ${cd.cortar.length}</button>`:'')+`<button class="btn small" type="button" data-bulk="script-off">Copiar script MikroTik</button><button class="btn small" type="button" data-bulk="users-off">Copiar usuarios</button>`;
+  const toolsRec=(can('editarClientes')?`<button class="btn small primary" type="button" data-bulk="recon">Reconectar a los ${cd.reconectar.length}</button>`:'')+`<button class="btn small" type="button" data-bulk="script-on">Copiar script MikroTik</button>`;
   body.innerHTML=`<div class="card"><h3>Calendario de cortes</h3><div class="list">${calendarHTML()}</div><div class="hint">Si el día de corte cae sábado, domingo o feriado, pasa al siguiente día hábil. La promesa vencida se suspende al día siguiente, sin esperar.</div></div>
     ${sect('Para cortar',cd.cortar,'cortar',toolsCut,'Nadie para cortar por ahora.')}
     ${sect('Para reconectar',cd.reconectar,'reconectar',toolsRec,'Nadie para reconectar.')}
     ${sect('Promesas vigentes',cd.promesas,'promesa','','No hay promesas de pago vigentes.')}
     <div id="cx-reco"></div>
-    <div class="notice info">La app te dice a quién cortar y a quién reconectar. <b>Cortar</b> lo seguís haciendo vos en el router (el script sirve para clientes PPPoE con el usuario cargado; revisalo antes de pegarlo). <b>Reconectar</b> se hace solo: cuando un cliente paga o se le carga una promesa, pasa a activo y los routers con el script de reconexión lo reactivan en menos de un minuto.</div>`;
+    <div class="notice info">La app te dice a quién cortar y a quién reconectar. Al <b>suspender</b> a un cliente (botón en su ficha o en esta lista), los routers con el script de cortes le agregan la IP a <span class="mono">Clientes Cortados</span> con su nombre, en menos de un minuto. Al <b>reconectarlo</b> (pago, promesa de pago o el botón Reconectar) le borran la entrada. En un router sin el script (<b>Ajustes → Routers → Script de cortes</b>) se sigue haciendo a mano con <b>Copiar script MikroTik</b>.</div>`;
   drawRecoEstado($('#cx-reco',body));
 }
-/* estado de la reconexión automática: si los routers están consultando y cuáles de los últimos reconectados ya se reactivaron */
+/* estado de los cortes y reconexiones automáticos: si los routers están consultando y cuáles de las últimas órdenes ya se hicieron */
 async function drawRecoEstado(box){
   if(!box||!can('editarClientes'))return;
   let j;try{j=await NET.api('GET','/api/reco');}catch(_){return;}
   if(!box.isConnected)return;
-  if(!j.routers.length){box.innerHTML='<div class="notice warn"><b>La reconexión automática todavía no está activada.</b> Para que los routers reconecten solos, en <b>Ajustes → Routers</b> tocá <b>Script de reconexión</b> en cada router y pegalo en WinBox.</div>';return;}
+  if(!j.routers.length){box.innerHTML='<div class="notice warn"><b>Los cortes y reconexiones automáticos todavía no están activados.</b> Para que los routers corten y reconecten solos, en <b>Ajustes → Routers</b> tocá <b>Script de cortes</b> en cada router y pegalo en WinBox.</div>';return;}
   const vivo=r=>r.visto&&Date.now()-r.visto<150e3,caidos=j.routers.filter(r=>!vivo(r));
-  const filas=j.items.slice(0,8).map(it=>{const falta=j.routers.filter(r=>!it.hechos.includes(r.id));
-    return `<div class="small"><b>${esc(it.nombre||'Cliente')}</b> <span class="muted">${esc(it.ip||it.usuario||'')} · ${esc(rtAgo(it.ts))}</span> · ${falta.length?'<span style="color:var(--bad)">falta en '+esc(falta.map(r=>r.nombre).join(', '))+'</span>':'<span style="color:var(--ok)">reconectado en todos los routers</span>'}</div>`;}).join('');
-  box.innerHTML=`<div class="card"><h3>Reconexión automática</h3><div class="small">${j.routers.map(r=>vivo(r)?`<span class="chip ok">${esc(r.nombre)}: atendiendo</span>`:`<span class="chip bad">${esc(r.nombre)}: no consulta</span>`).join(' ')}</div>${caidos.length?'<div class="hint bad">Un router que no consulta no reactiva a nadie: revisá que tenga el script y la programación.</div>':''}${filas?'<div style="margin-top:8px">'+filas+'</div>':'<div class="hint">Todavía no se reconectó a nadie desde que está activada.</div>'}</div>`;
+  const filas=j.items.slice(0,8).map(it=>{
+    const esp=Array.isArray(it.esperan)?it.esperan:j.routers.map(r=>r.id),falta=j.routers.filter(r=>esp.includes(r.id)&&!it.hechos.includes(r.id)),corte=it.acc==='c';
+    const est=!esp.length?`<span style="color:var(--bad)">ningún router atiende ${it.nodo?'el nodo '+esc(it.nodo):'a los clientes sin nodo'}: cortalo a mano o marcá el nodo en Ajustes → Routers</span>`
+      :falta.length?'<span style="color:var(--bad)">falta en '+esc(falta.map(r=>r.nombre).join(', '))+'</span>'
+      :`<span style="color:var(--ok)">${corte?'cortado':'reconectado'} en ${esp.length>1?'todos los routers que le tocan':esc((j.routers.find(r=>r.id===esp[0])||{}).nombre||'el router')}</span>`;
+    return `<div class="small"><span class="chip ${corte?'bad':'ok'}">${corte?'Cortar':'Reconectar'}</span> <b>${esc(it.nombre||'Cliente')}</b> <span class="muted">${esc(it.ip||it.usuario||'')} · ${esc(rtAgo(it.ts))}</span> · ${est}</div>`;}).join('');
+  box.innerHTML=`<div class="card"><h3>Cortes y reconexión automáticos</h3><div class="small">${j.routers.map(r=>vivo(r)?`<span class="chip ok">${esc(r.nombre)}: atendiendo</span>`:`<span class="chip bad">${esc(r.nombre)}: no consulta</span>`).join(' ')}</div>${caidos.length?'<div class="hint bad">Un router que no consulta no corta ni reconecta a nadie: revisá que tenga el script y la programación.</div>':''}${filas?'<div style="margin-top:8px">'+filas+'</div>':'<div class="hint">Todavía no se cortó ni reconectó a nadie desde que está activado.</div>'}</div>`;
 }
 
 /* cierre de caja: lo que cobró cada persona (para contar el efectivo que tiene que entregar cada una) */
@@ -966,7 +970,7 @@ VIEWS.cobranzas={
       const r=e.target.closest('[data-receipt]');if(r)return openReceipt(r.dataset.receipt);
       const k=e.target.closest('[data-cobrar]');if(k)return openCobro(k.dataset.cobrar);
       const o=e.target.closest('[data-open-client]');if(o)return openClient(o.dataset.openClient);
-      const sb=e.target.closest('[data-susp]');if(sb)return setSuspension([S.clientes.get(sb.dataset.susp)].filter(Boolean),true);
+      const sb=e.target.closest('[data-susp]');if(sb)return suspenderCliente(sb.dataset.susp);
       const rb=e.target.closest('[data-recon]');if(rb)return setSuspension([S.clientes.get(rb.dataset.recon)].filter(Boolean),false);
       const pb=e.target.closest('[data-prom]');if(pb)return openPromesa(pb.dataset.prom);
       const bk=e.target.closest('[data-bulk]');if(bk)return bulkCortes(bk.dataset.bulk);
