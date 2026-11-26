@@ -93,7 +93,9 @@ function analyzeImport(rows,opts){
   const byKey=new Map();
   if(opts.existentes){for(const c of S.clientes.values()){const k=nameKey(c.nombre);if(k)byKey.set(k,byKey.has(k)?null:c);}}
   const taken=new Set();
-  const out={recs:[],upd:[],act:{n:0,igual:0,porPlan:new Map(),conServ:0},sinMatch:0,existen:0,sinNombre:0,dup:0,planesFalta:new Set(),velFalta:new Map(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
+  /* una IP no puede estar en dos clientes: las que ya tiene alguien (o repite el mismo archivo) se importan sin IP y se informan */
+  const ipUsadas=new Set();for(const c of S.clientes.values())if(c.estado!=='baja')ipsDe(c).forEach(t=>ipUsadas.add(t));
+  const out={ipRep:[],recs:[],upd:[],act:{n:0,igual:0,porPlan:new Map(),conServ:0},sinMatch:0,existen:0,sinNombre:0,dup:0,planesFalta:new Set(),velFalta:new Map(),serviciosFalta:new Set(),cols:Object.keys(idx),sinGeo:0};
   for(let i=1;i<rows.length;i++){
     const r=rows[i],g=f=>idx[f]!==undefined?String(r[idx[f]]==null?'':r[idx[f]]).trim():'';
     const nombre=g('nombre');if(!nombre){out.sinNombre++;continue;}
@@ -128,7 +130,7 @@ function analyzeImport(rows,opts){
       }else if(opts.existentes==='completar'){
         const patch={},fill=(k,v)=>{if(v!==''&&v!=null&&(ex[k]==null||ex[k]===''))patch[k]=v;};
         fill('dni',fmtDoc(g('dni')));fill('tel',g('tel'));fill('tel2',g('tel2'));fill('dir',g('dir'));fill('loc',g('loc'));fill('ref',g('ref'));
-        fill('usuario',g('usuario'));fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
+        fill('usuario',g('usuario'));if(g('ip')&&ipOcupada(g('ip'),ex.id))out.ipRep.push(nombre+' ('+g('ip')+')');else fill('ip',g('ip'));fill('nodo',g('nodo'));fill('equipo',g('equipo'));fill('notas',g('notas'));
         if(plan){fill('planId',plan.id);
           if(patch.planId&&hasNum(ex.precio)){const hp=Array.isArray(ex.hp)?ex.hp:[],ref=hp.length?addMonths(hp[hp.length-1].h,1):curMonth();
             if(Number(ex.precio)===histPrice(plan,ref))patch.precio=null;}}   /* su precio especial coincide con el del plan: ahora lo da el plan */
@@ -150,7 +152,9 @@ function analyzeImport(rows,opts){
     if(g('lat')&&g('lng'))geo=parseCoords(g('lat').replace(',','.')+', '+g('lng').replace(',','.'));
     else if(g('geo'))geo=parseCoords(g('geo'));
     if(!geo)out.sinGeo++;
-    out.recs.push({codigo:cod||'',nombre,dni:fmtDoc(g('dni')),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:g('ip'),nodo:g('nodo'),equipo:g('equipo'),
+    let ipv=g('ip');
+    if(ipv){const toks=ipsDe({ip:ipv});if(toks.some(t=>ipUsadas.has(t))){out.ipRep.push(nombre+' ('+ipv+')');ipv='';}else toks.forEach(t=>ipUsadas.add(t));}
+    out.recs.push({codigo:cod||'',nombre,dni:fmtDoc(g('dni')),tel:g('tel'),tel2:g('tel2'),dir:g('dir'),loc:g('loc'),ref:g('ref'),planId:plan?plan.id:null,extras,tec,usuario:g('usuario'),ip:ipv,nodo:g('nodo'),equipo:g('equipo'),
       lat:geo?geo.lat:null,lng:geo?geo.lng:null,estado,alta:parseDateAny(g('alta'))||todayStr(),desde,ciclo:parseCiclo(g('ciclo'),opts.ciclo||1),precio:precio,notas:g('notas'),creado:Date.now(),mod:Date.now()});
   }
   return out;
@@ -311,7 +315,7 @@ function openImport(){
       if(!a.cols.includes('nombre')){out.innerHTML='<div class="notice bad">No encontré una columna de nombre. Revisá la primera fila del archivo.</div>';return;}
       const velF=[...a.velFalta].map(([k,n])=>k+' Mbps ('+n+')');
       out.innerHTML=`<div class="card flat"><h3>${opts().existentes==='actualizar'?a.act.n+' '+(a.act.n===1?'cliente se actualiza':'clientes se actualizan')+' desde '+esc(monthLabel(opts().vigencia)):a.recs.length+' '+(a.recs.length===1?'cliente listo':'clientes listos')+' para importar'}</h3>
-        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}${a.sinMatch?`<dt>Sin cliente con ese nombre</dt><dd>${a.sinMatch} filas se saltean: en este modo no se crean clientes nuevos</dd>`:''}${a.existen?`<dt>Ya cargados (mismo nombre)</dt><dd>${a.existen} no se vuelven a crear${opts().existentes==='actualizar'?`: ${a.act.n} cambian de plan, servicios o precio${a.act.porPlan.size?' ('+[...a.act.porPlan].map(([k,v])=>esc(k)+': '+v).join(' · ')+(a.act.conServ?' · '+a.act.conServ+' con servicios':'')+')':''}${a.act.igual?`; ${a.act.igual} ya estaban así`:''}`:a.upd.length?`; a ${a.upd.length} se les completan datos que les faltaban`:''}</dd>`:''}
+        <dl class="kv"><dt>Columnas reconocidas</dt><dd>${a.cols.map(esc).join(', ')}</dd>${a.sinNombre?`<dt>Sin nombre</dt><dd>${a.sinNombre} filas se saltean</dd>`:''}${a.dup?`<dt>N° ya existente</dt><dd>${a.dup} filas se saltean</dd>`:''}${a.ipRep.length?`<dt>IP repetida</dt><dd>${a.ipRep.length} ${a.ipRep.length===1?'tiene':'tienen'} una IP que ya está en otro cliente: ${a.ipRep.length===1?'se importa':'se importan'} sin IP (${a.ipRep.slice(0,5).map(esc).join(', ')}${a.ipRep.length>5?'…':''}). Cargala a mano cuando se aclare.</dd>`:''}${a.sinMatch?`<dt>Sin cliente con ese nombre</dt><dd>${a.sinMatch} filas se saltean: en este modo no se crean clientes nuevos</dd>`:''}${a.existen?`<dt>Ya cargados (mismo nombre)</dt><dd>${a.existen} no se vuelven a crear${opts().existentes==='actualizar'?`: ${a.act.n} cambian de plan, servicios o precio${a.act.porPlan.size?' ('+[...a.act.porPlan].map(([k,v])=>esc(k)+': '+v).join(' · ')+(a.act.conServ?' · '+a.act.conServ+' con servicios':'')+')':''}${a.act.igual?`; ${a.act.igual} ya estaban así`:''}`:a.upd.length?`; a ${a.upd.length} se les completan datos que les faltaban`:''}</dd>`:''}
         ${velF.length?`<dt>Velocidades sin plan</dt><dd>${velF.map(esc).join(', ')}. Esos clientes quedan sin plan (se cobra igual por su precio). Creá el plan y volvé a importar con «Completar» tildado.</dd>`:''}
         ${a.planesFalta.size?`<dt>Planes que no existen</dt><dd>${[...a.planesFalta].map(esc).join(', ')}. Esos clientes quedan sin plan. Creá los planes antes para que se asignen.</dd>`:''}${a.serviciosFalta.size?`<dt>Servicios que no existen</dt><dd>${[...a.serviciosFalta].map(esc).join(', ')}. Se ignoran: creálos en Planes y volvé a importar o asignalos a mano.</dd>`:''}<dt>Sin ubicación</dt><dd>${a.sinGeo}</dd></dl>
         <div class="actions"><button class="btn primary" type="button" id="imp-go"${a.recs.length||a.upd.length?'':' disabled'}>${(()=>{const v=opts().existentes==='actualizar'?'Actualizar':'Completar';return a.recs.length?'Importar '+a.recs.length:v+' '+a.upd.length;})()}${a.recs.length&&a.upd.length?(opts().existentes==='actualizar'?' y actualizar ':' y completar ')+a.upd.length:''}</button></div><div class="hint" id="imp-prog"></div></div>`;

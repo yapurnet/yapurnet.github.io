@@ -789,14 +789,16 @@ async function anularPromesa(id){
 async function suspenderCliente(id){
   const c=S.clientes.get(id);if(!c||c.estado!=='activo')return;
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
+  const cp=ipCompartida(c);   /* el router corta por IP: con una IP repetida se cortarían los dos */
+  if(cp.length)return toast('No se corta: comparte la IP '+cp[0].ip+' con '+ipDeQuien(cp[0])+' y se cortarían los dos. Corregí la IP repetida (Clientes → IP repetida).','bad');
   if(!await askConfirm(`¿Suspender a ${c.nombre}? Se le corta el internet: los routers con cortes automáticos le agregan la IP a «Clientes Cortados» en menos de un minuto; en los demás cortalo a mano (Cortes → Copiar script MikroTik).`,'Suspender y cortar',true))return;
   if(await setSuspension([c],true,true)){toast('Suspendido: se corta en menos de un minuto');closeModal();}
 }
 async function reconectarCliente(id){
   const c=S.clientes.get(id);if(!c||c.estado!=='suspendido')return;
   if(!can('editarClientes'))return toast('Tu perfil no puede cambiar el estado de los clientes','bad');
-  const debe=tieneDeuda(c);
-  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con cortes automáticos le borran la entrada de «Clientes Cortados» en menos de un minuto; en los demás, reactivalo a mano.${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
+  const debe=tieneDeuda(c),cs0=ipCompartida(c).filter(o=>o.c.estado==='suspendido')[0];
+  if(!await askConfirm(`¿Reconectar a ${c.nombre}? Pasa a activo y los routers con cortes automáticos le borran la entrada de «Clientes Cortados» en menos de un minuto; en los demás, reactivalo a mano.${cs0?` Ojo: comparte la IP ${cs0.ip} con ${ipDeQuien(cs0)}, que sigue suspendido: al borrar la entrada también recupera el internet.`:''}${debe?' Ojo: todavía debe y va a volver a figurar en «A cortar». Para darle plazo usá «Dar promesa de pago».':''}`,'Reconectar'))return;
   if(await setSuspension([c],false,true)){toast('Reconectado');closeModal();}
 }
 
@@ -858,13 +860,16 @@ function copyUsers(list){
 }
 async function bulkCortes(kind){
   const cd=cortesData();
-  const cs=(kind==='susp'||kind==='script-off'||kind==='users-off')?cd.cortar.map(x=>x.c):cd.reconectar.map(x=>x.c);
+  let cs=(kind==='susp'||kind==='script-off'||kind==='users-off')?cd.cortar.map(x=>x.c):cd.reconectar.map(x=>x.c);
   if(!cs.length)return;
+  let rep=[];
+  if(kind==='susp'){rep=cs.filter(x=>ipCompartida(x).length);cs=cs.filter(x=>!ipCompartida(x).length);   /* IP repetida: cortar a uno cortaría también al otro */
+    if(!cs.length)return toast('No se corta a nadie: todos comparten la IP con otro cliente. Corregí las IP repetidas (Clientes → IP repetida).','bad');}
   if(kind==='script-off')return copyScript(cs,false);
   if(kind==='script-on')return copyScript(cs,true);
   if(kind==='users-off'||kind==='users-on')return copyUsers(cs);
   const on=kind==='susp';
-  if(!await askConfirm(on?`¿Suspender y cortar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Suspendidos y los routers con cortes automáticos les cortan el internet en menos de un minuto; en los demás hacelo a mano (Copiar script MikroTik).${cs.length>=30?' Son muchos: revisá bien la lista antes de confirmar.':''}`:`¿Reconectar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Activos y los routers con cortes automáticos les borran la entrada de «Clientes Cortados» en menos de un minuto.`,on?'Suspender y cortar':'Reconectar',on))return;
+  if(!await askConfirm(on?`¿Suspender y cortar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Suspendidos y los routers con cortes automáticos les cortan el internet en menos de un minuto; en los demás hacelo a mano (Copiar script MikroTik).${cs.length>=30?' Son muchos: revisá bien la lista antes de confirmar.':''}${rep.length?` No se cortan ${rep.length} por tener la IP repetida con otro cliente (${rep.slice(0,3).map(x=>x.nombre).join(', ')}${rep.length>3?'…':''}): corregí su IP.`:''}`:`¿Reconectar a ${cs.length} cliente${cs.length===1?'':'s'}? Pasan a Activos y los routers con cortes automáticos les borran la entrada de «Clientes Cortados» en menos de un minuto.`,on?'Suspender y cortar':'Reconectar',on))return;
   await setSuspension(cs,on);
 }
 function cutRow(c,s,kind){
