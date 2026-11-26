@@ -79,6 +79,7 @@ async def main():
         sc3 = await pg.evaluate("[rtScript({id:'r1',nombre:'X',kinds:['q','p','d']},'r1.tk'),rtPingScript('r1.tk'),rtRecoScript('r1.tk')]")
         check('ningún script de router lleva un «?» suelto (el terminal de WinBox lo toma como ayuda y lo borra al pegar)', all('?' not in x for x in sc3), [i for i, x in enumerate(sc3) if '?' in x])
         check('en su lugar usan \\3F, que RouterOS lee como «?»', all('\\3F' in x for x in sc3))
+        check('todos los pedidos http de los scripts usan output=user as-value (RouterOS 6.49 rechaza output=none con keep-result=no y el on-error lo tapaba: el aviso de «hecho» nunca llegaba)', all('keep-result' not in x and 'output=none' not in x and x.count('/tool fetch') == x.count('output=user as-value') for x in sc3), [(i, x.count('/tool fetch'), x.count('output=user as-value')) for i, x in enumerate(sc3)])
         await pg.keyboard.press('Escape')
         await pg.evaluate("document.body.insertAdjacentHTML('beforeend','<div id=\"cx-t\"></div>')")
         await pg.evaluate("drawRecoEstado(document.getElementById('cx-t'))"); await pg.wait_for_selector('#cx-t .card', timeout=6000)
