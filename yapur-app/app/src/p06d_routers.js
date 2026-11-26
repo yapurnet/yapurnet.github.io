@@ -127,7 +127,7 @@ ${flush}
 :local enviar do={
   :local ok false
   :do {
-    /tool fetch url=($url . "\\3Frun=" . $run . "&part=" . $part . "&fin=" . $fin) http-method=post http-header-field=("Content-Type: text/plain,Authorization: Bearer " . $token) http-data=$body output=none keep-result=no check-certificate=no
+    /tool fetch url=($url . "\\3Frun=" . $run . "&part=" . $part . "&fin=" . $fin) http-method=post http-header-field=("Content-Type: text/plain,Authorization: Bearer " . $token) http-data=$body output=user as-value check-certificate=no
     :set ok true
   } on-error={ :set ok false }
   :return $ok
@@ -259,7 +259,7 @@ function rtPingScript(token){
         :local rec 0
         :do { :set rec [/ping address=$ip count=4 interval=250ms] } on-error={ :set rec 0 }
         :do {
-          /tool fetch url=($base . "\\3Fid=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+          /tool fetch url=($base . "\\3Fid=" . $id . "&sent=4&rec=" . $rec) http-method=post http-header-field=$h http-data="x" output=user as-value check-certificate=no
         } on-error={}
         :put ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4")
         :do { :log info ("YAPUR ping: " . $ip . " respondio " . $rec . " de 4") } on-error={}
@@ -355,7 +355,7 @@ function rtRecoScript(token){
   }
   :if ([:len $hechos] > 0) do={
     :do {
-      /tool fetch url=($base . "\\3Fok=" . $hechos) http-method=post http-header-field=$h http-data="x" output=none keep-result=no check-certificate=no
+      /tool fetch url=($base . "\\3Fok=" . $hechos) http-method=post http-header-field=$h http-data="x" output=user as-value check-certificate=no
     } on-error={}
   }
 }`;
