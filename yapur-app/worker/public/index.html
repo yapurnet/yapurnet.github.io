@@ -7018,6 +7018,13 @@ function reciboVia(){
   return null;
 }
 /* la pestaña de WhatsApp Web se reutiliza: cada recibo se abre en la misma pestaña (con otra pestaña, WhatsApp Web pide «Usar aquí» cada vez y la anterior se apaga) */
+/* extensión de Chrome de la oficina (herramientas-pc/extension-whatsapp): pega sola la imagen del recibo en WhatsApp Web. Avisa que está instalada con un mensaje; null = no se detecta (no instalada, apagada o de una versión anterior a la 1.1) */
+let WA_EXT=null;
+const rcPcHtml=()=>reciboVia()==='portapapeles'
+  ?(WA_EXT?'La extensión de esta computadora pega el recibo sola: se abre WhatsApp Web con el chat del cliente y el recibo aparece listo. Revisalo y apretá <b>Enviar</b>. Si no aparece, hacé clic en el cuadro de mensaje y pegalo con <b>Ctrl+V</b>.'
+    :'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo. <span class="muted">Para que se pegue solo hace falta la extensión de Chrome de la oficina, y no se detecta en esta computadora.</span>')
+  :'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.';
+try{window.addEventListener('message',e=>{if(e.source!==window||!e.data||typeof e.data.yapurWAext!=='string')return;WA_EXT=e.data.yapurWAext;const h=document.getElementById('rc-pc');if(h)h.innerHTML=rcPcHtml();});window.postMessage({yapurWAping:1},'*');}catch(_){}
 function abrirWhatsAppWeb(url){
   try{if(window.open(url,'yapur-wa'))return true;}catch(_){}
   NET.openExternal(url);return false;
@@ -7074,7 +7081,7 @@ function openReceipt(recibo){
     ${sale&&!d.anulado?'<div class="notice ok" style="margin-top:12px">El recibo le llega solo al cliente por WhatsApp.</div>':''}
     ${oficina||solo?waEstadoHTML(w):''}
     ${arcaReciboHTML(ps)}
-    ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${reciboVia()==='portapapeles'?'En la computadora: se copia el recibo y se abre WhatsApp Web con el chat del cliente. Hacé clic en el cuadro de mensaje, pegalo con <b>Ctrl+V</b> y mandalo.':'Este navegador no puede copiar imágenes: se descarga el recibo (archivo PNG) y se abre WhatsApp Web con el chat del cliente. En el chat tocá el <b>clip</b>, elegí «Fotos y videos» y seleccioná el archivo descargado.'}</div>`:''}
+    ${!sale&&((reciboVia()==='portapapeles')||(reciboVia()==='descarga'))&&(!d.anulado||oficina)?`<div class="hint" id="rc-pc" style="margin-top:12px">${rcPcHtml()}</div>`:''}
     <div class="actions start" style="margin-top:12px">${(d.anulado&&!oficina)||sale?'':c&&c.tel?`<a class="btn primary" id="rc-wa" data-wa-img target="_blank" rel="noopener" href="${waUrl(c.tel,txt)}">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</a>`:`<button class="btn primary" type="button" id="rc-wa">${d.anulado?'Enviar recibo anulado por WhatsApp':'Enviar por WhatsApp'}</button>`}${oficina&&!d.anulado&&S.ajustes.waActivo&&w?`<button class="btn" type="button" id="rc-wa-re">${w.e==='enviado'?'Volver a enviar solo':'Reintentar envío'}</button>`:''}<button class="btn" type="button" data-copy="${esc(txt)}" data-copy-label="Recibo">Copiar recibo</button>
     <button class="btn" type="button" id="rc-print">Imprimir</button>
     ${ps[0].anulado||!can('anular')?'':`<button class="btn danger" type="button" id="rc-anular">Anular</button>`}<button class="btn ghost" type="button" data-close>Cerrar</button></div>
@@ -8615,7 +8622,7 @@ VIEWS.resumen={
       aparece «Hay una versión nueva» con el botón Actualizar (recarga y listo; en el APK no hace falta reinstalar nada).
    2) APK nuevo (solo dentro del APK): el flujo que compila el APK publica yapur-version.json en el sitio de GitHub.
       Si el APK instalado es anterior, aparece «Hay un APK nuevo» con el botón Descargar. */
-const BUILD='679cd6267f';
+const BUILD='3a1abf2afb';
 const APK_INFO_URL='https://yapurnet.github.io/yapur-version.json';
 const UPD={web:'',apk:null,hide:{}};
 const verNum=s=>{const m=/^(\d+)\.(\d+)/.exec(String(s||'').trim());return m?Number(m[1])*100000+Number(m[2]):0;};

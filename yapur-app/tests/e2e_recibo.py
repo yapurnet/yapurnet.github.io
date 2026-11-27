@@ -137,6 +137,10 @@ async def main():
         n3 = await login(c3)
         await n3.evaluate("openReceipt('R261102-J2R')"); await n3.wait_for_selector('#rc-wa')
         check('en la computadora explica cómo usarlo (pegar con Ctrl+V en WhatsApp Web)', 'Ctrl+V' in await n3.inner_text('#rc-pc') and 'WhatsApp Web' in await n3.inner_text('#rc-pc'))
+        check('sin la extensión de Chrome avisa que no se detecta (y sigue explicando el Ctrl+V)', 'no se detecta' in await n3.inner_text('#rc-pc') and 'Ctrl+V' in await n3.inner_text('#rc-pc'))
+        await n3.evaluate("window.postMessage({yapurWAext: '1.1'}, '*')")   # lo que manda la extensión de la oficina al estar instalada
+        await n3.wait_for_function("document.getElementById('rc-pc').textContent.includes('pega el recibo sola')", timeout=3000)
+        check('con la extensión instalada avisa que el recibo se pega solo (con el Ctrl+V como respaldo)', 'Enviar' in await n3.inner_text('#rc-pc') and 'Ctrl+V' in await n3.inner_text('#rc-pc') and 'no se detecta' not in await n3.inner_text('#rc-pc'))
         async with c3.expect_page(timeout=8000) as nueva:
             await n3.click('#rc-wa')
         wp = await nueva.value
