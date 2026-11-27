@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Lector de potencia de las ONU: cada 10 minutos le pregunta a la OLT (SNMP, solo lectura)
+"""Lector de potencia de las ONU: dos veces por día (cada 12 horas) le pregunta a la OLT (SNMP, solo lectura)
 la potencia de cada ONU y la manda a la app de YAPUR.NET.
 Archivos al lado de este programa: olt_comunidad.txt (comunidad de solo lectura), app_token.txt (token del lector),
 (ya no hace falta mapa_onus.txt: la serie y el nombre de cada ONU se leen de la OLT)."""
 import os, sys, time, socket, json, urllib.request, urllib.error
 from olt_walk import pdu, parse_resp
 AQUI = os.path.dirname(os.path.abspath(__file__))
-HOST = '192.168.40.2'; URLS = ['https://yapur.mauroyapur.workers.dev/api/olt/ingest']; CADA = 600
+HOST = '192.168.40.2'; PORT = 161; URLS = ['https://yapur.mauroyapur.workers.dev/api/olt/ingest']; CADA = 43200
 B = '1.3.6.1.4.1.17409.2.8.4.'
 def leer(n): return open(os.path.join(AQUI, n), encoding='utf-8').read().strip()
 def recorrer_raw(com, raiz):
@@ -17,7 +17,7 @@ def recorrer_raw(com, raiz):
         rid += 1; data = None
         time.sleep(0.03)
         for _ in range(10):
-            try: s.sendto(pdu(0xA1, rid, cur, 1, com), (HOST, 161)); data, _ = s.recvfrom(65535); break
+            try: s.sendto(pdu(0xA1, rid, cur, 1, com), (HOST, PORT)); data, _ = s.recvfrom(65535); break
             except socket.timeout: pass
         if data is None: raise RuntimeError('La OLT no respondió (%s, después de %s)' % (raiz[len(B) - 3:], cur[len(raiz):]))
         es, vbs = parse_resp(data)
@@ -28,6 +28,37 @@ def recorrer_raw(com, raiz):
         try: res[int(oid[len(raiz) + 1:].split('.')[0])] = v
         except ValueError: continue
     return res
+def get_uno(s, com, oid, rid):
+    """Pide UN valor por su OID exacto (GET). UDP puede traer una respuesta atrasada de otra pregunta: se la ignora si el OID no es el pedido."""
+    for _ in range(2):
+        try:
+            s.sendto(pdu(0xA0, rid, oid, 1, com), (HOST, PORT))
+            for _r in range(4):
+                data, _d = s.recvfrom(65535)
+                es, vbs = parse_resp(data)
+                if es or not vbs: return None
+                o, t, v = vbs[0]
+                if o != oid: continue
+                return v / 100.0 if (t not in (0x80, 0x81, 0x82) and isinstance(v, int)) else None
+        except socket.timeout: pass
+    return None
+def completar(com, series, rx, tx, limite=900):
+    """El recorrido (GETNEXT) de la columna de potencia puede cortarse antes de tiempo: desde el 25/11/2026 la OLT dejó de listar ahí casi todas las ONU (unas 6 de 515),
+    aunque pidiéndolas una por una por su índice (lo que hace «Leer ahora») contesta bien. Las que faltan se piden así, y se agregan a rx y tx.
+    Devuelve (cuántas se completaron, las que no dio el tiempo de probar: no se las puede dar por caídas)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(1.5)
+    t0 = time.time(); hechas = 0; pendientes = set(); rid = 5000
+    faltan = [i for i in sorted(series) if i not in rx]
+    for n, idx in enumerate(faltan):
+        if time.time() - t0 > limite: pendientes = set(faltan[n:]); break
+        time.sleep(0.03); rid += 1
+        v = get_uno(s, com, '%s4.1.4.%d.0.0' % (B, idx), rid)
+        if v is None or not (-60 < v < 30): continue
+        rx[idx] = v; hechas += 1
+        t = get_uno(s, com, '%s4.1.5.%d.0.0' % (B, idx), rid + 100000)
+        if t is not None: tx[idx] = t
+    s.close()
+    return hechas, pendientes
 def a_bytes(v):
     if isinstance(v, str):
         if v.startswith('0x'):
@@ -55,6 +86,7 @@ def ciclo():
     series = {i: sn for i, sn in series.items() if len(sn) >= 8}
     rx = {i: v / 100.0 for i, v in recorrer_raw(com, B + '4.1.4').items() if isinstance(v, int)}
     tx = {i: v / 100.0 for i, v in recorrer_raw(com, B + '4.1.5').items() if isinstance(v, int)}
+    hechas, pendientes = completar(com, series, rx, tx)   # las que el recorrido no listó se piden una por una
     with open(os.path.join(AQUI, 'olt_lecturas.txt'), 'w') as f:
         for idx, v in sorted(rx.items()): f.write('%x|%s\n' % (idx, v))
     lect, todo = [], []
@@ -65,7 +97,7 @@ def ciclo():
         v = rx.get(idx)
         if v is None or not (-60 < v < 30): continue
         lect.append({'sn': sn, 'rx': v, 'tx': tx.get(idx), 'est': 'online', 'port': port, 'name': nombres.get(idx, '')})
-    off = [sn for idx, sn in series.items() if idx not in rx]   # registradas en la OLT pero que no devolvieron potencia (apagadas, sin luz o cortadas)
+    off = [sn for idx, sn in series.items() if idx not in rx and idx not in pendientes]   # registradas en la OLT pero que no devolvieron potencia (apagadas, sin luz o cortadas)
     if len(todo) < 50: raise RuntimeError('La OLT devolvió muy pocas ONU (%d); no mando nada para no borrar lo que ya está.' % len(todo))
     for i in range(0, max(len(lect), 1), 500):
         env = {'lect': lect[i:i + 500]}
@@ -77,7 +109,7 @@ def ciclo():
             except urllib.error.HTTPError as e: ult = '%s -> HTTP %d: %s' % (url.split('/')[2], e.code, e.read()[:200].decode('utf-8', 'replace'))
             except Exception as e: ult = '%s -> %s' % (url.split('/')[2], e)
         if ult: raise RuntimeError(ult)
-    return len(rx), len(lect)
+    return len(rx), len(lect), hechas
 def log(txt):
     """Anota en lector.log (se usa cuando corre sin ventana); lo achica si crece de más."""
     try:
@@ -90,7 +122,7 @@ def log(txt):
 if __name__ == '__main__':
     uno = '--una-vez' in sys.argv
     while True:
-        try: log(time.strftime('%d/%m %H:%M:%S') + ' ONU leídas: %d, enviadas: %d' % ciclo())
+        try: log(time.strftime('%d/%m %H:%M:%S') + ' ONU leídas: %d, enviadas: %d (pedidas una por una: %d)' % ciclo())
         except Exception as e: log(time.strftime('%d/%m %H:%M:%S') + ' Error: %s' % e)
         if uno: break
         time.sleep(CADA)

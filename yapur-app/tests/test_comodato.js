@@ -117,7 +117,7 @@ const DNI_TXT = '20.111.222';
     /* ---- modelos de equipos que el técnico elige de una lista (así solo escribe la MAC) ---- */
     r = await call('GET', '/api/comodato/modelos', undefined, T1);
     const modDef = (r.j.modelos || []).map(m => m.t + '|' + m.d);
-    t('de arranque la lista trae la ONU Huawei, la antena LiteBeam, el inyector PoE y la fuente de la ONU', r.s === 200 && same(modDef, ['ONU|Huawei HG8145V5', 'Antena|CPE Ubiquiti LiteBeam Gen2', 'Fuente o adaptador|Inyector de corriente PoE', 'Fuente o adaptador|Fuente de corriente de la ONU']) && r.j.tipos.includes('ONU'), r.j);
+    t('de arranque la lista trae las ONU Huawei y TP-Link, la antena LiteBeam, el inyector PoE y la fuente de la ONU', r.s === 200 && same(modDef, ['ONU|Huawei HG8145V5', 'ONU|TP-Link XZ000-G3', 'Antena|CPE Ubiquiti LiteBeam Gen2', 'Fuente o adaptador|Inyector de corriente PoE', 'Fuente o adaptador|Fuente de corriente de la ONU']) && r.j.tipos.includes('ONU'), r.j);
     r = await call('GET', '/api/comodato/modelos', undefined, T2);
     t('un técnico sin permiso de comodato no la pide', r.s === 403, r);
     r = await call('PUT', '/api/comodato/modelos', { modelos: [{ t: 'ONU', d: 'ZTE F670L' }] }, T1);

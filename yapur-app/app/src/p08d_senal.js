@@ -44,7 +44,7 @@ function caidasHtml(c){
   h+=`<div class="card"><h3>Caídas de las ONU (14 días)</h3><p class="small">${o.caidas?`<span class="chip bad">${o.caidas} ${o.caidas===1?'caída ahora':'caídas ahora'}</span> `:'<span class="chip ok">Ninguna ONU caída ahora</span> '}${caidasTot} ${caidasTot===1?'caída':'caídas'} en 14 días${o.total!=null?' · '+o.total+' ONU controladas':''}</p>${cdBarras(o.dias)}<p class="small muted" style="margin:6px 0 0">${cdPico(o.dias)}</p>`;
   if(o.ahoraCaidas.length)h+=`<h4>Caídas ahora</h4><p class="small muted">Las que figuran desde la primera medición pueden estar caídas desde antes: se anota desde que se empezó a medir.</p><div class="list">${o.ahoraCaidas.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="small muted">desde ${cdFecha(x.desde)} · ${cdDur(c.ahora-x.desde)}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}<span class="mono">${esc(x.k)}</span></div></div>`).join('')}</div>`;
   if(o.top.length)h+=`<h4>Las que más se cayeron (7 días)</h4><div class="list">${o.top.map(x=>`<div class="sn-cd" data-cid="${esc(x.cid||'')}"><div class="between"><b>${esc(x.cn||x.name||'ONU sin cliente')}</b><span class="chip ${x.caidas>=3?'bad':'warn'}">${x.caidas} ${x.caidas===1?'caída':'caídas'}</span></div><div class="small muted">${x.port?'Puerto '+esc(x.port)+' · ':''}${cdDur(x.min*6e4)} sin servicio en total</div></div>`).join('')}</div>`;
-  h+=`<p class="small muted">Una ONU se da por caída cuando no responde en dos lecturas seguidas de la OLT (cada 10 minutos). Un corte de luz en la casa del cliente también cuenta como caída.</p></div>`;
+  h+=`<p class="small muted">Una ONU se da por caída cuando no responde en dos lecturas seguidas de la OLT (se leen dos veces por día). Un corte de luz en la casa del cliente también cuenta como caída.</p></div>`;
   return h;
 }
 VIEWS.senal={
@@ -57,9 +57,9 @@ VIEWS.senal={
     const cd=$('#sn-caidas',box);if(cd)NET.api('GET','/api/caidas').then(c=>{cd.innerHTML=caidasHtml(c);$$('.sn-cd',cd).forEach(r=>r.addEventListener('click',()=>{const id=r.dataset.cid;if(id&&S.clientes.has(id))openClient(id);}));}).catch(()=>{cd.innerHTML='<div class="card"><p class="small muted">No se pudieron cargar las caídas.</p></div>';});
   },
   html(d){
-    const viejo=d.visto&&Date.now()-d.visto>3*36e5,tec=S.role==='tecnico';   /* al técnico no se le muestran totales: solo las que tienen mala señal */
+    const viejo=d.visto&&Date.now()-d.visto>14*36e5,tec=S.role==='tecnico';   /* al técnico no se le muestran totales: solo las que tienen mala señal */
     let h=`<div class="card"><p>${d.visto?`Última lectura de la OLT: <b>${senalHace(d.visto)}</b>.${tec?'':' '+d.total+' ONU leídas.'}`:'Todavía no llegó ninguna lectura de la OLT.'}</p>
-      ${viejo?'<p class="chip bad">Hace más de 3 horas que no llega ninguna lectura: revisá el lector.</p>':''}
+      ${viejo?'<p class="chip bad">Hace más de 14 horas que no llega ninguna lectura: revisá el lector.</p>':''}
       <p class="small muted">Se avisa cuando una ONU recibe <b>peor que ${d.umbral} dBm</b> (por ejemplo -29). Una potencia mejor, como -20, está bien.${d.sinCliente&&!tec?` ${d.sinCliente} ONU leídas no coinciden con ningún cliente (revisá la serie o MAC cargada en su ficha).`:''}</p></div>`;
     if(d.visto){
       h+=d.lista.length?`<h3>Con mala señal (${d.lista.length})</h3><div class="list">${d.lista.map(o=>`<div class="card sn-row" data-cid="${esc(o.cid||'')}"><div class="between"><b>${esc(o.cn||'ONU sin cliente')}</b><span class="chip bad">${o.rx} dBm</span></div><div class="small muted">${o.cd?esc(o.cd)+' · ':''}${o.port?'Puerto '+esc(o.port)+' · ':''}<span class="mono">${esc(o.k)}</span>${o.est?' · '+esc(o.est):''}</div></div>`).join('')}</div>`
@@ -108,7 +108,7 @@ async function openSenalCliente(id){
     ${d.sn?'':'<div id="sg-sug"></div>'}
     ${d.sn?'':`<div class="stack"><p class="small">Para ver la potencia automática, vinculá la ONU: escribí los últimos 6 caracteres de la serie (están en la etiqueta de la ONU, empieza con TPLG).</p><input id="sg-sn" placeholder="Ej: C70AD" autocapitalize="characters" autocomplete="off"><div class="actions"><button class="btn" type="button" id="sg-vinc">Vincular ONU</button></div></div>`}
     <p class="small muted">${d.sn?`Serie <span class="mono">${esc(d.sn)}</span>`:'Este cliente no tiene la serie de la ONU cargada (campo «Equipo» en su ficha).'}${d.port?` · Puerto/ID en la OLT: <b>${esc(d.port)}</b>`:''}</p>
-    ${fresca?`<p class="small muted">La OLT actualiza esta lectura cada 10 minutos. No hace falta medir.</p><details><summary class="small">Cargar una medida a mano</summary>${campo_}</details>`:campo_}
+    ${fresca?`<p class="small muted">Lectura reciente de la OLT. No hace falta medir.</p><details><summary class="small">Cargar una medida a mano</summary>${campo_}</details>`:campo_}
     ${d.sn&&d.port?`<div class="stack"><button class="btn" type="button" id="sg-ahora">Leer ahora</button><p class="small muted" id="sg-lr">Pide la potencia a la OLT en este momento (tarda unos segundos), sin esperar la lectura automática.</p></div>`:''}
     <div class="actions"><button class="btn primary" type="button" id="sg-go">Guardar medida</button></div></div>`,
   onClose:()=>setTimeout(()=>{if(S.clientes.has(id))openClient(id);},0),
