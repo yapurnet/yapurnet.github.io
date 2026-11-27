@@ -59,12 +59,14 @@ async function call(method, p, body, token) {
 
     /* el contador no pierde lo que pasó antes de dormirse */
     await call('GET', '/api/status');
-    await new Promise(r => setTimeout(r, 7000));   // pasa el tiempo en que se anota solo
+    /* desde #182 el contador se anota en la base como mucho cada minuto (USO_FLUSH_MS = 60 s, antes 5 s): esperar a que se anote solo haría la prueba de un minuto o más.
+       Pedir el consumo lo anota enseguida (usoVer), y eso es lo que se comprueba: lo que ya se anotó sobrevive a un reinicio. */
+    await call('GET', '/api/uso', undefined, A);
     await srv.stop(true);
     srv = await start({ code, dir: dataDir });
     BASE = srv.base;
     r = await call('GET', '/api/uso', undefined, A);
-    t('el consumo de antes del reinicio quedó anotado (aunque el servidor se durmió enseguida)', r.s === 200 && r.j.total >= 12 && r.j.pedidos.some(x => x.k === 'GET /api/status'), [r.j.total, r.j.pedidos.length]);
+    t('el consumo de antes del reinicio quedó anotado (al pedir el consumo se anota enseguida, aunque el servidor se reinicie)', r.s === 200 && r.j.total >= 12 && r.j.pedidos.some(x => x.k === 'GET /api/status'), [r.j.total, r.j.pedidos.length]);
     t('sin errores en el registro del servidor', !/Uncaught|\bERROR\b|✘/.test(srv.log()), srv.log().split('\n').filter(l => /Uncaught|ERROR|✘/.test(l)).slice(0, 5));
   } catch (e) {
     failN++; console.log('FAIL excepción', e);
