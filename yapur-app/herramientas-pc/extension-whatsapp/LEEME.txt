@@ -1,6 +1,11 @@
-Extensión de Chrome para pegar el comprobante solo en WhatsApp Web.
+Extensión de Chrome para pegar el comprobante solo en WhatsApp Web (versión 1.1).
 
-Instalar (una sola vez, en la compu de la oficina):
+Instalar (una sola vez, en cada compu de la oficina):
 1. En Chrome escribí chrome://extensions y activá «Modo de desarrollador» (arriba a la derecha).
-2. Tocá «Cargar descomprimida» y elegí esta carpeta (extension-whatsapp).
-3. Listo. Desde la app, «Enviar por WhatsApp» abre el chat y el comprobante aparece solo: apretás Enviar.
+2. Si ya había una «YAPUR.NET · comprobante en WhatsApp Web» instalada, tocá «Quitar».
+3. Tocá «Cargar descomprimida» y elegí esta carpeta (extension-whatsapp).
+4. Listo. Desde la app, «Enviar por WhatsApp» abre el chat y el comprobante aparece solo: apretás Enviar.
+
+Cómo saber si anda:
+- En la app, el cuadro del recibo dice «La extensión de esta computadora pega el recibo sola» (si dice que no se detecta, falta instalarla o actualizarla; después de instalarla recargá la app con F5).
+- En WhatsApp Web, arriba de la pantalla aparece un aviso verde «recibo pegado» (o uno rojo con lo que hay que hacer). Si no aparece ningún aviso, la extensión no está instalada o está apagada.
