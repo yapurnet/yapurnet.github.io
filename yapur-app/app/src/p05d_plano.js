@@ -20,10 +20,10 @@ function planoResumen(p){
    y el plano nunca puede dibujar algo distinto de lo que ya usa «Clonar con todo lo que cuelga» para copiar una rama */
 function planoBosque(){
   const visitado=new Set(),arboles=[];
-  const raices=[...S.red.values()].filter(p=>!p.padre||!S.red.has(p.padre)).sort(redTipoCmp);
+  const raices=redList().filter(p=>!p.padre||!redHas(p.padre)).sort(redTipoCmp);
   raices.forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(redArbol(p,visitado));}});
   /* por las dudas, algún punto raro que quedó sin alcanzar (padre apuntando en círculo) también se dibuja */
-  [...S.red.values()].sort(redTipoCmp).forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(redArbol(p,visitado));}});
+  redList().sort(redTipoCmp).forEach(p=>{if(!visitado.has(p.id)){visitado.add(p.id);arboles.push(redArbol(p,visitado));}});
   return arboles;
 }
 /* primero el ancho de cada nodo (el de las hojas es fijo, el de un padre es la suma de sus hijos), después
@@ -131,7 +131,7 @@ function planoSVG(){
    splitters ni OLT (para quien no necesita ver cómo está armada la red por dentro) ----- */
 const PLANO_GRID_COLS=5;
 function planoCajasSVG(){
-  const cajas=[...S.red.values()].filter(p=>p.tipo==='nap').sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  const cajas=redList().filter(p=>p.tipo==='nap').sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
   if(!cajas.length)return {svg:'',w:0,h:0,vacio:true};
   const cols=Math.min(PLANO_GRID_COLS,cajas.length),rows=Math.ceil(cajas.length/PLANO_GRID_COLS);
   const nodos=cajas.map((p,i)=>({p,x:(i%PLANO_GRID_COLS)*(PLANO_W+PLANO_GX)+PLANO_W/2,y:Math.floor(i/PLANO_GRID_COLS)*(PLANO_H+PLANO_GY)}));
@@ -142,7 +142,8 @@ function planoCajasSVG(){
   return {svg,w:W,h:H,vacio:false};
 }
 /* ----- cuál de las dos versiones le toca ver a quien está mirando: la completa gana si tiene las dos ----- */
-const planoModo=()=>can('redPlano')?'full':(can('redPlanoCajas')?'cajas':null);
+/* el plano completo dibuja la OLT y los splitters: sin el permiso de verlos se le muestra el simplificado de cajas */
+const planoModo=()=>can('redPlano')&&can('redSplitters')?'full':(can('redPlano')||can('redPlanoCajas')?'cajas':null);
 const planoDatos=modo=>modo==='full'?planoSVG():planoCajasSVG();
 /* ----- vista en pantalla: con acercar/alejar y botón para imprimir ----- */
 let PLANO_ZOOM=1;

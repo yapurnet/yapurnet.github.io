@@ -82,6 +82,7 @@ const PERMS=[
   ['red','Cargar y editar la red (cajas NAP y botellas de empalme)','Ubicarlas con el GPS y conectar a cada cliente con su caja. Eliminar puntos solo lo puede quien edita clientes.','Red'],
   ['redPlano','Ver el plano de la red','El dibujo completo de las conexiones (OLT, splitters, botellas y cajas) armado solo a partir de lo cargado, para revisarlo o imprimirlo. No hace falta para cargar ni editar la red. Si está prendido, gana a «Ver las cajas NAP».','Red'],
   ['redPlanoCajas','Ver las cajas NAP','Una versión simplificada del plano: muestra nomás las cajas NAP (nombre, referencia y puertos), una al lado de la otra, sin los splitters ni la OLT ni el resto de la red. Sirve para no mostrarle a quien no lo necesita cómo está armada la red por dentro. No hace falta si ya tiene «Ver el plano de la red».','Red'],
+  ['redSplitters','Ver los splitters y la OLT','Apagado: el servidor no le manda los splitters ni la OLT, y no los puede cargar, editar ni borrar. Ve las cajas NAP y las botellas de empalme como siempre; lo que cuelga de un splitter sigue conectado, nomás no ve de cuál sale. Si tiene el plano completo, ve el plano simplificado de cajas.','Red'],
   ['verTecnicos','Ver dónde están los técnicos','Pestaña «Técnicos»: la ubicación que comparten en horario laboral y su recorrido del día. Cada técnico acepta un aviso antes de empezar.','Equipo'],
   ['ping','Probar la conexión de un cliente (ping)','Un router de la empresa hace el ping a la IP del cliente y dice si responde. Solo prueba clientes con la IP cargada en su ficha.','Clientes'],
   ['verPlan','Ver el plan contratado de cada cliente','Apagado: el servidor no le manda el plan de los clientes ni la lista de planes, y no puede copiar la cola de MikroTik.','Clientes'],
@@ -93,8 +94,8 @@ const PERMS=[
 ];
 const MONEY_PERMS=['cobrar','caja','anular','promesas','resumen'];
 const PERM_DEF={
-  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,altaCampo:true,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,redPlano:false,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,elegirPlan:true,comodato:true,contratosGestion:false},
-  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,altaCampo:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,redPlano:true,redPlanoCajas:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,elegirPlan:true,comodato:true,contratosGestion:true}
+  tecnico:{clientesTodos:false,telefono:true,dni:false,editarClientes:false,altaCampo:true,ubicacion:true,ordenesTodas:false,crearOrdenes:true,operarOrdenes:true,precios:false,cobrar:false,caja:false,anular:false,promesas:false,resumen:false,red:true,redPlano:false,redPlanoCajas:false,redSplitters:false,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:false,elegirPlan:true,comodato:true,contratosGestion:false},
+  oficina:{clientesTodos:true,telefono:true,dni:true,editarClientes:true,altaCampo:true,ubicacion:true,ordenesTodas:true,crearOrdenes:true,operarOrdenes:true,precios:true,cobrar:true,caja:true,anular:false,promesas:true,resumen:false,red:true,redPlano:true,redPlanoCajas:false,redSplitters:true,cobrarCampo:false,verTecnicos:false,ping:true,verPlan:true,elegirPlan:true,comodato:true,contratosGestion:true}
 };
 const can=k=>!!S.perms[k];
 /* cobra en la calle (instalaciones, reclamos…) pero no maneja la caja ni las mensualidades */

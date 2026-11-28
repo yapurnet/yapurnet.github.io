@@ -75,7 +75,7 @@ Además de la caja NAP y la botella de empalme, la pestaña **Red** tiene un ter
 - **El plano completo, un punto a la vez:** la fibra de la **botella** lleva (por su pelo) hasta el splitter; la salida del splitter lleva a otro splitter o a una caja NAP; y, como en el caso de Mauro, un splitter puede estar alojado **dentro de una caja NAP**, con una salida alimentando esa misma caja (la «primaria») y la otra saliendo hacia una segunda caja NAP (la «secundaria»). En cada ficha, **«Sale de»** y **«Llega por»** ahora mezclan botellas y splitters sin problema: dicen de qué punto viene (pelo o salida, con el número) y qué lleva cada uno, para poder seguir el camino de la señal paso a paso tocando los botones.
 - **Para revisar:** no se puede bajar la relación de un splitter (por ejemplo de 1x4 a 1x2) si alguna de las salidas que quedarían afuera ya tiene datos cargados; primero hay que dejarlas libres. Tampoco se puede borrar un splitter del que sale otro punto de la red (caja, botella u otro splitter): hay que desconectarlo antes.
 - **Buscarlos y exportarlos:** en la lista de Red hay un filtro **Splitters** (además de Cajas NAP y Botellas), que muestra la relación y cuántas salidas están en uso. El CSV de Red suma las columnas *relación splitter* y *salidas usadas*.
-- **Permisos:** usa el mismo permiso **«Cargar y editar la red»** de las cajas y botellas; no hay uno nuevo. Quien no lo tiene ve la ficha del splitter (para seguir el camino de la fibra) pero no puede tocar nada. No hace falta un APK nuevo.
+- **Permisos:** cargar o editar un splitter usa el mismo permiso **«Cargar y editar la red»** de las cajas y botellas. Y verlos (a ellos y a la OLT) depende de otro permiso, **«Ver los splitters y la OLT»** (ver más abajo). No hace falta un APK nuevo.
 
 ## Red: OLT (el origen de la fibra)
 
@@ -87,6 +87,17 @@ El cuarto punto de la pestaña Red es la **OLT**: el equipo de donde sale la fib
 - **Para revisar:** no se puede bajar la cantidad de puertos si alguno de los que quedarían afuera ya tiene datos cargados; primero hay que dejarlo libre. Tampoco se puede borrar una OLT de la que sale otro punto de la red: hay que desconectarlo antes.
 - **Buscarla y exportarla:** en la lista de Red hay un filtro **OLT** (junto a Cajas NAP, Botellas y Splitters), que muestra la cantidad de puertos y cuántos están en uso. El CSV de Red suma las columnas correspondientes.
 - **Permisos:** usa el mismo permiso **«Cargar y editar la red»**; no hay uno nuevo. Quien no lo tiene ve la ficha de la OLT pero no puede tocar nada. No hace falta un APK nuevo.
+
+## Red: que el técnico no vea los splitters ni la OLT
+
+Un permiso por perfil, en Ajustes → Usuarios → Red: **«Ver los splitters y la OLT»** (`redSplitters`). Sirve para que quien sale a la calle trabaje con las cajas NAP y las botellas de empalme sin ver cómo está armada la red por dentro.
+
+- **Cómo viene:** encendido para la oficina (y el administrador, siempre) y **apagado para los técnicos**. Se enciende técnico por técnico, igual que el plano.
+- **Apagado:** el servidor **no le manda** los splitters ni la OLT (no es solo esconderlos en pantalla), y tampoco se los deja cargar, editar ni borrar. En Red desaparecen los filtros «OLT» y «Splitters» y los botones «Nuevo splitter» y «Nueva OLT»; no aparecen en la lista, el buscador, los desplegables ni el CSV; y la ficha de una caja o botella no dice de qué splitter sale ni a cuál lleva. Si tiene «Ver el plano de la red» encendido, ve el plano simplificado de cajas.
+- **No se rompe nada:** lo que cuelga de un splitter sigue conectado. Si el técnico edita una caja que sale de un splitter, o anota un pelo que lleva a uno, esa conexión se conserva tal cual (en el desplegable aparece como «Otro punto de la red (no lo ve tu perfil)»).
+- **Si se lo encienden de nuevo:** recibe los splitters y la OLT en el momento, sin cerrar la app.
+- **Cuando el administrador mira como técnico** («Ver como…») tampoco los ve.
+- **Para publicarlo:** cerrar y abrir la app dos veces, como siempre.
 
 ## Red: el plano de la red (el dibujo de las conexiones)
 

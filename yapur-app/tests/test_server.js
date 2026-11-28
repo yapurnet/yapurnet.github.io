@@ -77,7 +77,7 @@ async function openSSE(token) {
     r = await call('POST', '/api/users', { usuario: 'ofi', nombre: 'Laura', role: 'oficina', clave: 'laura1' }, A);
     t('admin crea oficina', r.s === 200 && r.j.user.role === 'oficina' && r.j.user.perms.cobrar === true && r.j.user.perms.anular === false, r);
     const OFI_ID = r.j.user.id;
-    r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Pedro', role: 'tecnico', clave: 'pedro1', tel: '3844111111', permisos: { cobrar: true, dni: true, elegirPlan: false } }, A);
+    r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Pedro', role: 'tecnico', clave: 'pedro1', tel: '3844111111', permisos: { cobrar: true, dni: true, elegirPlan: false, redSplitters: true } }, A);   /* con «redSplitters» para probar abajo que carga splitters y OLT; más adelante se lo apagamos */
     t('técnico: permisos de dinero siempre apagados', r.s === 200 && r.j.user.perms.cobrar === false && r.j.user.perms.dni === true, r.j);
     const TEC_ID = r.j.user.id;
     r = await call('POST', '/api/users', { usuario: 'tec1', nombre: 'Otro', role: 'tecnico', clave: 'pedro1' }, A);
@@ -272,6 +272,67 @@ async function openSSE(token) {
     t('redPlano: un técnico nuevo lo tiene apagado por defecto (aunque ya tenga el permiso de red)', tecU && tecU.perms.redPlano === false && tecU.perms.red === true, tecU);
     r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false, redPlano: true } }, A);
     t('redPlano: el administrador se lo puede activar a un técnico puntual', r.s === 200 && r.j.user.perms.redPlano === true, r);
+
+    /* ---- redSplitters: quien no lo tiene (el técnico) no recibe los splitters ni la OLT, y no los puede cargar, editar ni borrar ---- */
+    t('redSplitters: una oficina nueva lo tiene activado por defecto', ofiU && ofiU.perms.redSplitters === true, ofiU);
+    t('redSplitters: un técnico (sin pedírselo) lo tiene apagado por defecto', tecU && tecU.perms.redSplitters === false, tecU);
+    const itemsRed = j => (j.cols.red || []).reduce((o, d) => Object.assign(o, d.data.items), {});
+    const ids = o => Object.keys(o).sort().join(',');
+    r = await call('GET', '/api/sync', undefined, T);
+    let rojo = itemsRed(r.j);
+    t('redSplitters: al técnico le llegan las cajas y las botellas', r.s === 200 && rojo.n1 && rojo.e1 && rojo.e2 && rojo.e3 && rojo.n2, ids(rojo));
+    t('redSplitters: pero no le llega ningún splitter ni la OLT', !rojo.s1 && !rojo.s2 && !rojo.s3 && !rojo.s5 && !rojo.s6 && !rojo.o1, ids(rojo));
+    t('redSplitters: la botella conserva su pelo que lleva al splitter (el dato sigue ahí, solo no ve a dónde)', rojo.e2.pelos['1'].a === 's5', rojo.e2);
+    r = await call('GET', '/api/doc/red/puntos', undefined, T);
+    t('redSplitters: tampoco por la lectura de un documento', r.s === 200 && r.j.data.items.e1 && !r.j.data.items.s1 && !r.j.data.items.o1, ids(r.j.data.items));
+    r = await call('GET', '/api/sync', undefined, O);
+    rojo = itemsRed(r.j);
+    t('redSplitters: la oficina sí los recibe', rojo.s1 && rojo.o1 && rojo.e1, ids(rojo));
+    r = await call('GET', '/api/sync', undefined, A);
+    rojo = itemsRed(r.j);
+    t('redSplitters: el administrador recibe todo', rojo.s1 && rojo.o1 && rojo.e1 && rojo.n1, ids(rojo));
+    r = await RED(T, { s1: { notas: 'cambio' } });
+    t('redSplitters: el técnico sin el permiso no puede editar un splitter', r.s === 403 && /splitters ni la OLT/.test(r.j.error), r);
+    r = await RED(T, { o1: { salidas: { 3: { e: 'conectado' } } } });
+    t('redSplitters: ni los puertos de la OLT', r.s === 403 && /splitters ni la OLT/.test(r.j.error), r);
+    r = await RED(T, { s8: { tipo: 'splitter', nombre: 'SPL-08', rel: 2 } });
+    t('redSplitters: ni cargar un splitter nuevo', r.s === 403 && /splitters ni la OLT/.test(r.j.error), r);
+    r = await RED(T, { o8: { tipo: 'olt', nombre: 'OLT-08', puertos: 4 } });
+    t('redSplitters: ni una OLT nueva', r.s === 403 && /splitters ni la OLT/.test(r.j.error), r);
+    r = await RED(T, { n1: { tipo: 'splitter', rel: 2 } });
+    t('redSplitters: ni convertir una caja en splitter', r.s === 403, r);
+    r = await RED(T, { s1: { tipo: 'nap' } });
+    t('redSplitters: ni convertir un splitter en caja', r.s === 403, r);
+    r = await RED(T, { n1: { ref: 'Poste nuevo', padre: 's1' } });
+    t('redSplitters: pero la caja y la botella las sigue editando (y conserva de qué splitter sale)', r.s === 200 && r.j.data.items.n1.ref === 'Poste nuevo' && r.j.data.items.n1.padre === 's1', r);
+    r = await call('GET', '/api/sync', undefined, A);
+    t('redSplitters: el administrador ve que el splitter quedó intacto', itemsRed(r.j).s1.notas === undefined && itemsRed(r.j).s1.rel === 2, itemsRed(r.j).s1);
+    r = await RED(A, { s9: { tipo: 'splitter', nombre: 'SPL-09 libre', rel: 2 } });
+    r = await call('PATCH', '/api/users/' + OFI_ID, { permisos: { redSplitters: false } }, A);
+    t('redSplitters: el administrador se lo apaga a la oficina', r.s === 200 && r.j.user.perms.redSplitters === false, r);
+    r = await RED(O, { s9: null });
+    t('redSplitters: sin el permiso tampoco puede borrar un splitter', r.s === 403 && /splitters ni la OLT/.test(r.j.error), r);
+    r = await call('GET', '/api/sync', undefined, O);
+    t('redSplitters: y a la oficina sin el permiso tampoco le llegan', r.s === 200 && !itemsRed(r.j).s9 && !itemsRed(r.j).s1 && !itemsRed(r.j).o1 && itemsRed(r.j).e1, ids(itemsRed(r.j)));
+    /* en vivo: el parche de un splitter (sin el tipo, solo lo que cambió) tampoco le llega a quien no los ve */
+    const rvT = await openStream(T), rvA = await openStream(A);
+    await sleep(300);
+    r = await RED(A, { s9: { salidas: { 1: { e: 'reservado' } }, mod: 5 }, n1: { mod: 6 } });
+    await sleep(500);
+    const evRed = ds => ds.events.filter(e => e.ev === 'doc' && e.data.coll === 'red');
+    t('redSplitters: en vivo el técnico se entera de la caja pero no del splitter', evRed(rvT).some(e => e.data.data.items.n1) && !evRed(rvT).some(e => e.data.data.items.s9), JSON.stringify(evRed(rvT)));
+    t('redSplitters: en vivo el administrador se entera de los dos', evRed(rvA).some(e => e.data.data.items.n1 && e.data.data.items.s9), JSON.stringify(evRed(rvA)));
+    rvT.close(); rvA.close();
+    r = await call('PATCH', '/api/users/' + OFI_ID, { permisos: { redSplitters: true } }, A);
+    t('redSplitters: el administrador se lo vuelve a prender a la oficina', r.s === 200 && r.j.user.perms.redSplitters === true, r);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false, redPlano: true, redSplitters: true } }, A);
+    t('redSplitters: el administrador se lo prende a un técnico puntual', r.s === 200 && r.j.user.perms.redSplitters === true, r);
+    r = await call('GET', '/api/sync', undefined, T);
+    t('redSplitters: y entonces sí recibe los splitters y la OLT', r.s === 200 && itemsRed(r.j).s1 && itemsRed(r.j).o1, ids(itemsRed(r.j)));
+    r = await RED(T, { s9: null });
+    t('redSplitters: (borrar sigue siendo de quien edita clientes)', r.s === 403 && /eliminar/i.test(r.j.error), r);
+    r = await call('PATCH', '/api/users/' + TEC_ID, { permisos: { cobrar: true, dni: true, red: true, elegirPlan: false, redPlano: true } }, A);
+    t('redSplitters: se lo vuelve a apagar al técnico (queda como estaba para las demás pruebas)', r.s === 200 && r.j.user.perms.redSplitters === false && r.j.user.perms.redPlano === true, r);
     r = await call('GET', '/api/backup', undefined, A);
     t('red: la copia de seguridad incluye la red', r.s === 200 && r.j.docs.some(d => d.coll === 'red' && d.data.items.e1), r.j && Object.keys(r.j));
 
