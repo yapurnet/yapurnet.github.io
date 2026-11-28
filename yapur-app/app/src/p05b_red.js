@@ -28,7 +28,16 @@ const salidaEst=(p,n)=>{const x=salidaEntry(p,n);return x&&SALIDA_EST[x.e]?x.e:'
 const redCantidad=p=>p.tipo==='splitter'?(p.rel||0):p.tipo==='olt'?(p.puertos||0):0;
 const salidasUsadas=p=>Object.keys(p.salidas||{}).filter(n=>salidaEst(p,n)!=='libre'&&n<=redCantidad(p)).length;
 const fdot=c=>c?`<i class="fdot" style="background:${c[1]}" title="${esc(c[0])}"></i>`:'';
-const redName=id=>{const p=id&&S.red.get(id);return p?p.nombre:'';};
+/* Quien no tiene «Ver los splitters y la OLT» (el técnico) no los ve. El servidor ya no se los manda; esto además cubre al administrador cuando mira la app como ese perfil.
+   Todo lo que lee la red pasa por redGet / redHas / redList (nunca directo por S.red) para que un splitter oculto no se cuele en una lista, un buscador ni un desplegable. */
+const redOculto=p=>!!p&&(p.tipo==='splitter'||p.tipo==='olt')&&!can('redSplitters');
+const redGet=id=>{const p=id&&S.red.get(id);return p&&!redOculto(p)?p:null;};
+const redHas=id=>!!redGet(id);
+const redList=()=>[...S.red.values()].filter(p=>!redOculto(p));
+/* un «Sale de» o «Lleva a» que apunta a un punto que este perfil no ve: se conserva tal cual al guardar (si no, editar una caja le cortaría la conexión con su splitter) */
+const redRefOculta=id=>!!id&&!can('redSplitters')&&!redHas(id);
+const REF_OCULTA_TXT='Otro punto de la red (no lo ve tu perfil)';
+const redName=id=>{const p=id&&redGet(id);return p?p.nombre:'';};
 const redCmp=(a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true});
 /* distancia en metros entre dos puntos con lat/lng (fórmula del haversine) */
 function distM(a,b){
@@ -41,7 +50,7 @@ const fmtDist=m=>m<1000?Math.round(m)+' m':(m/1000).toFixed(1).replace('.',',')+
 /* clientes que hoy cuelgan de una caja (los dados de baja ya no ocupan puerto) */
 const napClients=id=>[...S.clientes.values()].filter(c=>c.nap===id&&c.estado!=='baja');
 const napUsed=id=>napClients(id).length;
-const redKids=id=>[...S.red.values()].filter(p=>p.padre===id);
+const redKids=id=>redList().filter(p=>p.padre===id);
 function redDescendants(id){
   const out=new Set(),todo=[id];
   while(todo.length){const x=todo.pop();for(const k of redKids(x))if(!out.has(k.id)){out.add(k.id);todo.push(k.id);}}
@@ -49,13 +58,13 @@ function redDescendants(id){
 }
 function napLine(c){
   if(!c||!c.nap)return '';
-  const p=S.red.get(c.nap);if(!p)return '';
+  const p=redGet(c.nap);if(!p)return '';
   return `<b>${esc(p.nombre)}</b>${c.napPuerto?' · puerto '+esc(c.napPuerto):''} <button class="btn small ghost" type="button" data-act="nap">Ver caja</button>${canMoverNap()?' <button class="btn small ghost" type="button" data-act="mover-nap">Mover</button>':''}`;
 }
 
 /* ----- campo «Caja NAP» + puerto del cliente (formulario y cierre de instalación) ----- */
 function napOptionsHTML(sel,from,vacio){
-  const l=[...S.red.values()].filter(p=>p.tipo==='nap').map(p=>({p,d:from&&hasGeo(p)?distM(from,p):null}));
+  const l=redList().filter(p=>p.tipo==='nap').map(p=>({p,d:from&&hasGeo(p)?distM(from,p):null}));
   l.sort((a,b)=>(a.d!=null&&b.d!=null)?a.d-b.d:(a.d!=null?-1:(b.d!=null?1:redCmp(a.p,b.p))));
   return '<option value="">'+esc(vacio||'Sin caja asignada')+'</option>'+l.map(({p,d})=>{
     const u=napUsed(p.id);
@@ -63,7 +72,7 @@ function napOptionsHTML(sel,from,vacio){
   }).join('');
 }
 function napFieldHTML(c){
-  const from=hasGeo(c)?c:null,none=![...S.red.values()].some(p=>p.tipo==='nap');
+  const from=hasGeo(c)?c:null,none=!redList().some(p=>p.tipo==='nap');
   return `<div class="grid2">${F('Caja NAP de la que sale','cf-nap',`<select id="cf-nap">${napOptionsHTML(c&&c.nap,from)}</select>`,none?'Todavía no hay cajas NAP cargadas: se cargan en la pestaña «Red».':'Con la ubicación cargada, las más cercanas aparecen primero.')}
     ${F('Puerto','cf-nap-puerto',`<input id="cf-nap-puerto" type="number" min="1" max="288" step="1" inputmode="numeric" value="${c&&c.napPuerto?esc(c.napPuerto):''}">`)}</div>
     <div class="hint" id="cf-nap-hint"></div>`;
@@ -78,7 +87,7 @@ function bindNapField(root,selfId){
     sel.innerHTML=napOptionsHTML(cur,g);sel.value=cur;
   };
   const check=()=>{
-    const id=sel.value,n=parseInt(pu.value,10),p=id&&S.red.get(id);
+    const id=sel.value,n=parseInt(pu.value,10),p=id&&redGet(id);
     hint.className='hint';hint.textContent='';
     if(pu.value&&!id){hint.className='hint bad';hint.textContent='Elegí la caja a la que corresponde ese puerto.';return;}
     if(!p)return;
@@ -119,7 +128,7 @@ function redRow(p,d){
 }
 function redRows(){
   const parts=norm(RED.q).trim().split(/\s+/).filter(Boolean);
-  let l=[...S.red.values()].filter(p=>{
+  let l=redList().filter(p=>{
     if(RED.tipo==='nap'&&p.tipo!=='nap')return false;
     if(RED.tipo==='empalme'&&p.tipo!=='empalme')return false;
     if(RED.tipo==='splitter'&&p.tipo!=='splitter')return false;
@@ -137,7 +146,7 @@ function redRows(){
 let redRun=null;
 function exportRed(){
   const rows=[['tipo','nombre','latitud','longitud','puertos','clientes conectados','iluminada','relación splitter','salidas usadas','sale de','referencia','notas','fibra','pelos','pelos en uso','PON vivos','qué hay que hacer']];
-  [...S.red.values()].sort(redTipoCmp).forEach(p=>{
+  redList().sort(redTipoCmp).forEach(p=>{
     rows.push([RED_TIPO[p.tipo]||p.tipo,p.nombre,hasGeo(p)?p.lat:'',hasGeo(p)?p.lng:'',p.puertos||'',p.tipo==='nap'?napUsed(p.id):'',p.tipo==='nap'?(p.iluminada?'Sí':'No'):'',p.tipo==='splitter'&&p.rel?'1x'+p.rel:'',(p.tipo==='splitter'||p.tipo==='olt')&&redCantidad(p)?salidasUsadas(p):'',redName(p.padre),p.ref||'',p.notas||'',p.fibra||'',p.tipo==='empalme'&&p.hilos?p.hilos:'',p.tipo==='empalme'&&p.hilos?pelosUsados(p):'',(p.pons||[]).map(n=>'PON '+n).join(' + '),p.hacer||'']);
   });
   saveFile('red-'+todayStr()+'.csv',toCsv(rows));
@@ -145,15 +154,15 @@ function exportRed(){
 VIEWS.red={
   mount(el){
     el.innerHTML=`<div class="toolbar"><div class="line"><input class="search" id="rd-q" type="search" placeholder="Buscar caja o empalme por nombre o referencia" autocomplete="off" aria-label="Buscar en la red" value="${esc(RED.q)}"></div>
-      <div class="line"><button class="btn primary" type="button" id="rd-new-nap">Nueva caja NAP</button><button class="btn" type="button" id="rd-new-split">Nuevo splitter</button><button class="btn" type="button" id="rd-new-emp">Nueva botella de empalme</button><button class="btn" type="button" id="rd-new-olt">Nueva OLT</button></div>
+      <div class="line"><button class="btn primary" type="button" id="rd-new-nap">Nueva caja NAP</button>${can('redSplitters')?'<button class="btn" type="button" id="rd-new-split">Nuevo splitter</button>':''}<button class="btn" type="button" id="rd-new-emp">Nueva botella de empalme</button>${can('redSplitters')?'<button class="btn" type="button" id="rd-new-olt">Nueva OLT</button>':''}</div>
       <div class="seg" id="rd-seg"></div>
-      <div class="line"><button class="btn small" type="button" id="rd-near">Ordenar por cercanía (GPS)</button><button class="btn small ghost" type="button" id="rd-name" hidden>Ordenar por nombre</button><button class="btn small ghost" type="button" id="rd-csv">Descargar lista</button>${can('redPlano')?'<button class="btn small ghost" type="button" id="rd-plano">Ver plano de la red</button>':(can('redPlanoCajas')?'<button class="btn small ghost" type="button" id="rd-plano">Ver cajas NAP</button>':'')}</div>
+      <div class="line"><button class="btn small" type="button" id="rd-near">Ordenar por cercanía (GPS)</button><button class="btn small ghost" type="button" id="rd-name" hidden>Ordenar por nombre</button><button class="btn small ghost" type="button" id="rd-csv">Descargar lista</button>${planoModo()==='full'?'<button class="btn small ghost" type="button" id="rd-plano">Ver plano de la red</button>':(planoModo()==='cajas'?'<button class="btn small ghost" type="button" id="rd-plano">Ver cajas NAP</button>':'')}</div>
       <div class="hint" id="rd-near-st"></div></div><div id="rd-count" class="hint"></div><div class="list" id="rd-list"></div>`;
     $('#rd-q',el).addEventListener('input',e=>{RED.q=e.target.value;RED.limit=60;this.update();});
     $('#rd-new-nap',el).addEventListener('click',()=>openRedForm(null,'nap'));
-    $('#rd-new-split',el).addEventListener('click',()=>openRedForm(null,'splitter'));
+    const nSplit=$('#rd-new-split',el);if(nSplit)nSplit.addEventListener('click',()=>openRedForm(null,'splitter'));
     $('#rd-new-emp',el).addEventListener('click',()=>openRedForm(null,'empalme'));
-    $('#rd-new-olt',el).addEventListener('click',()=>openRedForm(null,'olt'));
+    const nOlt=$('#rd-new-olt',el);if(nOlt)nOlt.addEventListener('click',()=>openRedForm(null,'olt'));
     $('#rd-seg',el).addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;RED.tipo=b.dataset.f;RED.limit=60;this.update();});
     $('#rd-csv',el).addEventListener('click',exportRed);
     const plano=$('#rd-plano',el);if(plano)plano.addEventListener('click',openRedPlano);
@@ -177,14 +186,15 @@ VIEWS.red={
   },
   update(){
     const seg=$('#rd-seg');if(!seg)return;
-    const fs=[['todos','Todos'],['olt','OLT'],['nap','Cajas NAP'],['splitter','Splitters'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas'],['sinempalmar','Sin empalmar']];
+    const fs=[['todos','Todos'],['olt','OLT'],['nap','Cajas NAP'],['splitter','Splitters'],['empalme','Empalmes'],['nogeo','Sin ubicación'],['llenas','Cajas llenas'],['sinempalmar','Sin empalmar']].filter(([k])=>can('redSplitters')||(k!=='olt'&&k!=='splitter'));
+    if(!fs.some(([k])=>k===RED.tipo))RED.tipo='todos';
     seg.innerHTML=fs.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${RED.tipo===k}">${l}</button>`).join('');
     const nm=$('#rd-name');if(nm)nm.hidden=RED.sort!=='cerca';
     const rows=redRows();
     $('#rd-count').textContent=S.loaded.red?`${rows.length} ${rows.length===1?'punto':'puntos'}`:'Cargando…';
     const list=$('#rd-list');
     if(!rows.length){
-      list.innerHTML=S.red.size?'<div class="empty"><b>Ningún punto coincide</b><span>Probá con otra búsqueda o cambiá el filtro.</span></div>':'<div class="empty"><b>Todavía no hay cajas NAP ni empalmes</b><span>Parado al lado de la caja, tocá «Nueva caja NAP» y después «Usar mi ubicación actual (GPS)».</span></div>';
+      list.innerHTML=redList().length?'<div class="empty"><b>Ningún punto coincide</b><span>Probá con otra búsqueda o cambiá el filtro.</span></div>':'<div class="empty"><b>Todavía no hay cajas NAP ni empalmes</b><span>Parado al lado de la caja, tocá «Nueva caja NAP» y después «Usar mi ubicación actual (GPS)».</span></div>';
       return;
     }
     list.innerHTML=rows.slice(0,RED.limit).map(({p,d})=>redRow(p,d)).join('')+(rows.length>RED.limit?`<button class="btn more" type="button" data-more>Ver más (${rows.length-RED.limit})</button>`:'');
@@ -240,8 +250,8 @@ const canMoverNap=()=>can('red')&&(can('editarClientes')||can('ubicacion')||can(
 
 /* ----- ficha de una caja o empalme ----- */
 function openRed(id){
-  const p=S.red.get(id);if(!p){toast('No se encontró ese punto de la red','bad');return;}
-  const nap=p.tipo==='nap',split=p.tipo==='splitter',olt=p.tipo==='olt',hasSalidas=split||olt,grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],par=p.padre?S.red.get(p.padre):null;
+  const p=redGet(id);if(!p){toast('No se encontró ese punto de la red','bad');return;}
+  const nap=p.tipo==='nap',split=p.tipo==='splitter',olt=p.tipo==='olt',hasSalidas=split||olt,grid=nap&&p.puertos>0,cl=nap?napClients(p.id):[],par=p.padre?redGet(p.padre):null;
   const cant=redCantidad(p);
   const conecta=redConecta(p),llega=llegaPorDe(p);
   const kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
@@ -288,8 +298,8 @@ function empalmeConecta(p){
   const m=new Map();
   redKids(p.id).forEach(k=>m.set(k.id,{r:k,pelos:[]}));
   Object.keys(p.pelos||{}).forEach(n=>{
-    const x=peloEntry(p,n);if(!x||!x.a||!S.red.has(x.a)||peloEst(p,n)==='libre')return;
-    if(!m.has(x.a))m.set(x.a,{r:S.red.get(x.a),pelos:[]});
+    const x=peloEntry(p,n);if(!x||!x.a||!redHas(x.a)||peloEst(p,n)==='libre')return;
+    if(!m.has(x.a))m.set(x.a,{r:redGet(x.a),pelos:[]});
     m.get(x.a).pelos.push({n:Number(n),pon:x.p||null});
   });
   m.forEach(v=>v.pelos.sort((a,b)=>a.n-b.n));
@@ -298,7 +308,7 @@ function empalmeConecta(p){
 /* por dónde llega la señal a este punto (desde el pelo de una botella, o desde la salida de un splitter que dicen llevarle) */
 function llegaPorDe(p){
   const out=[];
-  S.red.forEach(e=>{
+  redList().forEach(e=>{
     if(e.id===p.id)return;
     if(e.tipo==='empalme'&&e.pelos)Object.keys(e.pelos).forEach(n=>{const x=peloEntry(e,n);if(x&&x.a===p.id&&peloEst(e,n)!=='libre')out.push({e,n:Number(n),pon:x.p||null});});
     if((e.tipo==='splitter'||e.tipo==='olt')&&e.salidas)Object.keys(e.salidas).forEach(n=>{const x=salidaEntry(e,n);if(x&&x.a===p.id&&salidaEst(e,n)!=='libre')out.push({e,n:Number(n),pon:null});});
@@ -310,8 +320,8 @@ function splitterConecta(p){
   const m=new Map();
   redKids(p.id).forEach(k=>m.set(k.id,{r:k,pelos:[]}));
   Object.keys(p.salidas||{}).forEach(n=>{
-    const x=salidaEntry(p,n);if(!x||!x.a||!S.red.has(x.a)||salidaEst(p,n)==='libre')return;
-    if(!m.has(x.a))m.set(x.a,{r:S.red.get(x.a),pelos:[]});
+    const x=salidaEntry(p,n);if(!x||!x.a||!redHas(x.a)||salidaEst(p,n)==='libre')return;
+    if(!m.has(x.a))m.set(x.a,{r:redGet(x.a),pelos:[]});
     m.get(x.a).pelos.push({n:Number(n),pon:null});
   });
   m.forEach(v=>v.pelos.sort((a,b)=>a.n-b.n));
@@ -340,7 +350,7 @@ function salidasFichaHTML(p){
   const cant=redCantidad(p),puede=can('red'),olt=p.tipo==='olt',tit=olt?'Puertos':'Salidas';
   if(!cant)return `<div><h3>${tit}</h3><div class="hint">${puede?(olt?'Cargá la cantidad de puertos de la OLT en «Editar» para poder anotar cada uno.':'Elegí la relación del splitter en «Editar» (1x2, 1x4…) para poder anotar cada salida.'):(olt?'Todavía no se cargó la cantidad de puertos de esta OLT.':'Todavía no se cargó la relación de este splitter.')}</div></div>`;
   const cell=n=>{
-    const x=salidaEntry(p,n),e=salidaEst(p,n),dest=x&&x.a&&S.red.has(x.a)?S.red.get(x.a):null,col=FIBRA_COL[(n-1)%12];
+    const x=salidaEntry(p,n),e=salidaEst(p,n),dest=x&&x.a&&redHas(x.a)?redGet(x.a):null,col=FIBRA_COL[(n-1)%12];
     const lbl=e==='libre'?'Libre':dest?dest.nombre:SALIDA_EST[e];
     const aria=(olt?'Puerto ':'Salida ')+n+' ('+col[0].toLowerCase()+'): '+SALIDA_EST[e]+(dest?' · lleva a '+dest.nombre:'');
     const body=`<span class="pn">${fdot(col)}${n}</span><span class="pl">${esc(lbl)}</span>`;
@@ -350,7 +360,7 @@ function salidasFichaHTML(p){
   const cells=[];for(let n=1;n<=cant;n++)cells.push(cell(n));
   const usados=Object.keys(p.salidas||{}).map(Number).filter(n=>n>=1&&n<=cant&&salidaEst(p,n)!=='libre').sort((a,b)=>a-b);
   const lista=usados.map(n=>{
-    const x=salidaEntry(p,n),col=FIBRA_COL[(n-1)%12],dest=x.a&&S.red.get(x.a),est=salidaEst(p,n);
+    const x=salidaEntry(p,n),col=FIBRA_COL[(n-1)%12],dest=x.a&&redGet(x.a),est=salidaEst(p,n);
     const linea=[dest?'lleva a '+dest.nombre:'',x.n||''].filter(Boolean).join(' · ');
     const tag=`<${puede?'button':'div'} class="item" type="button" ${puede?`data-salida="${n}"`:''}><div><div class="t">${fdot(col)} ${olt?'Puerto':'Salida'} ${n} · ${esc(col[0].toLowerCase())}</div><div class="s">${esc(linea||SALIDA_EST[est])}</div></div><div class="side"><span class="chip ${est==='reservado'?'warn':est==='danado'?'bad':'ok'}">${esc(SALIDA_EST[est])}</span></div></${puede?'button':'div'}>`;
     return tag;
@@ -360,12 +370,12 @@ function salidasFichaHTML(p){
 }
 /* anotar una salida (de un splitter) o un puerto (de una OLT): a dónde lleva (otra caja, otro splitter o una botella) y una nota */
 function openSalida(id,n){
-  const p=S.red.get(id);if(!p||!(p.tipo==='splitter'||p.tipo==='olt'))return;
+  const p=redGet(id);if(!p||!(p.tipo==='splitter'||p.tipo==='olt'))return;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const olt=p.tipo==='olt',lab=olt?'Puerto':'Salida';
   const x=salidaEntry(p,n),col=FIBRA_COL[(n-1)%12];
   const e0=x&&SALIDA_EST[x.e]?x.e:'conectado';
-  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort(redTipoCmp);
+  const otros=redList().filter(r=>r.id!==p.id).sort(redTipoCmp);
   const html=`<div class="head-row"><span class="chip">${fdot(col)} ${esc(col[0])}</span></div>
     <form class="form" id="sl-form" novalidate>
     ${F('Estado '+(olt?'del puerto':'de la salida'),'sl-e',`<select id="sl-e">${Object.entries(SALIDA_EST).map(([k,v])=>opt(k,v,k===e0)).join('')}</select>`)}
@@ -403,7 +413,7 @@ function empalmeFichaHTML(p){
   const cell=n=>{
     const x=peloEntry(p,n),e=peloEst(p,n),info=peloInfo(n,xt);
     const lbl=e==='libre'?'Libre':e==='empalmado'?(x.p?'PON '+x.p:'Empalmado'):PELO_EST[e];
-    const aria='Pelo '+n+(info.color?' ('+info.color[0].toLowerCase()+')':'')+': '+PELO_EST[e]+(x&&x.p?' · '+ponTxt(x.p):'')+(x&&x.a&&S.red.has(x.a)?' · lleva a '+S.red.get(x.a).nombre:'');
+    const aria='Pelo '+n+(info.color?' ('+info.color[0].toLowerCase()+')':'')+': '+PELO_EST[e]+(x&&x.p?' · '+ponTxt(x.p):'')+(x&&x.a&&redHas(x.a)?' · lleva a '+redGet(x.a).nombre:'');
     const body=`<span class="pn">${fdot(info.color)}${n}</span><span class="pl">${esc(lbl)}</span>`;
     return puede?`<button class="pelo est-${e}" type="button" data-pelo="${n}" aria-label="${esc(aria)}" title="${esc(aria)}">${body}</button>`:`<div class="pelo est-${e}" aria-label="${esc(aria)}">${body}</div>`;
   };
@@ -416,27 +426,27 @@ function empalmeFichaHTML(p){
   }
   const usados=Object.keys(p.pelos||{}).map(Number).filter(n=>n>=1&&n<=hil&&peloEst(p,n)!=='libre').sort((a,b)=>a-b);
   const lista=usados.map(n=>{
-    const x=peloEntry(p,n),info=peloInfo(n,xt),dest=x.a&&S.red.get(x.a);
+    const x=peloEntry(p,n),info=peloInfo(n,xt),dest=x.a&&redGet(x.a);
     const linea=[x.p?ponTxt(x.p):'',dest?'lleva a '+dest.nombre:'',x.n||''].filter(Boolean).join(' · ');
     return `<${puede?'button':'div'} class="item" type="button" ${puede?`data-pelo="${n}"`:''}><div><div class="t">${fdot(info.color)} Pelo ${n}${info.color?' · '+esc(info.color[0].toLowerCase()):''}${info.tubo&&hil>xt?' · tubo '+info.tubo:''}</div><div class="s">${esc(linea||PELO_EST[peloEst(p,n)])}</div></div><div class="side"><span class="chip ${peloEst(p,n)==='empalmado'?'accent':peloEst(p,n)==='danado'?'bad':'warn'}">${esc(PELO_EST[peloEst(p,n)])}</span></div></${puede?'button':'div'}>`;
   }).join('');
   return `${hacerH}${ponsH}<div><h3>Pelos de la fibra</h3><div class="hint">${usados.length} de ${hil} en uso.${puede?' Tocá un pelo para anotar cuál está empalmado y qué lleva.':''}</div>${partes.join('')}${lista?`<h3 style="margin-top:14px">Qué lleva cada pelo</h3><div class="list" style="margin-top:8px">${lista}</div>`:''}</div>`;
 }
 /* anotar un pelo: si está empalmado, qué PON lleva y a qué caja o botella va */
-async function esperarRed(id,ok){for(let i=0;i<40&&!ok(S.red.get(id)||{});i++)await new Promise(r=>setTimeout(r,50));}
+async function esperarRed(id,ok){for(let i=0;i<40&&!ok(redGet(id)||{});i++)await new Promise(r=>setTimeout(r,50));}
 function openPelo(id,n){
-  const p=S.red.get(id);if(!p||p.tipo!=='empalme')return;
+  const p=redGet(id);if(!p||p.tipo!=='empalme')return;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const x=peloEntry(p,n),info=peloInfo(n,xtuboDe(p));
   const e0=x&&PELO_EST[x.e]?x.e:'empalmado';
-  const otros=[...S.red.values()].filter(r=>r.id!==p.id).sort(redTipoCmp);
+  const otros=redList().filter(r=>r.id!==p.id).sort(redTipoCmp);
   const pons=[...new Set([...PON_LISTA,...(p.pons||[]),...(x&&x.p?[x.p]:[])])].sort((a,b)=>a-b);
   const html=`<div class="head-row"><div>${info.color?`<span class="chip">${fdot(info.color)} ${esc(info.color[0])}</span> `:''}${info.tubo&&p.hilos>xtuboDe(p)?`<span class="chip">Tubo ${info.tubo}${info.tuboCol?' · '+esc(info.tuboCol[0].toLowerCase()):''}</span>`:''}</div></div>
     <form class="form" id="pl-form" novalidate>
     ${F('Estado del pelo','pl-e',`<select id="pl-e">${Object.entries(PELO_EST).map(([k,v])=>opt(k,v,k===e0)).join('')}</select>`)}
     <div id="pl-det">
     ${F('PON que lleva','pl-pon',`<select id="pl-pon"><option value="">No indicar</option>${pons.map(k=>opt(k,ponTxt(k)+((p.pons||[]).includes(k)?' · vivo':''),x&&x.p===k)).join('')}</select>`)}
-    ${F('Lleva a (caja, splitter o botella)','pl-a',`<select id="pl-a"><option value="">No indicar</option>${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si todavía no está cargada, cargala primero en Red.')}
+    ${F('Lleva a (caja, splitter o botella)','pl-a',`<select id="pl-a"><option value="">No indicar</option>${redRefOculta(x&&x.a)?opt(x.a,REF_OCULTA_TXT,true):''}${otros.map(r=>opt(r.id,r.nombre+' · '+(RED_TIPO[r.tipo]||r.tipo),x&&x.a===r.id)).join('')}</select>`,'Si todavía no está cargada, cargala primero en Red.')}
     </div>
     ${F('Nota','pl-n',`<input id="pl-n" maxlength="120" autocomplete="off" value="${esc(x&&x.n||'')}" placeholder="Ej.: empalmado con el pelo 3 de la botella siguiente">`)}
     <div class="actions"><button class="btn ghost" type="button" id="pl-cancel">Cancelar</button>${x?'<button class="btn danger" type="button" id="pl-libre">Dejar libre</button>':''}<button class="btn primary" type="submit">Guardar</button></div></form>`;
@@ -462,7 +472,7 @@ function openPelo(id,n){
 }
 /* un cliente dentro de una caja: quién es, dónde está y las acciones (ver su ficha, mover) */
 function openNapClient(napId,cid){
-  const p=S.red.get(napId),c=S.clientes.get(cid);
+  const p=redGet(napId),c=S.clientes.get(cid);
   if(!p||!c)return openRed(napId);
   const vis=clientVisible(c),kv=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
   const html=`<div class="head-row">${estChip(c)}</div>
@@ -481,7 +491,7 @@ function openNapClient(napId,cid){
 }
 /* sacar a un cliente de la caja: queda libre su puerto (el cliente no se borra ni se da de baja) */
 async function sacarDeCaja(cid,napId){
-  const p=S.red.get(napId),c=S.clientes.get(cid);if(!p||!c)return openRed(napId);
+  const p=redGet(napId),c=S.clientes.get(cid);if(!p||!c)return openRed(napId);
   if(!canMoverNap())return toast('Tu perfil no puede cambiar de caja a un cliente','bad');
   if(!await askConfirm('¿Sacar a '+c.nombre+' de '+p.nombre+'?'+(c.napPuerto?' El puerto '+c.napPuerto+' queda libre.':'')+' El cliente sigue en el sistema.','Sacar de la caja',true))return openNapClient(napId,cid);
   try{
@@ -494,14 +504,14 @@ async function sacarDeCaja(cid,napId){
 /* un puerto libre: se elige al cliente que está conectado ahí. Sin escribir nada se ofrecen dos listas, «Por instalar» (los abonados nuevos) y «Ya instalados» (los que todavía no tienen caja), con los más cercanos a la caja primero;
    escribiendo se busca entre todos por nombre o calle (un técnico busca con 3 letras como mínimo y ve pocos resultados: no es una lista de todos los clientes) */
 function openAsignarPuerto(napId,port,q0,tab0){
-  const p=S.red.get(napId);if(!p)return;
+  const p=redGet(napId);if(!p)return;
   if(!canMoverNap())return toast('Tu perfil no puede cargar clientes en una caja','bad');
   const todos=can('clientesTodos'),min=todos?2:3,lim=todos?30:8,limYa=todos?15:8;
   const vis=todos?null:visibleSet();   /* un técnico ve «Por instalar» solo con los abonados de sus órdenes */
   const m=napMap(p),sinPto=new Set(m.sin.map(c=>c.id)),geo=hasGeo(p);
   const dist=c=>geo&&hasGeo(c)?distM(p,c):null;
   const puesto=c=>c.nap===napId&&!sinPto.has(c.id);              /* ya ocupa un puerto de esta caja: se ve en el dibujo */
-  const enCaja=c=>!!(c.nap&&S.red.has(c.nap));
+  const enCaja=c=>!!(c.nap&&redHas(c.nap));
   const abierta=new Set();for(const o of S.ordenes.values())if(o.tipo==='instalacion'&&ORD_OPEN(o))abierta.add(o.clientId);
   const nombre=(a,b)=>norm(a.nombre).localeCompare(norm(b.nombre),'es',{numeric:true});
   /* primero los de esta caja que no tienen puerto, después los más cercanos, al final los que no tienen ubicación */
@@ -571,7 +581,7 @@ function openAsignarPuerto(napId,port,q0,tab0){
 function openMoverNap(cid,volverA){
   const c=S.clientes.get(cid);if(!c)return;
   if(!canMoverNap())return toast('Tu perfil no puede cambiar de caja a un cliente','bad');
-  const cur=c.nap&&S.red.get(c.nap),from=hasGeo(c)?c:null;
+  const cur=c.nap&&redGet(c.nap),from=hasGeo(c)?c:null;
   let dest=cur&&cur.tipo==='nap'?cur.id:'',sel=null;
   const html=`<p>Pasar a <b>${esc(c.nombre)}</b> ${cur?'de <b>'+esc(cur.nombre)+(c.napPuerto?' · puerto '+esc(c.napPuerto):'')+'</b>':'(hoy sin caja)'} a otra caja o a otro puerto. Al confirmar queda libre el puerto de origen y ocupado el de destino.</p>
     ${F('Caja NAP de destino','mv-nap',`<select id="mv-nap">${napOptionsHTML(dest,from,'Elegí la caja de destino')}</select>`,from?'Las más cercanas a la casa del cliente aparecen primero.':'')}
@@ -580,7 +590,7 @@ function openMoverNap(cid,volverA){
   openModal({title:'Mover cliente de caja',html,onMount(el){
     const box=$('#mv-ports',el),go=$('#mv-go',el),hint=$('#mv-hint',el);
     const draw=()=>{
-      const p=dest&&S.red.get(dest);
+      const p=dest&&redGet(dest);
       hint.textContent='';hint.className='hint';go.disabled=!p||!sel;
       if(!p){box.innerHTML='';return;}
       if(!p.puertos){
@@ -593,10 +603,10 @@ function openMoverNap(cid,volverA){
     };
     $('#mv-nap',el).addEventListener('change',e=>{dest=e.target.value;sel=null;draw();});
     box.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(!b)return;sel=parseInt(b.dataset.pick,10);draw();});
-    const volver=()=>{if(volverA&&S.red.has(volverA))openRed(volverA);else if(cur)openRed(cur.id);else closeModal();};
+    const volver=()=>{if(volverA&&redHas(volverA))openRed(volverA);else if(cur)openRed(cur.id);else closeModal();};
     $('#mv-cancel',el).addEventListener('click',volver);
     go.addEventListener('click',async()=>{
-      const p=S.red.get(dest);if(!p||!sel)return;
+      const p=redGet(dest);if(!p||!sel)return;
       if(p.puertos&&sel>p.puertos)return toast(p.nombre+' tiene '+p.puertos+' puertos: el '+sel+' no existe','bad');
       if(dest===c.nap&&sel===parseInt(c.napPuerto,10))return toast('Ya está en ese puerto','bad');
       const otro=napClients(dest).find(x=>x.id!==c.id&&parseInt(x.napPuerto,10)===sel);
@@ -615,13 +625,13 @@ function openMoverNap(cid,volverA){
    Es un dato de ese punto físico en particular (no se copia al clonar una rama, ver prepararClon):
    una caja nueva arranca sin empalmar hasta que alguien la marca. */
 async function toggleIluminada(id){
-  const p=S.red.get(id);if(!p||p.tipo!=='nap')return;
+  const p=redGet(id);if(!p||p.tipo!=='nap')return;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const nuevo=!p.iluminada;
   try{await putItem('red','puntos',p.id,{iluminada:nuevo,mod:Date.now()});await esperarRed(p.id,x=>!!x.iluminada===nuevo);toast(nuevo?'Caja marcada como iluminada':'Caja marcada como sin empalmar');openRed(p.id);}catch(e){dbError(e);}
 }
 function openRedGeo(id){
-  const p=S.red.get(id);if(!p)return;
+  const p=redGet(id);if(!p)return;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const ART_LUGAR={nap:'la caja',splitter:'el splitter',olt:'la OLT',empalme:'la botella'};
   openModal({title:'Ubicación de '+p.nombre,html:`${geoFieldHTML(p,'Si estás al lado de '+(ART_LUGAR[p.tipo]||'el punto')+', tocá el botón y se completa solo.')}<div class="actions"><button class="btn ghost" type="button" data-close>Cancelar</button><button class="btn primary" type="button" id="geo-save">Guardar ubicación</button></div>`,onMount(el){
@@ -639,13 +649,13 @@ function openRedGeo(id){
    nuevo (el prefijo elegido + el nombre original), colgada de un padre nuevo. La copia no trae ubicación, referencia,
    notas, fibra, PON vivos ni «qué hay que hacer»: son datos de ese punto físico en particular, no de la estructura. */
 function prepararClon(raizId,nuevoPadreId,prefijo,buscar,reemplazar){
-  const raiz=S.red.get(raizId);if(!raiz)return {ok:false,msg:'No se encontró ese punto de la red'};
+  const raiz=redGet(raizId);if(!raiz)return {ok:false,msg:'No se encontró ese punto de la red'};
   const visitado=new Set([raiz.id]);
   const arbol=redArbol(raiz,visitado);
   const idMap=new Map();
   (function asignar(nodo){idMap.set(nodo.p.id,newId());nodo.hijos.forEach(h=>asignar(h.nodo));})(arbol);
   const items={},usados=new Map();
-  [...S.red.values()].forEach(x=>{if(!usados.has(x.tipo))usados.set(x.tipo,new Set());usados.get(x.tipo).add(norm(x.nombre));});
+  redList().forEach(x=>{if(!usados.has(x.tipo))usados.set(x.tipo,new Set());usados.get(x.tipo).add(norm(x.nombre));});
   const CAMPOS=['tipo','puertos','rel','hilos','xtubo'];   /* solo lo estructural: ni ubicación, ni texto libre de este punto físico */
   let dup=null;
   (function construir(nodo,padreNuevo){
@@ -675,10 +685,10 @@ function prepararClon(raizId,nuevoPadreId,prefijo,buscar,reemplazar){
   return {ok:true,items,count:Object.keys(items).length,nuevaRaiz:idMap.get(raiz.id)};
 }
 function openRedClonar(id){
-  const p=S.red.get(id);if(!p||p.tipo==='olt')return;
+  const p=redGet(id);if(!p||p.tipo==='olt')return;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
   const bloqueados=redDescendants(p.id);
-  const padres=[...S.red.values()].filter(x=>(x.tipo==='empalme'||x.tipo==='splitter'||x.tipo==='olt')&&x.id!==p.id&&!bloqueados.has(x.id)).sort(redTipoCmp);
+  const padres=redList().filter(x=>(x.tipo==='empalme'||x.tipo==='splitter'||x.tipo==='olt')&&x.id!==p.id&&!bloqueados.has(x.id)).sort(redTipoCmp);
   const html=`<p>Crea una copia de <b>${esc(p.nombre)}</b> y de todo lo que cuelga de ella (splitters, botellas y cajas), con la misma estructura. La copia no trae ubicación, referencia, notas, fibra, PON vivos ni «qué hay que hacer»: eso es de cada punto físico y hay que cargarlo de nuevo.</p>
     <form class="form" id="cl-form" novalidate>
     ${F('De dónde sale la copia','cl-padre',`<select id="cl-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo))).join('')}</select>`,'La OLT, la botella o el splitter del que va a salir esta copia.')}
@@ -701,7 +711,7 @@ function openRedClonar(id){
         await putMany('red','puntos',r.items);
         await esperarRed(r.nuevaRaiz,x=>!!x.nombre);
         toast(r.count+' puntos creados');
-        if(S.red.has(r.nuevaRaiz))openRed(r.nuevaRaiz);else closeModal();
+        if(redHas(r.nuevaRaiz))openRed(r.nuevaRaiz);else closeModal();
       }catch(err){dbError(err);}
     });
   }});
@@ -709,18 +719,20 @@ function openRedClonar(id){
 
 /* ----- alta y edición ----- */
 function openRedForm(id,tipoNuevo){
-  const old=id?S.red.get(id):null;
+  const old=id?redGet(id):null;
   if(!can('red'))return toast('Tu perfil no puede modificar la red','bad');
+  if(id&&!old)return toast('No se encontró ese punto de la red','bad');
+  if(!old&&(tipoNuevo==='splitter'||tipoNuevo==='olt')&&!can('redSplitters'))return toast('Tu perfil no puede cargar splitters ni la OLT','bad');
   const p=old||{tipo:tipoNuevo==='empalme'?'empalme':tipoNuevo==='splitter'?'splitter':tipoNuevo==='olt'?'olt':'nap',puertos:tipoNuevo==='nap'||!tipoNuevo?16:null};
   const bloqueados=old?redDescendants(old.id):new Set();
-  const padres=[...S.red.values()].filter(x=>(x.tipo==='empalme'||x.tipo==='splitter'||x.tipo==='olt')&&(!old||(x.id!==old.id&&!bloqueados.has(x.id)))).sort(redTipoCmp);
+  const padres=redList().filter(x=>(x.tipo==='empalme'||x.tipo==='splitter'||x.tipo==='olt')&&(!old||(x.id!==old.id&&!bloqueados.has(x.id)))).sort(redTipoCmp);
   const html=`<form class="form" id="rform" novalidate>
-    <div class="grid2">${F('Qué es','rf-tipo',`<select id="rf-tipo"${old?' disabled':''}>${opt('olt','OLT (origen de la fibra)',p.tipo==='olt')}${opt('nap','Caja NAP (de acá salen los clientes)',p.tipo==='nap')}${opt('splitter','Splitter (divide la señal)',p.tipo==='splitter')}${opt('empalme','Botella de empalme',p.tipo==='empalme')}</select>`)}
+    <div class="grid2">${F('Qué es','rf-tipo',`<select id="rf-tipo"${old?' disabled':''}>${can('redSplitters')?opt('olt','OLT (origen de la fibra)',p.tipo==='olt'):''}${opt('nap','Caja NAP (de acá salen los clientes)',p.tipo==='nap')}${can('redSplitters')?opt('splitter','Splitter (divide la señal)',p.tipo==='splitter'):''}${opt('empalme','Botella de empalme',p.tipo==='empalme')}</select>`)}
     ${F('Nombre o número *','rf-nombre',`<input id="rf-nombre" value="${esc(p.nombre||'')}" autocomplete="off" placeholder="NAP-12">`)}</div>
     <div class="grid2" id="rf-fila"><div id="rf-puertos-w">${F('Cantidad de puertos','rf-puertos',`<input id="rf-puertos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.puertos?esc(p.puertos):''}">`,'Salidas de la caja (8, 16…).')}</div>
     <div id="rf-rel-w">${F('Relación (salidas)','rf-rel',`<select id="rf-rel"><option value="">Elegí…</option>${RATIOS_SPLIT.map(n=>opt(n,'1x'+n,p.rel===n)).join('')}</select>`,'Cuántas salidas tiene el splitter.')}</div>
     <div id="rf-oltp-w">${F('Cantidad de puertos','rf-oltp',`<input id="rf-oltp" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.tipo==='olt'&&p.puertos?esc(p.puertos):''}">`,'Puertos GPON de la OLT (4, 8, 16, 24…). Cada uno sale con su propia fibra.')}</div></div>
-    <div class="grid2" id="rf-padre-w">${F('Sale de','rf-padre',`<select id="rf-padre"><option value="">No indicar</option>${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo),x.id===p.padre)).join('')}</select>`,'La OLT, la botella de empalme o el splitter del que sale la señal.')}</div>
+    <div class="grid2" id="rf-padre-w">${F('Sale de','rf-padre',`<select id="rf-padre"><option value="">No indicar</option>${redRefOculta(p.padre)?opt(p.padre,REF_OCULTA_TXT,true):''}${padres.map(x=>opt(x.id,x.nombre+' · '+(RED_TIPO[x.tipo]||x.tipo),x.id===p.padre)).join('')}</select>`,'La OLT, la botella de empalme o el splitter del que sale la señal.')}</div>
     <div id="rf-emp-w">
     ${F('Qué fibra es','rf-fibra',`<input id="rf-fibra" maxlength="120" autocomplete="off" value="${esc(p.fibra||'')}" placeholder="Fibra de 24 pelos, tendido desde ADMIN02">`)}
     <div class="grid2">${F('Cantidad de pelos','rf-hilos',`<input id="rf-hilos" type="number" min="1" max="288" step="1" inputmode="numeric" value="${p.hilos?esc(p.hilos):(old?'':24)}">`,'Los que tiene el cable (12, 24, 48…).')}
@@ -744,7 +756,7 @@ function openRedForm(id,tipoNuevo){
       const tipo=kind(),nombre=v('rf-nombre');
       if(!nombre)return toast('Falta el nombre','bad');
       const DUP_ART={nap:'una caja NAP',splitter:'un splitter',empalme:'una botella de empalme',olt:'una OLT'};
-      if([...S.red.values()].some(x=>x.tipo===tipo&&x.id!==(old&&old.id)&&norm(x.nombre)===norm(nombre)))return toast('Ya hay '+(DUP_ART[tipo]||'un punto')+' con ese nombre','bad');
+      if(redList().some(x=>x.tipo===tipo&&x.id!==(old&&old.id)&&norm(x.nombre)===norm(nombre)))return toast('Ya hay '+(DUP_ART[tipo]||'un punto')+' con ese nombre','bad');
       let puertos=null,rel=null;
       if(tipo==='nap'&&v('rf-puertos')!==''){puertos=parseInt(v('rf-puertos'),10);if(!(puertos>=1&&puertos<=288))return toast('Los puertos tienen que ser un número entre 1 y 288','bad');}
       if(old&&tipo==='nap'&&puertos&&puertos<napUsed(old.id))return toast('La caja ya tiene '+napUsed(old.id)+' clientes conectados: no puede tener menos puertos','bad');
@@ -783,7 +795,7 @@ function openRedForm(id,tipoNuevo){
         const NUEVO_TXT={nap:'Caja NAP guardada',splitter:'Splitter guardado',empalme:'Botella de empalme guardada',olt:'OLT guardada'};
         toast(old?'Cambios guardados':(NUEVO_TXT[tipo]||'Guardado'));closeModal();
         /* una caja o una OLT recién creada se abre sola, ya dibujada, para ir cargando qué cliente o qué puerto va en cada lugar */
-        if(nid&&((tipo==='nap'&&puertos)||(tipo==='empalme'&&obj.hilos)||(tipo==='splitter'&&obj.rel)||(tipo==='olt'&&puertos))){for(let k=0;k<40&&!S.red.has(nid);k++)await new Promise(r=>setTimeout(r,50));if(S.red.has(nid))openRed(nid);}
+        if(nid&&((tipo==='nap'&&puertos)||(tipo==='empalme'&&obj.hilos)||(tipo==='splitter'&&obj.rel)||(tipo==='olt'&&puertos))){for(let k=0;k<40&&!redHas(nid);k++)await new Promise(r=>setTimeout(r,50));if(redHas(nid))openRed(nid);}
       }catch(err){dbError(err);}
     });
     const del=$('#rf-del',el);

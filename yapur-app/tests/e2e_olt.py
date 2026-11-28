@@ -39,7 +39,8 @@ async def red_id(pg, nombre): return await pg.evaluate("n => { const p=[...S.red
 
 async def main():
     st, j = api('POST', '/api/setup', {'codigo': CODE, 'usuario': 'mauro', 'clave': 'claveSegura1', 'nombre': 'Mauro'}); TA = j['token']
-    api('POST', '/api/users', {'usuario': 'sinred2', 'nombre': 'Sin Red 2', 'role': 'tecnico', 'clave': 'sinred2123', 'permisos': {'red': False}}, TA)
+    api('POST', '/api/users', {'usuario': 'sinsplit', 'nombre': 'Sin Splitters', 'role': 'tecnico', 'clave': 'sinsplit123', 'permisos': {'red': True}}, TA)
+    api('POST', '/api/users', {'usuario': 'sinred2', 'nombre': 'Sin Red 2', 'role': 'tecnico', 'clave': 'sinred2123', 'permisos': {'red': False, 'redSplitters': True}}, TA)
     async with async_playwright() as p:
         br = await p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--no-sandbox'])
         ctx = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, accept_downloads=True)
@@ -221,6 +222,15 @@ async def main():
         await pg2.wait_for_function("S.loaded.red", timeout=8000)
         await pg2.evaluate(f"openRed('{olt1}')"); await pg2.wait_for_selector('.sheet .pelos')
         check('sin permiso de red, la OLT se ve pero sin botón «Editar» ni puertos tocables', await pg2.evaluate("!document.querySelector('.sheet [data-act=editar]')") and await pg2.evaluate("!document.querySelector('.sheet button.pelo')"))
+
+        # 12) sin el permiso «redSplitters» (el técnico por defecto) la ficha ni se abre: el servidor no le manda ni splitters ni la OLT
+        ctx3 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
+        await ctx3.route('**/fonts.g*/**', lambda r: r.abort())
+        pg3 = await login(ctx3, 'sinsplit', 'sinsplit123')
+        await pg3.wait_for_function("S.loaded.red", timeout=8000)
+        check('sin «redSplitters» el servidor no le manda el punto', await pg3.evaluate(f"S.red.has('{olt1}')") is False)
+        await pg3.evaluate(f"openRed('{olt1}')"); await pg3.wait_for_selector('#toastRoot', timeout=4000)
+        check('y al intentar abrirlo avisa que no se encontró (no se abre ninguna ficha)', 'No se encontró' in await pg3.inner_text('#toastRoot') and await pg3.locator('.sheet .pelos').count() == 0)
         await br.close()
     print('\nERRORES:', ERR if ERR else 'ninguno')
     print(f'{sum(res)} ok, {len(res) - sum(res)} con fallas')

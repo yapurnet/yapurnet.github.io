@@ -39,7 +39,8 @@ async def login(ctx, user, clave):
 async def main():
     st, j = api('POST', '/api/setup', {'codigo': CODE, 'usuario': 'mauro', 'clave': 'claveSegura1', 'nombre': 'Mauro'}); TA = j['token']
     api('POST', '/api/users', {'usuario': 'sinplano', 'nombre': 'Sin Plano', 'role': 'tecnico', 'clave': 'sinplano123', 'permisos': {'red': True, 'redPlano': False, 'redPlanoCajas': False}}, TA)
-    api('POST', '/api/users', {'usuario': 'conplano', 'nombre': 'Con Plano', 'role': 'tecnico', 'clave': 'conplano123', 'permisos': {'red': True, 'redPlano': True}}, TA)
+    api('POST', '/api/users', {'usuario': 'conplano', 'nombre': 'Con Plano', 'role': 'tecnico', 'clave': 'conplano123', 'permisos': {'red': True, 'redPlano': True, 'redSplitters': True}}, TA)
+    api('POST', '/api/users', {'usuario': 'plansinspl', 'nombre': 'Plano sin splitters', 'role': 'tecnico', 'clave': 'plansinspl123', 'permisos': {'red': True, 'redPlano': True, 'redSplitters': False}}, TA)
     api('POST', '/api/users', {'usuario': 'solocajas', 'nombre': 'Solo Cajas', 'role': 'tecnico', 'clave': 'solocajas123', 'permisos': {'red': True, 'redPlano': False, 'redPlanoCajas': True}}, TA)
 
     def red(items):
@@ -178,6 +179,18 @@ async def main():
         check('no dibuja ninguna línea (no hay splitters que conecten)', await pgC.locator('.pedge').count() == 0)
         check('el título del modal dice «Cajas NAP»', 'Cajas NAP' == (await pgC.inner_text('.sheet-head h2')).strip())
         await ctx4.close()
+
+        # 9) el permiso «redSplitters»: con el plano completo pero sin ver los splitters ni la OLT, el plano que le toca es el simplificado de cajas
+        ctx5 = await br.new_context(bypass_csp=True, viewport={'width': 390, 'height': 844}, geolocation={'latitude': -28.46, 'longitude': -62.83, 'accuracy': 10}, permissions=['geolocation'])
+        await ctx5.route('**/fonts.g*/**', lambda r: r.abort())
+        pgD = await login(ctx5, 'plansinspl', 'plansinspl123')
+        await pgD.click('#tabs [data-tab=red]')
+        await pgD.wait_for_selector('#rd-plano', timeout=8000)
+        check('con «redPlano» pero sin «redSplitters» el botón dice «Ver cajas NAP»', 'Ver cajas NAP' in await pgD.inner_text('#rd-plano'))
+        await pgD.click('#rd-plano'); await pgD.wait_for_selector('.plano-wrap svg', timeout=8000)
+        names5 = await pgD.evaluate("[...document.querySelectorAll('.pnode title')].map(t=>t.textContent)")
+        check('y el plano dibuja solo las cajas NAP, sin OLT ni splitters', sorted(names5) == ['NAP-01', 'NAP-03 (sin salida anotada)'], names5)
+        await ctx5.close()
 
         await br.close()
     check('sin errores de la página', not ERR, ERR)

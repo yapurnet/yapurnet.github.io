@@ -41,11 +41,11 @@ const EGRESO_CATS = ['retiro', 'proveedor', 'devolucion', 'saldo_favor', 'equipo
 const canSeeEgresos = (u, p) => u.role === 'admin' || p.caja || p.resumen;
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const USER_RE = /^[a-z0-9._-]{2,32}$/;
-const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion', 'ventasOtra', 'soloVentas'];
+const PERM_KEYS = ['clientesTodos', 'telefono', 'dni', 'editarClientes', 'altaCampo', 'ubicacion', 'ordenesTodas', 'crearOrdenes', 'operarOrdenes', 'precios', 'cobrar', 'caja', 'anular', 'promesas', 'resumen', 'red', 'redPlano', 'redPlanoCajas', 'redSplitters', 'cobrarCampo', 'verTecnicos', 'ping', 'verPlan', 'elegirPlan', 'comodato', 'contratosGestion', 'ventasOtra', 'soloVentas'];
 const MONEY = ['cobrar', 'caja', 'anular', 'promesas', 'resumen'];
 const PERM_DEF = {
-  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, altaCampo: true, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, redPlano: false, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
-  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, altaCampo: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, redPlano: true, redPlanoCajas: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, elegirPlan: true, comodato: true, contratosGestion: true }
+  tecnico: { clientesTodos: false, telefono: true, dni: false, editarClientes: false, altaCampo: true, ubicacion: true, ordenesTodas: false, crearOrdenes: true, operarOrdenes: true, precios: false, cobrar: false, caja: false, anular: false, promesas: false, resumen: false, red: true, redPlano: false, redPlanoCajas: false, redSplitters: false, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: false, elegirPlan: true, comodato: true, contratosGestion: false },
+  oficina: { clientesTodos: true, telefono: true, dni: true, editarClientes: true, altaCampo: true, ubicacion: true, ordenesTodas: true, crearOrdenes: true, operarOrdenes: true, precios: true, cobrar: true, caja: true, anular: false, promesas: true, resumen: false, red: true, redPlano: true, redPlanoCajas: false, redSplitters: true, cobrarCampo: false, verTecnicos: false, ping: true, verPlan: true, elegirPlan: true, comodato: true, contratosGestion: true }
 };
 const ROLES = ['admin', 'oficina', 'tecnico'];
 const isPlain = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -345,6 +345,8 @@ function guard(u, p, coll, existing, patch, ctx) {
 
 /* ----- red: cajas NAP, botellas de empalme, splitters y OLT (se guardan juntas en red/puntos, un registro por punto) ----- */
 const RED_TIPOS = ['nap', 'empalme', 'splitter', 'olt'];
+/* la parte «de adentro» de la red: quien no tiene el permiso «redSplitters» (el técnico) no recibe los splitters ni la OLT, ni los puede cargar, editar o borrar */
+const RED_INTERNOS = ['splitter', 'olt'];
 const RED_KEYS = ['tipo', 'nombre', 'lat', 'lng', 'puertos', 'padre', 'ref', 'notas', 'creado', 'mod', 'fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos', 'rel', 'salidas', 'iluminada'];
 /* solo de las botellas de empalme: qué fibra es, cuántos pelos tiene y de a cuántos por tubo, qué PON están vivos, qué hay que hacer y qué lleva cada pelo */
 const EMP_KEYS = ['fibra', 'hilos', 'xtubo', 'pons', 'hacer', 'pelos'];
@@ -364,12 +366,14 @@ function guardRed(u, p, old, items) {
     const nw = items[id], prev = old[id];
     if (nw === null) {   /* eliminar un punto */
       if (u.role !== 'admin' && !p.editarClientes) return 'Tu usuario no puede eliminar puntos de la red.';
+      if (u.role !== 'admin' && !p.redSplitters && prev && RED_INTERNOS.includes(prev.tipo)) return 'Tu usuario no puede modificar los splitters ni la OLT.';
       continue;
     }
     if (!isPlain(nw)) return 'Formato inválido.';
     for (const k of Object.keys(nw)) if (!RED_KEYS.includes(k)) return 'Dato desconocido en la red: ' + k + '.';
     const tipo = 'tipo' in nw ? nw.tipo : prev && prev.tipo, nombre = 'nombre' in nw ? nw.nombre : prev && prev.nombre;
     if (!RED_TIPOS.includes(tipo)) return 'El tipo tiene que ser caja NAP, botella de empalme, splitter u OLT.';
+    if (u.role !== 'admin' && !p.redSplitters && (RED_INTERNOS.includes(tipo) || (prev && RED_INTERNOS.includes(prev.tipo)))) return 'Tu usuario no puede modificar los splitters ni la OLT.';
     if (typeof nombre !== 'string' || !nombre.trim() || nombre.length > 60) return 'Falta el nombre (hasta 60 letras).';
     if ('lat' in nw || 'lng' in nw) {
       const la = 'lat' in nw ? nw.lat : prev && prev.lat, ln = 'lng' in nw ? nw.lng : prev && prev.lng;
@@ -1086,6 +1090,7 @@ export class YapurDB extends DurableObject {
       return d;
     }
     if (u.role === 'admin') return data;
+    if (coll === 'red') return p.redSplitters ? data : this.redSinInternos(id, data);
     if (coll === 'planes') { if (!p.verPlan && !p.elegirPlan) return null; if (p.precios) return data; const c = Object.assign({}, data); delete c.precio; delete c.hist; return c; }
     if (coll === 'clientes') {
       const drop = [];
@@ -1105,6 +1110,25 @@ export class YapurDB extends DurableObject {
       return p.cobrar || p.caja || p.editarClientes ? out : this.sinEstadoDePago(out);
     }
     return data;
+  }
+  /* A quien no tiene «redSplitters» se le sacan los splitters y la OLT de lo que se le manda: el documento entero o el parche de una escritura.
+     El parche de un punto que ya existe puede no traer el tipo (solo lo que cambió), así que en ese caso se mira el tipo en lo guardado. */
+  redSinInternos(id, data) {
+    if (!isPlain(data) || !isPlain(data.items)) return data;
+    let guardado = null;
+    const items = {};
+    for (const k of Object.keys(data.items)) {
+      const it = data.items[k];
+      let tipo = isPlain(it) && typeof it.tipo === 'string' ? it.tipo : null;
+      if (tipo === null && isPlain(it)) {
+        if (guardado === null) { const d = this.readDoc('red', id); guardado = d && isPlain(d.items) ? d.items : {}; }
+        const g = guardado[k];
+        tipo = isPlain(g) && typeof g.tipo === 'string' ? g.tipo : null;
+      }
+      if (tipo !== null && RED_INTERNOS.includes(tipo)) continue;
+      items[k] = it;
+    }
+    return Object.assign({}, data, { items });
   }
   /* quien puede elegir el plan de un abonado nuevo (el técnico) ve el plan solo de los clientes «por instalar»: el de los ya instalados sigue siendo de la oficina */
   planSoloDePorInstalar(data) {
